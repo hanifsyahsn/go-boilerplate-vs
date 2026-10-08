@@ -1,0 +1,158 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/platform/middleware/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/platform/middleware/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/auth/shared/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/auth/shared/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/auth/register/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/auth/register/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/auth/login/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/auth/login/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/auth/refresh/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/auth/refresh/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/me/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/me/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/admin/user/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/admin/user/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/note/shared/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/note/shared/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/note/create/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/note/create/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/note/list/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/note/list/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/note/update/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/note/update/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/note/delete/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/note/delete/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
