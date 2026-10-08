@@ -1,0 +1,71 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/main
+/api
+/cmd/api/api
+/cmd/api/main
+
+# Go build / tooling
+/bin/
+/dist/
+/vendor/
+go.work
+go.work.sum
+*.prof
+*.pprof
+__debug_bin*
+
+# Environment (commit .env.example only)
+.env
+.env.*
+*.env
+!.env.example
+
+# Keys and certificates (make ec_private / ec_public)
+*.pem
+*.key
+*.crt
+*.p12
+
+# Test coverage
+coverage.out
+coverage.html
+coverage.txt
+*.coverprofile
+
+# Logs
+*.log
+logs/
+
+# Local data (docker volumes, dumps)
+/data/
+/pgdata/
+*.dump
+*.sql.gz
+
+# Air (live reload)
+tmp/
+.air.toml.local
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+.fleet/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code local settings
+.claude/settings.local.json

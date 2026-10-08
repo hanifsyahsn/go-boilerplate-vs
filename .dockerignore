@@ -1,0 +1,14 @@
+.git
+.gitignore
+.idea
+.vscode
+.env
+.env.*
+*.pem
+*.md
+*_test.go
+coverage.out
+Dockerfile*
+docker-compose*.yml
+bin/
+dist/
