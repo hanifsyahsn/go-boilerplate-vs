@@ -4,7 +4,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-ARG VERSION=dev
+ARG VERSION
 RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=$VERSION" -o main ./cmd/api/main.go
 
 FROM alpine:latest
