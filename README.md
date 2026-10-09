@@ -27,6 +27,16 @@ go test ./...            # + integration tests (testcontainers starts Postgres)
 make sqlc                # regenerate */sqlc after editing query/*.sql or a migration
 ```
 
+## Build & deploy
+
+```sh
+./build.sh     # docker compose build → go_boilerplate_vs_api:$(cat VERSION), prunes this project's dangling images
+./deploy.sh    # SIGTERM the running container (30s grace, then stop), then `docker compose up -d app`
+```
+
+Bump `VERSION` before building; the version is baked in with `-ldflags -X main.Version`. Run the migrations
+(`make migrate_up`) before deploying a release that adds one.
+
 ## Endpoints
 
 | Method | Path | Auth | Slice |

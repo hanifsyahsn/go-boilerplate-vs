@@ -17,15 +17,20 @@ services:
       timeout: 5s
       retries: 5
 
-  # Run the migrations first (`make migrate_up`), then:
-  #   docker compose --profile app up -d --build
+  # Run the migrations first (`make migrate_up`), then `./build.sh && ./deploy.sh`
+  # (both read the tag from VERSION).
   app:
     profiles: ["app"]
     build:
       context: .
+      dockerfile: Dockerfile
       args:
         VERSION: ${VERSION:-dev}
+      labels:
+        - "project=go_boilerplate_vs_api_label"
     container_name: go_boilerplate_vs_api
+    image: go_boilerplate_vs_api:${VERSION:-dev}
+    restart: "no"
     ports:
       - "8080:8080"
     env_file:

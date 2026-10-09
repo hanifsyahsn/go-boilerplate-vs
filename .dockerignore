@@ -12,3 +12,6 @@ Dockerfile*
 docker-compose*.yml
 bin/
 dist/
+build.sh
+deploy.sh
+VERSION
