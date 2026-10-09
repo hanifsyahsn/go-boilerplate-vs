@@ -24,12 +24,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        VERSION: ${VERSION:-dev}
       labels:
         - "project=go_boilerplate_vs_api_label"
     container_name: go_boilerplate_vs_api
-    image: go_boilerplate_vs_api:${VERSION:-dev}
+    image: go_boilerplate_vs_api:${VERSION}
     restart: "no"
     ports:
       - "8080:8080"
