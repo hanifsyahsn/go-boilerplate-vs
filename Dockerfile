@@ -1,4 +1,5 @@
 FROM golang:1.26-alpine AS builder
+LABEL project="go_boilerplate_vs_api_label"
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download

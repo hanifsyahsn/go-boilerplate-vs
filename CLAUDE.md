@@ -22,6 +22,7 @@ make migrate_create NAME=add_something
 make sqlc                      # regenerate every */sqlc package
 make mock SOURCE=path/file.go DESTINATION=path/mock_file.go PKG_NAME=pkg
 make ec_private && make ec_public
+./build.sh && ./deploy.sh      # image go_boilerplate_vs_api:$(cat VERSION); deploy = graceful SIGTERM swap
 
 go test ./... -short           # unit tests only (no Docker)
 go test ./...                  # full suite; TestMain starts a migrated postgres:17 container per package
