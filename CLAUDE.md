@@ -162,6 +162,10 @@ The whole API is JSON:API 1.1; keep it that way in a new slice.
   serialization: `jsonapi:"id"`, `json:"name"` for an attribute, `jsonapi:"relation,<name>,<type>"` for a
   relationship (nil pointer → `data: null`, slice → to-many). A create is 201 with a `Location` header; a
   delete / logout 204 with no body.
+- **Costly relationships** (to-many, big tables): `include` / `fields` only trim at serialization, so pass
+  the `Query` (or two bools) to the service and load by need — `q.Includes("path")` → full rows;
+  else `q.WantsField(type, "rel")` → ids only (linkage); else skip it. Never render an empty to-many to mean
+  "not loaded". A cheap to-one (note → `created_by` via JOIN) just always loads.
 - **Errors**: `{"jsonapi", "errors": [{status, code, title, detail, source}]}`; several errors take their
   shared status, else 400 (all 4xx) / 500. Unknown routes (404), a wrong method (405) and panics (500) are
   JSON:API errors too (`router.go`). A non-numeric path id is a 404 (it names no resource).

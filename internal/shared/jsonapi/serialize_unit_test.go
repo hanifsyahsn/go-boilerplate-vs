@@ -125,3 +125,53 @@ func TestBuild_U(t *testing.T) {
 		})
 	}
 }
+
+type testNode struct {
+	ID     int64     `jsonapi:"id"`
+	Parent *testNode `jsonapi:"relation,parent,nodes"`
+}
+
+func TestBuild_Pointers_U(t *testing.T) {
+	acme := &testCompany{ID: 9, Name: "Acme"}
+	shared := &testUser{ID: 1, Name: "Jane", Company: acme}
+	loop := &testNode{ID: 1}
+	loop.Parent = loop
+
+	reviewer := func(id string) Relationship { return Relationship{Data: ResourceIdentifier{Type: "users", ID: id}} }
+
+	testCases := []struct {
+		name         string
+		resourceType string
+		data         any
+		include      IncludePolicy
+		assert       func(t *testing.T, doc Document)
+	}{
+		{
+			name:         "one pointer shared by two resources is linked from both",
+			resourceType: "notes",
+			data:         []testNote{{ID: "1", Reviewer: shared}, {ID: "2", Reviewer: shared}},
+			include:      IncludePolicy{"notes": {"reviewer": {}}},
+			assert: func(t *testing.T, doc Document) {
+				data := doc.Data.([]Resource)
+				require.Equal(t, reviewer("1"), data[0].Relationships["reviewer"])
+				require.Equal(t, reviewer("1"), data[1].Relationships["reviewer"])
+				require.Len(t, doc.Included, 1)
+			},
+		},
+		{
+			name:         "a real cycle is cut",
+			resourceType: "nodes",
+			data:         loop,
+			include:      IncludePolicy{"nodes": {"parent": {}}},
+			assert: func(t *testing.T, doc Document) {
+				require.Equal(t, Relationship{Data: nil}, doc.Data.(Resource).Relationships["parent"])
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.assert(t, Build(tc.resourceType, tc.data, tc.include, nil))
+		})
+	}
+}
