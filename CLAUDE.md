@@ -29,7 +29,9 @@ go test ./...                  # full suite; TestMain starts a migrated postgres
 go test -run '^TestService_Update_I$' ./internal/features/note/update -count=1
 ```
 
-On Windows the Makefile sets `DOCKER_HOST=npipe:////./pipe/docker_engine` for the test targets.
+On Windows the Makefile sets `DOCKER_HOST=npipe:////./pipe/docker_engine` for the test targets. Set it yourself for a plain
+`go test ./...` — without it testcontainers' auto-detection intermittently fails with "rootless Docker is not supported on
+Windows".
 
 ## Architecture
 

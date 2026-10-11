@@ -1,7 +1,7 @@
 -include .env
 export
 
-TEST ?= .
+TEST ?= .*
 PACKAGE ?= ./...
 DOCKER_HOST ?= npipe:////./pipe/docker_engine
 
