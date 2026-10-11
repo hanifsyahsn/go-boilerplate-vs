@@ -213,6 +213,34 @@ func parseFilter(q *Query, key, name string, bracketed bool, spec QuerySpec, val
 	return unsupported(key)
 }
 
+// Includes reports whether the relationship path ("created_by",
+// "created_by.company") goes into "included", asked by the client or by the
+// endpoint's default. A service uses it to load a costly relationship only
+// when it's included.
+func (q Query) Includes(path string) bool {
+	for _, node := range q.Include { // one root: the primary type
+		for _, segment := range strings.Split(path, ".") {
+			next, ok := node[segment]
+			if !ok {
+				return false
+			}
+			node = next
+		}
+		return true
+	}
+	return false
+}
+
+// WantsField reports whether a resourceType response keeps the field (an
+// attribute or relationship): true unless ?fields[resourceType] leaves it
+// out. A relationship that isn't included but is wanted still needs its
+// linkage (the related ids), never an empty to-many standing in for
+// "not loaded".
+func (q Query) WantsField(resourceType, name string) bool {
+	keep, ok := q.Fields[resourceType]
+	return !ok || keep[name]
+}
+
 // FilterBool reads filter[name] as a boolean: nil when not given.
 func (q Query) FilterBool(name string) (*bool, *apperror.AppError) {
 	raw, ok := q.Filter[name]

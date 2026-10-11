@@ -144,6 +144,53 @@ func TestQuery_FilterBool_U(t *testing.T) {
 	}
 }
 
+func TestQuery_Includes_U(t *testing.T) {
+	q := Query{Include: IncludePolicy{"notes": {"created_by": {"company": {}}}}}
+
+	testCases := []struct {
+		name  string
+		query Query
+		path  string
+		want  bool
+	}{
+		{name: "a top-level path", query: q, path: "created_by", want: true},
+		{name: "a nested path", query: q, path: "created_by.company", want: true},
+		{name: "not included", query: q, path: "editors", want: false},
+		{name: "a nested path not included", query: q, path: "created_by.manager", want: false},
+		{name: "nothing included", query: Query{}, path: "created_by", want: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.query.Includes(tc.path))
+		})
+	}
+}
+
+func TestQuery_WantsField_U(t *testing.T) {
+	q := Query{Fields: Fieldsets{"notes": {"title": true}, "users": {}}}
+
+	testCases := []struct {
+		name         string
+		query        Query
+		resourceType string
+		field        string
+		want         bool
+	}{
+		{name: "listed in the fieldset", query: q, resourceType: "notes", field: "title", want: true},
+		{name: "left out of the fieldset", query: q, resourceType: "notes", field: "created_by", want: false},
+		{name: "an empty fieldset keeps nothing", query: q, resourceType: "users", field: "name", want: false},
+		{name: "no fieldset for the type keeps everything", query: q, resourceType: "companies", field: "name", want: true},
+		{name: "no fieldsets at all", query: Query{}, resourceType: "notes", field: "created_by", want: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.query.WantsField(tc.resourceType, tc.field))
+		})
+	}
+}
+
 func TestFieldNames_U(t *testing.T) {
 	testCases := []struct {
 		name     string

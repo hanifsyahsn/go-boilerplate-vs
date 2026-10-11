@@ -91,13 +91,16 @@ func serialize(resourceType string, v any, ctx *serializeContext) Resource {
 		return Resource{Type: resourceType}
 	}
 
-	// cycle protection
+	// cycle protection: visited holds only the structs on the current path,
+	// so a pointer shared by two resources (one author of two notes) is
+	// serialized each time, and only a real cycle is cut.
 	if rv.CanAddr() {
 		ptr := rv.UnsafeAddr()
 		if ctx.visited[ptr] {
 			return Resource{Type: resourceType}
 		}
 		ctx.visited[ptr] = true
+		defer delete(ctx.visited, ptr)
 	}
 
 	rt := rv.Type()
