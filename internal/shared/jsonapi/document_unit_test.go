@@ -1,15 +1,23 @@
 package jsonapi
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/pagination"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -145,6 +153,145 @@ func TestWriteErrors_U(t *testing.T) {
 			require.Equal(t, tc.wantStatus, w.Code)
 			require.Equal(t, MediaType, w.Header().Get("Content-Type"))
 			require.JSONEq(t, tc.want, w.Body.String())
+		})
+	}
+}
+
+func TestWriteErrorsContext_Log_U(t *testing.T) {
+	live := func() context.Context { return requestid.With(context.Background(), "ctx-id") }
+	cancelled := func() context.Context {
+		ctx, cancel := context.WithCancel(requestid.With(context.Background(), "ctx-id"))
+		cancel()
+		return ctx
+	}
+	expired := func() context.Context {
+		ctx, cancel := context.WithDeadline(requestid.With(context.Background(), "ctx-id"), time.Now().Add(-time.Second))
+		t.Cleanup(cancel)
+		return ctx
+	}
+
+	testCases := []struct {
+		name      string
+		ctx       func() context.Context
+		headerID  string // set on the response header, as middleware.RequestID does
+		err       *apperror.AppError
+		wantLog   bool
+		wantLevel string
+		wantMsg   string
+		wantID    string // "" => no request_id attribute
+	}{
+		{
+			name: "a live 500: request failed at error", ctx: live, headerID: "ctx-id",
+			err:     apperror.New(apperror.CodeInternal, "Oops.", errors.New("db down")),
+			wantLog: true, wantLevel: "ERROR", wantMsg: "request failed", wantID: "ctx-id",
+		},
+		{
+			name: "a cancelled ctx with a pq-style error: request cancelled at warn", ctx: cancelled, headerID: "ctx-id",
+			err:     apperror.New(apperror.CodeInternal, "Oops.", errors.New("pq: canceling statement due to user request")),
+			wantLog: true, wantLevel: "WARN", wantMsg: "request cancelled", wantID: "ctx-id",
+		},
+		{
+			name: "context.Canceled in the chain: request cancelled at warn", ctx: live,
+			err:     apperror.New(apperror.CodeInternal, "Oops.", fmt.Errorf("get note: %w", context.Canceled)),
+			wantLog: true, wantLevel: "WARN", wantMsg: "request cancelled", wantID: "ctx-id",
+		},
+		{
+			name: "a deadline exceeded is our timeout: request failed at error", ctx: expired,
+			err:     apperror.New(apperror.CodeInternal, "Oops.", fmt.Errorf("get note: %w", context.DeadlineExceeded)),
+			wantLog: true, wantLevel: "ERROR", wantMsg: "request failed", wantID: "ctx-id",
+		},
+		{
+			name: "a cancelled 404 is still request rejected", ctx: cancelled,
+			err:     apperror.New(apperror.CodeNotFound, "Gone.", errors.New("no rows")),
+			wantLog: true, wantLevel: "WARN", wantMsg: "request rejected", wantID: "ctx-id",
+		},
+		{
+			name: "no id in ctx: read from the response header", ctx: context.Background, headerID: "header-id",
+			err:     apperror.New(apperror.CodeInternal, "Oops.", errors.New("db down")),
+			wantLog: true, wantLevel: "ERROR", wantMsg: "request failed", wantID: "header-id",
+		},
+		{
+			name: "no id anywhere", ctx: context.Background,
+			err:     apperror.New(apperror.CodeConflict, "Wrong type.", errors.New("type mismatch")),
+			wantLog: true, wantLevel: "WARN", wantMsg: "request rejected",
+		},
+		{
+			name: "no wrapped cause: nothing logged", ctx: cancelled,
+			err: apperror.New(apperror.CodeNotFound, "Gone.", nil),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			l, err := logging.New(&buf, logging.FormatJSON, "debug")
+			require.NoError(t, err)
+			prev := slog.Default()
+			slog.SetDefault(l)
+			defer slog.SetDefault(prev)
+
+			w := httptest.NewRecorder()
+			if tc.headerID != "" {
+				w.Header().Set(requestid.Header, tc.headerID)
+			}
+			WriteErrorsContext(tc.ctx(), w, tc.err)
+
+			require.Equal(t, apperror.MapToHTTPStatus(tc.err.Code), w.Code)
+			if tc.err.Err != nil {
+				require.NotContains(t, w.Body.String(), tc.err.Err.Error(), "the cause is never in the body")
+			}
+			if !tc.wantLog {
+				require.Empty(t, buf.String())
+				return
+			}
+
+			line := bytes.TrimSpace(buf.Bytes())
+			var rec map[string]any
+			require.NoError(t, json.Unmarshal(line, &rec), buf.String())
+			require.Equal(t, tc.wantLevel, rec["level"])
+			require.Equal(t, tc.wantMsg, rec["msg"])
+			require.Equal(t, float64(w.Code), rec["status"])
+			require.Equal(t, string(tc.err.Code), rec["code"])
+			require.Equal(t, tc.err.Err.Error(), rec["err"])
+			if tc.wantID != "" {
+				require.Equal(t, tc.wantID, rec[requestid.Key])
+				require.Equal(t, 1, strings.Count(string(line), `"`+requestid.Key+`"`), "request_id logged exactly once")
+			} else {
+				require.NotContains(t, rec, requestid.Key)
+			}
+		})
+	}
+}
+
+func TestWriteErrors_UsesBackground_U(t *testing.T) {
+	testCases := []struct {
+		name      string
+		err       *apperror.AppError
+		wantLevel string
+		wantMsg   string
+	}{
+		{name: "a 500 is request failed", err: apperror.New(apperror.CodeInternal, "Oops.", errors.New("db down")), wantLevel: "ERROR", wantMsg: "request failed"},
+		{name: "a 409 is request rejected", err: apperror.New(apperror.CodeConflict, "No.", errors.New("mismatch")), wantLevel: "WARN", wantMsg: "request rejected"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			l, err := logging.New(&buf, logging.FormatJSON, "debug")
+			require.NoError(t, err)
+			prev := slog.Default()
+			slog.SetDefault(l)
+			defer slog.SetDefault(prev)
+
+			w := httptest.NewRecorder()
+			w.Header().Set(requestid.Header, "req-1")
+			WriteErrors(w, tc.err)
+
+			var rec map[string]any
+			require.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &rec), buf.String())
+			require.Equal(t, tc.wantLevel, rec["level"])
+			require.Equal(t, tc.wantMsg, rec["msg"])
+			require.Equal(t, "req-1", rec[requestid.Key])
 		})
 	}
 }

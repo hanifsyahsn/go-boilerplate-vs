@@ -3,12 +3,13 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
-	"github.com/bytedance/gopkg/util/logger"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	"github.com/spf13/viper"
 )
 
@@ -33,10 +34,21 @@ type Config struct {
 	// CookieDomain is the auth cookies' Domain attribute. Optional — empty
 	// means a host-only cookie.
 	CookieDomain string `mapstructure:"COOKIE_DOMAIN"`
+	// LogFormat is text (default, for development) or json (production).
+	LogFormat string `mapstructure:"LOG_FORMAT"`
+	// LogLevel is the minimum level logged: debug, info (default), warn or
+	// error.
+	LogLevel string `mapstructure:"LOG_LEVEL"`
 }
 
 // DefaultRefreshTokenDuration is REFRESH_TOKEN_DURATION when unset: 7 days.
 const DefaultRefreshTokenDuration = 7 * 24 * time.Hour
+
+// LOG_FORMAT / LOG_LEVEL when unset.
+const (
+	DefaultLogFormat = logging.FormatText
+	DefaultLogLevel  = "info"
+)
 
 // LoadConfig reads configuration from a .env file at path (if present) and
 // falls back to OS environment variables. A missing .env file is not an
@@ -54,7 +66,7 @@ func LoadConfig(path string) (Config, error) {
 			return Config{}, fmt.Errorf("config.LoadConfig() (ReadInConfig): %w", err)
 		}
 	} else {
-		logger.Warn("no .env file found, using environment variables only")
+		slog.Warn("no .env file found, using environment variables only")
 	}
 
 	v.AutomaticEnv()
@@ -90,6 +102,8 @@ func LoadConfig(path string) (Config, error) {
 		ECPublicKeyPath:      v.GetString("EC_PUBLIC_KEY_PATH"),
 		CookieSecure:         cookieSecure,
 		CookieDomain:         v.GetString("COOKIE_DOMAIN"),
+		LogFormat:            getStringEnv(v, "LOG_FORMAT", DefaultLogFormat),
+		LogLevel:             getStringEnv(v, "LOG_LEVEL", DefaultLogLevel),
 	}
 
 	if err = config.Validate(); err != nil {
@@ -97,6 +111,13 @@ func LoadConfig(path string) (Config, error) {
 	}
 
 	return config, nil
+}
+
+func getStringEnv(v *viper.Viper, key, defaultVal string) string {
+	if val := v.GetString(key); val != "" {
+		return val
+	}
+	return defaultVal
 }
 
 func getDurationEnv(v *viper.Viper, key string) (time.Duration, error) {
@@ -130,8 +151,8 @@ func getBoolEnv(v *viper.Viper, key string, defaultVal bool) (bool, error) {
 }
 
 // Validate enforces every required field. Optional knobs
-// (REFRESH_TOKEN_DURATION, COOKIE_*) get their defaults in LoadConfig and
-// aren't checked here.
+// (REFRESH_TOKEN_DURATION, COOKIE_*, LOG_*) get their defaults in LoadConfig;
+// LOG_FORMAT / LOG_LEVEL must still be values logging accepts.
 func (c Config) Validate() error {
 	required := []struct {
 		key   string
@@ -153,6 +174,9 @@ func (c Config) Validate() error {
 		if r.empty {
 			errs = append(errs, fmt.Errorf("%s is required", r.key))
 		}
+	}
+	if err := logging.Check(c.LogFormat, c.LogLevel); err != nil {
+		errs = append(errs, fmt.Errorf("LOG_FORMAT / LOG_LEVEL: %w", err))
 	}
 	return errors.Join(errs...)
 }

@@ -4,6 +4,7 @@
 package handlerutil
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -20,7 +21,7 @@ import (
 func ParseQuery(c *gin.Context, primaryType string, spec jsonapi.QuerySpec) (jsonapi.Query, bool) {
 	q, err := jsonapi.ParseQuery(c.Request.URL.Query(), primaryType, spec)
 	if err != nil {
-		jsonapi.WriteAppError(c.Writer, err)
+		jsonapi.WriteErrorsContext(RequestContext(c), c.Writer, err)
 		return jsonapi.Query{}, false
 	}
 	return q, true
@@ -51,9 +52,9 @@ func hasBody(r *http.Request) bool {
 func ParamID(c *gin.Context, name, label string) (int64, bool) {
 	id, err := strconv.ParseInt(c.Param(name), 10, 64)
 	if err != nil || id <= 0 {
-		jsonapi.WriteError(c.Writer, apperror.CodeNotFound,
+		jsonapi.WriteErrorsContext(RequestContext(c), c.Writer, apperror.New(apperror.CodeNotFound,
 			fmt.Sprintf("That %s was not found.", label),
-			fmt.Errorf("strconv.ParseInt(%q): invalid :%s", c.Param(name), name))
+			fmt.Errorf("strconv.ParseInt(%q): invalid :%s", c.Param(name), name)))
 		return 0, false
 	}
 	return id, true
@@ -81,7 +82,7 @@ func WriteError(c *gin.Context, err error, where string) bool {
 	}
 	var appErr *apperror.AppError
 	if errors.As(err, &appErr) {
-		jsonapi.WriteAppError(c.Writer, appErr)
+		jsonapi.WriteErrorsContext(RequestContext(c), c.Writer, appErr)
 		return true
 	}
 	var validationErrs apperror.ValidationErrors
@@ -89,7 +90,17 @@ func WriteError(c *gin.Context, err error, where string) bool {
 		jsonapi.WriteValidationErrors(c.Writer, "", validationErrs)
 		return true
 	}
-	jsonapi.WriteError(c.Writer, apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
-		fmt.Errorf("(%s): %w", where, err))
+	jsonapi.WriteErrorsContext(RequestContext(c), c.Writer, apperror.New(apperror.CodeInternal,
+		apperror.CodeInternal.SafeToThrow(), fmt.Errorf("(%s): %w", where, err)))
 	return true
+}
+
+// RequestContext is the context to log an error with: the request's own, so
+// a client cancellation is visible (a *gin.Context's Err() is always nil),
+// or context.Background() when there's no request (gin.CreateTestContext).
+func RequestContext(c *gin.Context) context.Context {
+	if c.Request == nil {
+		return context.Background()
+	}
+	return c.Request.Context()
 }

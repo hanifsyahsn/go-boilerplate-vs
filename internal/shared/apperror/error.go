@@ -75,6 +75,13 @@ func (e *AppError) Error() string {
 	return e.Message
 }
 
+// Unwrap returns the cause, so errors.Is / errors.As see through an AppError
+// (errors.Is(err, context.Canceled)). The cause is only logged: an error
+// object carries Code / Message / Source, never Err.
+func (e *AppError) Unwrap() error {
+	return e.Err
+}
+
 func New(code Code, message string, err error) *AppError {
 	return &AppError{
 		Code:    code,

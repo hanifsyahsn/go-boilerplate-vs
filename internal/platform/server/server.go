@@ -3,10 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
-	"github.com/bytedance/gopkg/util/logger"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/config"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
@@ -35,7 +35,7 @@ func NewServer(conf config.Config, version string, tokenMaker jwttoken.M, userSt
 func (server *Server) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Infof("server running on %s", server.httpServer.Addr)
+		slog.InfoContext(ctx, "server running", "addr", server.httpServer.Addr)
 		if err := server.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -48,16 +48,16 @@ func (server *Server) Run(ctx context.Context) error {
 	case <-ctx.Done():
 	}
 
-	logger.Info("shutting down server...")
+	slog.InfoContext(ctx, "shutting down server")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
 	if err := server.httpServer.Shutdown(shutdownCtx); err != nil {
-		logger.Errorf("server forced to shutdown: %v", err)
+		slog.ErrorContext(ctx, "server forced to shutdown", "err", err)
 		return err
 	}
 
-	logger.Info("server exited gracefully")
+	slog.InfoContext(ctx, "server exited gracefully")
 	return nil
 }

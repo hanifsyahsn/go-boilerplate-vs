@@ -6,13 +6,16 @@
 package jsonapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
-	"github.com/bytedance/gopkg/util/logger"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/pagination"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
 )
 
 // MediaType is the JSON:API media type, sent on every response and required
@@ -115,8 +118,33 @@ func WriteMeta(w http.ResponseWriter, r *http.Request, status int, meta any) {
 
 // WriteErrors writes one error object per error. The status is the errors'
 // own when they share one, else the most general: 400 for all-4xx, 500
-// otherwise. Each error's wrapped cause is logged (error level for 5xx).
+// otherwise. It's WriteErrorsContext without a request context — prefer that
+// one when there is one.
 func WriteErrors(w http.ResponseWriter, errs ...*apperror.AppError) {
+	WriteErrorsContext(context.Background(), w, errs...)
+}
+
+// WriteErrorsContext writes errs like WriteErrors and logs each one's wrapped
+// cause with ctx:
+//
+//   - a 5xx: "request failed" at error level — or "request cancelled" at warn
+//     when the client went away (ctx cancelled, or context.Canceled in the
+//     error chain). The context is the main signal: lib/pq answers a
+//     cancelled query with a Postgres error, not context.Canceled. A
+//     context.DeadlineExceeded stays an error: that's our timeout.
+//   - a 4xx: "request rejected" at warn.
+//
+// Pass the request's own context (c.Request.Context()), not a *gin.Context:
+// its Err() is always nil. The request id comes from ctx; when ctx carries
+// none it's read back from the response header (middleware.RequestID sets it
+// before the handlers run), so it's logged once either way.
+func WriteErrorsContext(ctx context.Context, w http.ResponseWriter, errs ...*apperror.AppError) {
+	reqID := ""
+	if requestid.FromContext(ctx) == "" {
+		reqID = w.Header().Get(requestid.Header)
+	}
+	ctxCancelled := errors.Is(ctx.Err(), context.Canceled)
+
 	objects := make([]ErrorObject, 0, len(errs))
 	status := 0
 	for _, e := range errs {
@@ -131,10 +159,17 @@ func WriteErrors(w http.ResponseWriter, errs ...*apperror.AppError) {
 		}
 
 		if e.Err != nil {
-			if s >= 500 {
-				logger.Errorf("%v", e.Err)
-			} else {
-				logger.Warnf("%v", e.Err)
+			args := []any{"status", s, "code", string(e.Code), "err", e.Err}
+			if reqID != "" {
+				args = append(args, requestid.Key, reqID)
+			}
+			switch {
+			case s < 500:
+				slog.WarnContext(ctx, "request rejected", args...)
+			case ctxCancelled || errors.Is(e, context.Canceled):
+				slog.WarnContext(ctx, "request cancelled", args...)
+			default:
+				slog.ErrorContext(ctx, "request failed", args...)
 			}
 		}
 

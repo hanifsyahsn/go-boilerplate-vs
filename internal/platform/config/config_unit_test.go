@@ -37,8 +37,20 @@ func TestLoadConfig_Env_U(t *testing.T) {
 				require.Equal(t, 168*time.Hour, c.RefreshTokenDuration)
 				require.True(t, c.CookieSecure)
 				require.Empty(t, c.CookieDomain)
+				require.Equal(t, "text", c.LogFormat)
+				require.Equal(t, "info", c.LogLevel)
 			},
 		},
+		{
+			name:     "log format and level read",
+			override: map[string]string{"LOG_FORMAT": "json", "LOG_LEVEL": "debug"},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Equal(t, "json", c.LogFormat)
+				require.Equal(t, "debug", c.LogLevel)
+			},
+		},
+		{name: "an invalid log format", override: map[string]string{"LOG_FORMAT": "xml"}, wantErr: "LOG_FORMAT"},
+		{name: "an invalid log level", override: map[string]string{"LOG_LEVEL": "loud"}, wantErr: `log level "loud"`},
 		{
 			name:     "no refresh duration: 7 days",
 			override: map[string]string{"REFRESH_TOKEN_DURATION": ""},
@@ -74,6 +86,8 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			}
 			t.Setenv("COOKIE_SECURE", "")
 			t.Setenv("COOKIE_DOMAIN", "")
+			t.Setenv("LOG_FORMAT", "")
+			t.Setenv("LOG_LEVEL", "")
 			for k, v := range tc.override {
 				t.Setenv(k, v)
 			}

@@ -48,6 +48,9 @@ func TestNewRouter_U(t *testing.T) {
 			wantBody: `{"jsonapi":{"version":"1.1"},"meta":{"status":"up","version":"test-version"},"links":{"self":"/healthz"}}`},
 		{name: "an unknown route is a JSON:API 404", method: http.MethodGet, path: "/api/nope", wantCode: http.StatusNotFound},
 		{name: "a wrong method is a JSON:API 405", method: http.MethodPut, path: "/api/auth/login", wantCode: http.StatusMethodNotAllowed},
+		{name: "a panic is a JSON:API 500", method: http.MethodGet, path: "/api/me", role: "user",
+			expect:   func(h *mocks) { h.me.EXPECT().Get(gomock.Any()).Do(func(*gin.Context) { panic("boom") }) },
+			wantCode: http.StatusInternalServerError},
 		{name: "a non JSON:API body is a 415 before any handler", method: http.MethodPost, path: "/api/auth/login",
 			body: `{}`, wantCode: http.StatusUnsupportedMediaType},
 		{name: "register is public", method: http.MethodPost, path: "/api/auth/register",
@@ -107,6 +110,7 @@ func TestNewRouter_U(t *testing.T) {
 			r.ServeHTTP(w, req)
 
 			require.Equal(t, tc.wantCode, w.Code, w.Body.String())
+			require.NotEmpty(t, w.Header().Get("X-Request-ID"), "every response carries a request id")
 			if tc.wantCode != http.StatusTeapot {
 				require.Equal(t, jsonapi.MediaType, w.Header().Get("Content-Type"))
 			}
