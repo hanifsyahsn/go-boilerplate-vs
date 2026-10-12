@@ -18,6 +18,7 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/pagination"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestuser"
 	"github.com/stretchr/testify/require"
 )
 
@@ -171,14 +172,15 @@ func TestWriteErrorsContext_Log_U(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name      string
-		ctx       func() context.Context
-		headerID  string // set on the response header, as middleware.RequestID does
-		err       *apperror.AppError
-		wantLog   bool
-		wantLevel string
-		wantMsg   string
-		wantID    string // "" => no request_id attribute
+		name       string
+		ctx        func() context.Context
+		headerID   string // set on the response header, as middleware.RequestID does
+		err        *apperror.AppError
+		wantLog    bool
+		wantLevel  string
+		wantMsg    string
+		wantID     string // "" => no request_id attribute
+		wantUserID int64  // 0 => no user_id attribute
 	}{
 		{
 			name: "a live 500: request failed at error", ctx: live, headerID: "ctx-id",
@@ -214,6 +216,11 @@ func TestWriteErrorsContext_Log_U(t *testing.T) {
 			name: "no id anywhere", ctx: context.Background,
 			err:     apperror.New(apperror.CodeConflict, "Wrong type.", errors.New("type mismatch")),
 			wantLog: true, wantLevel: "WARN", wantMsg: "request rejected",
+		},
+		{
+			name: "an authenticated request logs the caller", ctx: func() context.Context { return requestuser.With(live(), 42) },
+			err:     apperror.New(apperror.CodeInternal, "Oops.", errors.New("db down")),
+			wantLog: true, wantLevel: "ERROR", wantMsg: "request failed", wantID: "ctx-id", wantUserID: 42,
 		},
 		{
 			name: "no wrapped cause: nothing logged", ctx: cancelled,
@@ -258,6 +265,12 @@ func TestWriteErrorsContext_Log_U(t *testing.T) {
 				require.Equal(t, 1, strings.Count(string(line), `"`+requestid.Key+`"`), "request_id logged exactly once")
 			} else {
 				require.NotContains(t, rec, requestid.Key)
+			}
+			if tc.wantUserID != 0 {
+				require.Equal(t, float64(tc.wantUserID), rec["user_id"])
+				require.Equal(t, 1, strings.Count(string(line), `"user_id"`), "user_id logged exactly once")
+			} else {
+				require.NotContains(t, rec, "user_id")
 			}
 		})
 	}

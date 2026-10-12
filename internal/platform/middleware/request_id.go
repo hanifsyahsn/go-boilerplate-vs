@@ -9,7 +9,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	internalsharedconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
 )
 
@@ -38,9 +37,10 @@ func RequestID() gin.HandlerFunc {
 	}
 }
 
-// AccessLog writes one "request" record per request once it's been served,
-// with user_id when the auth middleware identified the caller (it runs later,
-// but its c.Set is visible after c.Next). A request the client abandoned
+// AccessLog writes one "request" record per request once it's been served.
+// It logs with c.Request.Context() read after c.Next, so the record gets
+// user_id from logging's handler once the auth middleware (which runs later)
+// put the caller on it. A request the client abandoned
 // (its context cancelled) is warn with cancelled=true whatever the status;
 // otherwise error level for a 5xx, info for the rest. Mount it after
 // RequestID (so the record carries request_id) and before the recovery (so it
@@ -61,9 +61,6 @@ func AccessLog() gin.HandlerFunc {
 			"latency_ms", float64(time.Since(start).Microseconds()) / 1000,
 			"client_ip", c.ClientIP(),
 			"bytes", max(c.Writer.Size(), 0),
-		}
-		if userID, ok := c.Get(internalsharedconstant.UserIdKey); ok {
-			args = append(args, "user_id", userID)
 		}
 
 		level := slog.LevelInfo

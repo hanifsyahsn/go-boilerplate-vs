@@ -43,10 +43,10 @@ Logs go to stdout through `log/slog`: `LOG_FORMAT=text` (default) for developmen
 production** so a log aggregator can filter by field (`status`, `user_id`, …); `LOG_LEVEL` is `debug` / `info`
 (default) / `warn` / `error`. Every request gets one `request` access-log record, and every line it writes
 carries a `request_id` — the same value as the `X-Request-ID` response header, so `grep 3f2a9c1e` finds a whole
-request.
+request — and, once the caller is authenticated, their `user_id`, so `grep user_id=42` finds everything one user
+did.
 
-The `request` record also has `method`, `path`, `status`, `latency_ms`, `client_ip`, `bytes` and, for an
-authenticated call, `user_id`. A request the client abandoned (closed tab, navigated away) is logged at **warn**
+The `request` record also has `method`, `path`, `status`, `latency_ms`, `client_ip` and `bytes`. A request the client abandoned (closed tab, navigated away) is logged at **warn**
 with `cancelled=true` — and its error as `request cancelled` — instead of as a server error; a 5xx is `error`,
 everything else `info`. A client error (4xx) logs its cause as `request rejected` (warn), a real failure as
 `request failed` (error).

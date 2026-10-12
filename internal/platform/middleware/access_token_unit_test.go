@@ -13,6 +13,7 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
 	internalsharedconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/constant"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestuser"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,7 +36,7 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 				q.EXPECT().GetUserIsActive(gomock.Any(), int64(7)).Return(true, nil)
 			},
 			wantCode:   http.StatusOK,
-			wantInBody: "7:admin",
+			wantInBody: "7:admin|request ctx:7",
 		},
 		{
 			name:   "the cookie wins over the header",
@@ -46,7 +47,7 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 				q.EXPECT().GetUserIsActive(gomock.Any(), int64(7)).Return(true, nil)
 			},
 			wantCode:   http.StatusOK,
-			wantInBody: "7:",
+			wantInBody: "7:|request ctx:7",
 		},
 		{name: "no token at all", stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {}, wantCode: http.StatusUnauthorized},
 		{name: "not a bearer header", header: "Basic abc", stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {}, wantCode: http.StatusUnauthorized},
@@ -100,7 +101,9 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 			r := gin.New()
 			r.Use(AccessTokenMiddleware(m, q))
 			r.GET("/", func(c *gin.Context) {
-				c.String(http.StatusOK, "%d:%s", c.GetInt64(internalsharedconstant.UserIdKey), c.GetString(internalsharedconstant.UserRoleKey))
+				reqUser, _ := requestuser.FromContext(c.Request.Context())
+				c.String(http.StatusOK, "%d:%s|request ctx:%d", c.GetInt64(internalsharedconstant.UserIdKey),
+					c.GetString(internalsharedconstant.UserRoleKey), reqUser)
 			})
 
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
