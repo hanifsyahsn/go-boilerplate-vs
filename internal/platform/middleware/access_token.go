@@ -14,6 +14,7 @@ import (
 	internalsharedconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/handlerutil"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/jsonapi"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestuser"
 )
 
 // UserStatusReader is the one lookup the middleware needs from the DB —
@@ -72,6 +73,9 @@ func AccessTokenMiddleware(jwt jwttoken.M, users UserStatusReader) gin.HandlerFu
 		}
 
 		c.Set(internalsharedconstant.UserIdKey, userID)
+		// The request context too: the access log, the error writer and other
+		// middlewares log with c.Request.Context(), which doesn't see gin keys.
+		c.Request = c.Request.WithContext(requestuser.With(c.Request.Context(), userID))
 
 		// A token without a role reads as "" and is treated as unprivileged
 		// by RequireRole downstream.

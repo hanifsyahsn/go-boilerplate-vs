@@ -3,7 +3,11 @@
 // middleware.RequestID sets it; logging's handler reads it.
 package requestid
 
-import "context"
+import (
+	"context"
+
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestuser"
+)
 
 // Header is the request / response header that carries the id.
 const Header = "X-Request-ID"
@@ -34,14 +38,18 @@ func FromContext(ctx context.Context) string {
 	return ""
 }
 
-// Detach returns a fresh context.Background() carrying only ctx's id: no
-// deadline, no cancellation, no values. Use it for a goroutine that outlives
-// the request. Never use context.WithoutCancel on a *gin.Context instead —
-// gin reuses it for the next request.
+// Detach returns a fresh context.Background() carrying only ctx's request id
+// and caller (requestuser): no deadline, no cancellation, no other values.
+// Use it for a goroutine that outlives the request, so its logs keep both
+// ids. Never hand a goroutine the *gin.Context, nor context.WithoutCancel of
+// it — gin reuses it for the next request.
 func Detach(ctx context.Context) context.Context {
-	id := FromContext(ctx)
-	if id == "" {
-		return context.Background()
+	detached := context.Background()
+	if id := FromContext(ctx); id != "" {
+		detached = With(detached, id)
 	}
-	return With(context.Background(), id)
+	if userID, ok := requestuser.FromContext(ctx); ok {
+		detached = requestuser.With(detached, userID)
+	}
+	return detached
 }

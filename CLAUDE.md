@@ -97,14 +97,15 @@ Rules:
 0. Every route (404 / 405 / panic included) runs `RequestID` → `AccessLog` → recovery. `RequestID` keeps an
    incoming `X-Request-ID` matching `^[A-Za-z0-9._:-]{1,128}$`, else makes a UUID, and sets it on the response
    header (before the handlers), in the gin context (`requestid.Key`) and in the request context. `AccessLog`
-   writes one `request` record (method, path, status, latency_ms, client_ip, bytes, plus `user_id` once auth
-   has set it): warn with `cancelled=true` when the client went away (request context cancelled), else error
+   writes one `request` record (method, path, status, latency_ms, client_ip, bytes; `user_id` comes from the
+   handler once auth has put the caller on the request context): warn with `cancelled=true` when the client went away (request context cancelled), else error
    for a 5xx, info for the rest.
 1. `middleware.JSONAPIMediaType` (every `/api` route) checks content negotiation first (406 / 415).
 2. `AccessTokenMiddleware` reads the access token from the `app-access-token` cookie, else
    `Authorization: Bearer`, verifies it (ES256, `iss`, `aud` = `CLIENT_ID`, `exp`, `typ = access`), then
    re-reads `users.is_active` on **every** request (inactive / deleted → 401, DB error → 500). It sets
-   `user_id` and `user_role` in the gin context. `RequireRole(enum.RoleAdmin)` gates `/api/admin`.
+   `user_id` and `user_role` in the gin context, and the caller on the request context
+   (`requestuser.With`) so logs written with `c.Request.Context()` carry `user_id`. `RequireRole(enum.RoleAdmin)` gates `/api/admin`.
 3. The handler parses the query with `handlerutil.ParseQuery(c, type, spec)` **first** (before any side
    effect), binds the request document with `handlerutil.BindResource(c, ResourceSpec{Type, ID}, &req)`,
    calls the service, and writes with `handlerutil.WriteData` (or `WriteMeta` / `c.Status(204)`).
@@ -120,20 +121,23 @@ Rules:
 ### Logging
 
 - `log/slog` only. `logging.Setup(conf.LogFormat, conf.LogLevel)` in `main` makes the default logger (stdout;
-  `LOG_FORMAT` text / json, `LOG_LEVEL`); its handler adds `request_id` from `requestid.FromContext(ctx)`, which
-  also reads a `*gin.Context` (services get one as their ctx).
+  `LOG_FORMAT` text / json, `LOG_LEVEL`); its handler adds `request_id` (`requestid.FromContext`) and the
+  caller's `user_id` (`requestuser.FromContext`) to every record; both also read a `*gin.Context` (services get
+  one as their ctx).
 - **Use the `*Context` variant whenever a ctx is in scope** — that's where `request_id` comes from. Short
   lowercase message + key/value attributes, never a formatted string:
-  `slog.ErrorContext(ctx, "notify: get user failed", "user_id", id, "err", err)`. Background workers use
-  `worker run failed` / `worker job failed` / `worker stopped` with a `worker` attribute.
+  `slog.ErrorContext(ctx, "notify: get note failed", "note_id", id, "err", err)`. **`user_id` always means the
+  caller and comes from ctx** — never add it by hand on the request path; name another user for what it is
+  (`target_user_id`, `recipient_id`). Background workers use `worker run failed` / `worker job failed` /
+  `worker stopped` with a `worker` attribute, and (no request ctx) may log `user_id` for the user they process.
 - Writing an error from a handler / middleware: pass the **request's** context —
   `jsonapi.WriteErrorsContext(handlerutil.RequestContext(c), c.Writer, ...)` (`handlerutil.WriteError`,
   `ParseQuery`, `ParamID` and `AccessTokenMiddleware` do). Not the `*gin.Context`: its `Err()` is always nil, so
   a cancellation would read as a server error. `RequestContext` falls back to `context.Background()` when
   `c.Request` is nil (`gin.CreateTestContext`).
 - Startup failures: `logging.Fatal("load config failed", "err", err)`. A `TestMain` may use `log.Fatalf`.
-- A goroutine that outlives the request: `utility.SafeGoContext(requestid.Detach(ctx), fn)` — a panic is
-  logged with the id. **Never `context.WithoutCancel(c)` on a `*gin.Context`**: gin reuses it for the next
+- A goroutine that outlives the request: `utility.SafeGoContext(requestid.Detach(ctx), fn)` — `Detach` keeps
+  the request id and the caller, so its logs (and a recovered panic) carry both. **Never `context.WithoutCancel(c)` on a `*gin.Context`**: gin reuses it for the next
   request. Anything async (an emailer, …) takes a ctx for the same reason.
 - Tests that assert on logs swap the default: `prev := slog.Default(); slog.SetDefault(l); defer
   slog.SetDefault(prev)` with `l, _ := logging.New(&buf, logging.FormatJSON, "debug")`.

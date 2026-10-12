@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	internalsharedconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/constant"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestuser"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,9 +49,10 @@ func TestDetach_U(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	testCases := []struct {
-		name   string
-		parent func() (context.Context, context.CancelFunc)
-		wantID string
+		name       string
+		parent     func() (context.Context, context.CancelFunc)
+		wantID     string
+		wantUserID int64 // 0 => no caller
 	}{
 		{
 			name: "keeps the id and drops the cancellation",
@@ -63,10 +66,18 @@ func TestDetach_U(t *testing.T) {
 			parent: func() (context.Context, context.CancelFunc) {
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())
 				c.Set(Key, "from-gin")
-				c.Set("user_id", int64(1))
+				c.Set(internalsharedconstant.UserIdKey, int64(1))
+				c.Set("other", "x")
 				return c, func() {}
 			},
-			wantID: "from-gin",
+			wantID: "from-gin", wantUserID: 1,
+		},
+		{
+			name: "keeps the caller from a request context",
+			parent: func() (context.Context, context.CancelFunc) {
+				return context.WithCancel(requestuser.With(With(context.Background(), "abc"), 42))
+			},
+			wantID: "abc", wantUserID: 42,
 		},
 		{
 			name:   "no id: a plain background context",
@@ -83,7 +94,10 @@ func TestDetach_U(t *testing.T) {
 
 			require.Equal(t, tc.wantID, FromContext(detached))
 			require.NoError(t, detached.Err())
-			require.Nil(t, detached.Value("user_id"), "carries only the id")
+			require.Nil(t, detached.Value("other"), "carries only the two ids")
+			userID, ok := requestuser.FromContext(detached)
+			require.Equal(t, tc.wantUserID != 0, ok)
+			require.Equal(t, tc.wantUserID, userID)
 		})
 	}
 }

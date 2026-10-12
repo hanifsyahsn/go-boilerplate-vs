@@ -1,12 +1,15 @@
 // Package logging configures log/slog: text (development) or JSON
-// (production) output, a minimum level, and a request_id attribute on every
-// record logged with a request's context (requestid.FromContext).
+// (production) output, a minimum level, and request_id + user_id attributes
+// on every record logged with a request's context (requestid / requestuser).
 //
 // Log with the *Context variants (slog.ErrorContext(ctx, ...)) whenever a
 // ctx is in scope — that's where the request id comes from. Messages are
 // short and lowercase; the details go in key/value attributes:
 //
-//	slog.ErrorContext(ctx, "notify: get user failed", "user_id", id, "err", err)
+//	slog.ErrorContext(ctx, "notify: get note failed", "note_id", id, "err", err)
+//
+// user_id always means the caller and comes from ctx — don't add it by hand.
+// Name an attribute about another user for what it is (target_user_id).
 package logging
 
 import (
@@ -19,7 +22,11 @@ import (
 	"strings"
 
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestuser"
 )
+
+// userIDKey is the caller's log attribute.
+const userIDKey = "user_id"
 
 const (
 	FormatText = "text"
@@ -98,8 +105,8 @@ func parseLevel(level string) (slog.Level, error) {
 	}
 }
 
-// handler adds request_id from the record's context. WithAttrs / WithGroup
-// re-wrap, so a logger derived with .With(...) keeps adding it.
+// handler adds request_id and user_id from the record's context. WithAttrs /
+// WithGroup re-wrap, so a logger derived with .With(...) keeps adding them.
 type handler struct {
 	slog.Handler
 }
@@ -107,6 +114,9 @@ type handler struct {
 func (h handler) Handle(ctx context.Context, r slog.Record) error {
 	if id := requestid.FromContext(ctx); id != "" {
 		r.AddAttrs(slog.String(requestid.Key, id))
+	}
+	if id, ok := requestuser.FromContext(ctx); ok {
+		r.AddAttrs(slog.Int64(userIDKey, id))
 	}
 	return h.Handler.Handle(ctx, r)
 }

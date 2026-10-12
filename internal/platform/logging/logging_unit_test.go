@@ -12,7 +12,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	internalsharedconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestuser"
 	"github.com/stretchr/testify/require"
 )
 
@@ -191,6 +193,53 @@ func TestHandler_RequestID_U(t *testing.T) {
 			if tc.check != nil {
 				tc.check(t, rec)
 			}
+		})
+	}
+}
+
+func TestHandler_UserID_U(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	ginCtx := func() context.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Set(internalsharedconstant.UserIdKey, int64(7))
+		return c
+	}
+
+	testCases := []struct {
+		name       string
+		ctx        func() context.Context
+		wantUserID int64 // 0 => no user_id attribute
+	}{
+		{name: "outside a request: nothing added", ctx: context.Background},
+		{name: "a request without a caller: nothing added", ctx: func() context.Context { return requestid.With(context.Background(), "r") }},
+		{name: "a plain context (With)", ctx: func() context.Context { return requestuser.With(context.Background(), 42) }, wantUserID: 42},
+		{name: "a *gin.Context (the auth middleware's key)", ctx: ginCtx, wantUserID: 7},
+		{
+			name: "a detached context keeps it",
+			ctx: func() context.Context {
+				return requestid.Detach(requestuser.With(requestid.With(context.Background(), "r"), 42))
+			},
+			wantUserID: 42,
+		},
+		{name: "detached from a *gin.Context", ctx: func() context.Context { return requestid.Detach(ginCtx()) }, wantUserID: 7},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			l, err := New(&buf, FormatJSON, "debug")
+			require.NoError(t, err)
+
+			l.InfoContext(tc.ctx(), "m")
+
+			rec := decode(t, buf.String())
+			if tc.wantUserID == 0 {
+				require.NotContains(t, rec, "user_id")
+				return
+			}
+			require.Equal(t, float64(tc.wantUserID), rec["user_id"])
+			require.Equal(t, 1, strings.Count(buf.String(), `"user_id"`))
 		})
 	}
 }

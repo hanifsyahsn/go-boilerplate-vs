@@ -15,6 +15,7 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	internalsharedconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestuser"
 	"github.com/stretchr/testify/require"
 )
 
@@ -75,7 +76,8 @@ func TestAccessLog_U(t *testing.T) {
 		status    int
 		body      string
 		target    string
-		userID    int64 // set by the "auth" handler when non-zero
+		userID    int64 // set by the "auth" handler when non-zero, as AccessTokenMiddleware does
+		ginOnly   bool  // set it with c.Set alone, not on the request context
 		cancelled bool  // the client went away
 		wantLevel string
 	}{
@@ -85,6 +87,7 @@ func TestAccessLog_U(t *testing.T) {
 		{name: "an authenticated caller's user_id", status: http.StatusOK, target: "/x", userID: 7, wantLevel: "INFO"},
 		{name: "a cancelled 500 is warn", status: http.StatusInternalServerError, target: "/x", userID: 7, cancelled: true, wantLevel: "WARN"},
 		{name: "a cancelled 200 is warn too", status: http.StatusOK, target: "/x", cancelled: true, wantLevel: "WARN"},
+		{name: "a gin key alone isn't on the request context: no user_id", status: http.StatusOK, target: "/x", userID: 7, ginOnly: true, wantLevel: "INFO"},
 	}
 
 	for _, tc := range testCases {
@@ -101,7 +104,10 @@ func TestAccessLog_U(t *testing.T) {
 			r.Use(RequestID(), AccessLog())
 			r.GET("/x", func(c *gin.Context) {
 				if tc.userID != 0 {
-					c.Set(internalsharedconstant.UserIdKey, tc.userID) // as AccessTokenMiddleware does
+					c.Set(internalsharedconstant.UserIdKey, tc.userID)
+					if !tc.ginOnly {
+						c.Request = c.Request.WithContext(requestuser.With(c.Request.Context(), tc.userID))
+					}
 				}
 				c.String(tc.status, tc.body)
 			})
@@ -117,8 +123,9 @@ func TestAccessLog_U(t *testing.T) {
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 
+			line := bytes.TrimSpace(buf.Bytes())
 			var rec map[string]any
-			require.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &rec), buf.String())
+			require.NoError(t, json.Unmarshal(line, &rec), buf.String())
 			require.Equal(t, tc.wantLevel, rec["level"])
 			require.Equal(t, "request", rec["msg"])
 			require.Equal(t, http.MethodGet, rec["method"])
@@ -128,8 +135,9 @@ func TestAccessLog_U(t *testing.T) {
 			require.Equal(t, float64(len(tc.body)), rec["bytes"])
 			require.Contains(t, rec, "latency_ms")
 			require.Equal(t, "req-1", rec[requestid.Key])
-			if tc.userID != 0 {
+			if tc.userID != 0 && !tc.ginOnly {
 				require.Equal(t, float64(tc.userID), rec["user_id"])
+				require.Equal(t, 1, bytes.Count(line, []byte(`"user_id"`)), "user_id logged exactly once")
 			} else {
 				require.NotContains(t, rec, "user_id")
 			}
