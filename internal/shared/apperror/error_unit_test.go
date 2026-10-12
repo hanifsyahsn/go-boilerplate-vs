@@ -1,7 +1,9 @@
 package apperror
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
 	"testing"
@@ -35,6 +37,42 @@ func TestNew(t *testing.T) {
 
 			var asErr error = got
 			assert.Equal(t, tt.message, asErr.Error())
+		})
+	}
+}
+
+func TestAppError_Unwrap_U(t *testing.T) {
+	inner := New(CodeNotFound, "Inner.", context.Canceled)
+
+	testCases := []struct {
+		name      string
+		err       error
+		target    error
+		wantIs    bool
+		wantCode  Code // the AppError errors.As finds
+		wantNoApp bool
+	}{
+		{name: "Is through the cause", err: New(CodeInternal, "Oops.", context.Canceled), target: context.Canceled, wantIs: true, wantCode: CodeInternal},
+		{
+			name: "Is through a %w cause", err: New(CodeInternal, "Oops.", fmt.Errorf("query: %w", context.Canceled)),
+			target: context.Canceled, wantIs: true, wantCode: CodeInternal,
+		},
+		{
+			name: "Is through a nested AppError", err: New(CodeInternal, "Outer.", fmt.Errorf("wrap: %w", inner)),
+			target: context.Canceled, wantIs: true, wantCode: CodeInternal,
+		},
+		{name: "a different cause", err: New(CodeInternal, "Oops.", errors.New("db down")), target: context.Canceled, wantIs: false, wantCode: CodeInternal},
+		{name: "no cause", err: New(CodeNotFound, "Gone.", nil), target: context.Canceled, wantIs: false, wantCode: CodeNotFound},
+		{name: "As finds an AppError behind %w", err: fmt.Errorf("svc: %w", inner), target: context.Canceled, wantIs: true, wantCode: CodeNotFound},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.wantIs, errors.Is(tc.err, tc.target))
+
+			var appErr *AppError
+			require.True(t, errors.As(tc.err, &appErr))
+			require.Equal(t, tc.wantCode, appErr.Code, "the outermost AppError")
 		})
 	}
 }

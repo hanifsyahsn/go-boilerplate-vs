@@ -49,14 +49,18 @@ type Handlers struct {
 //	authed   AccessTokenMiddleware (any active user)
 //	/admin   AccessTokenMiddleware + RequireRole(admin)
 //
-// plus an unauthenticated GET /healthz liveness probe that reports the build
+// Every route (404 / 405 / panic included) runs RequestID → AccessLog →
+// recovery first, so every response carries X-Request-ID and gets one access
+// log record.
+//
+// There's also an unauthenticated GET /healthz liveness probe that reports the build
 // version. Unknown routes (404), a wrong method (405) and a panic (500) answer
 // with JSON:API errors too.
 func NewRouter(version string, tokenMaker jwttoken.M, userStatus middleware.UserStatusReader, h Handlers) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Logger(), gin.CustomRecovery(func(c *gin.Context, recovered any) {
+	r.Use(middleware.RequestID(), middleware.AccessLog(), gin.CustomRecovery(func(c *gin.Context, recovered any) {
 		jsonapi.WriteError(c.Writer, apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
-			fmt.Errorf("panic (Router): %v", recovered))
+			fmt.Errorf("panic: %v", recovered))
 		c.Abort()
 	}))
 	r.HandleMethodNotAllowed = true

@@ -1,14 +1,18 @@
 package handlerutil
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/jsonapi"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/validation"
@@ -292,6 +296,65 @@ func TestWriteError_U(t *testing.T) {
 			if tc.wantPointer != "" {
 				require.Equal(t, &apperror.Source{Pointer: tc.wantPointer}, errorDoc(t, w.Body.String()).Errors[0].Source)
 			}
+		})
+	}
+}
+
+func TestWriteError_LogContext_U(t *testing.T) {
+	testCases := []struct {
+		name      string
+		request   func() *http.Request // nil => no request, as gin.CreateTestContext leaves it
+		err       error
+		wantLevel string
+		wantMsg   string
+	}{
+		{
+			name:      "a live request: request failed at error",
+			request:   func() *http.Request { return httptest.NewRequest(http.MethodGet, "/x", nil) },
+			err:       errors.New("pq: connection refused"),
+			wantLevel: "ERROR", wantMsg: "request failed",
+		},
+		{
+			name: "a cancelled request: request cancelled at warn",
+			request: func() *http.Request {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return httptest.NewRequest(http.MethodGet, "/x", nil).WithContext(ctx)
+			},
+			err:       errors.New("pq: canceling statement due to user request"),
+			wantLevel: "WARN", wantMsg: "request cancelled",
+		},
+		{
+			name:      "no request: falls back to context.Background",
+			err:       errors.New("boom"),
+			wantLevel: "ERROR", wantMsg: "request failed",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			l, err := logging.New(&buf, logging.FormatJSON, "debug")
+			require.NoError(t, err)
+			prev := slog.Default()
+			slog.SetDefault(l)
+			defer slog.SetDefault(prev)
+
+			gin.SetMode(gin.TestMode)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			if tc.request != nil {
+				c.Request = tc.request()
+			}
+
+			require.True(t, WriteError(c, tc.err, "Test Handler"))
+			require.Equal(t, http.StatusInternalServerError, w.Code)
+
+			var rec map[string]any
+			require.NoError(t, json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &rec), buf.String())
+			require.Equal(t, tc.wantLevel, rec["level"])
+			require.Equal(t, tc.wantMsg, rec["msg"])
+			require.Contains(t, rec["err"], "(Test Handler)")
 		})
 	}
 }

@@ -37,6 +37,31 @@ make sqlc                # regenerate */sqlc after editing query/*.sql or a migr
 Bump `VERSION` before building; the version is baked in with `-ldflags -X main.Version`. Run the migrations
 (`make migrate_up`) before deploying a release that adds one.
 
+### Logging
+
+Logs go to stdout through `log/slog`: `LOG_FORMAT=text` (default) for development, **`LOG_FORMAT=json` in
+production** so a log aggregator can filter by field (`status`, `user_id`, …); `LOG_LEVEL` is `debug` / `info`
+(default) / `warn` / `error`. Every request gets one `request` access-log record, and every line it writes
+carries a `request_id` — the same value as the `X-Request-ID` response header, so `grep 3f2a9c1e` finds a whole
+request.
+
+The `request` record also has `method`, `path`, `status`, `latency_ms`, `client_ip`, `bytes` and, for an
+authenticated call, `user_id`. A request the client abandoned (closed tab, navigated away) is logged at **warn**
+with `cancelled=true` — and its error as `request cancelled` — instead of as a server error; a 5xx is `error`,
+everything else `info`. A client error (4xx) logs its cause as `request rejected` (warn), a real failure as
+`request failed` (error).
+
+Behind nginx, forward nginx's own id so the proxy and app logs share it (the app keeps a well-formed incoming
+`X-Request-ID`), and expose the header to a cross-origin frontend:
+
+```nginx
+location /api/ {
+    proxy_set_header X-Request-ID $request_id;
+    add_header Access-Control-Expose-Headers X-Request-ID always;   # only for a cross-origin client
+    proxy_pass http://app:8080;
+}
+```
+
 ## Endpoints
 
 | Method | Path | Auth | Slice |
@@ -67,6 +92,9 @@ curl -X PATCH localhost:8080/api/notes/5 -H 'Content-Type: application/vnd.api+j
 
 Register takes a `users` document, login / refresh / logout a `sessions` one. Every endpoint supports sparse
 fieldsets (`?fields[notes]=title`), and note endpoints `?include=created_by` (the default; `?include=` for none).
+
+Every response carries an `X-Request-ID` header; show it next to error messages (*"ref: …"*) so a user's report
+leads straight to the logs.
 
 Refresh tokens rotate on every refresh and live `REFRESH_TOKEN_DURATION` (default 7 days) from the last refresh,
 so an active user stays logged in. A client that doesn't use the cookies must store the new `refresh_token`

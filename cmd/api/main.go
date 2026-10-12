@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/bytedance/gopkg/util/logger"
 	adminusersvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user"
 	adminusersqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user/sqlc"
 	authloginsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login"
@@ -31,6 +31,7 @@ import (
 	updatenotesvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/update"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/config"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/server"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/validation"
@@ -45,16 +46,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	logger.Infof("starting go_boilerplate_vs %s", Version)
-
 	conf, err := config.LoadConfig(".")
 	if err != nil {
-		logger.Fatal("config.LoadConfig() (Main): ", err)
+		logging.Fatal("load config failed", "err", err)
 	}
+	if err = logging.Setup(conf.LogFormat, conf.LogLevel); err != nil {
+		logging.Fatal("setup logging failed", "err", err)
+	}
+
+	slog.InfoContext(ctx, "starting go_boilerplate_vs", "version", Version, "environment", conf.Environment)
 
 	conn, err := sql.Open(conf.DBDriver, conf.DBSource)
 	if err != nil {
-		logger.Fatal("sql.Open() (Main): ", err)
+		logging.Fatal("open db failed", "err", err)
 	}
 	defer conn.Close()
 
@@ -64,20 +68,20 @@ func main() {
 	conn.SetConnMaxIdleTime(5 * time.Minute)
 
 	if err = conn.PingContext(ctx); err != nil {
-		logger.Fatal("conn.Ping() (Main): ", err)
+		logging.Fatal("ping db failed", "err", err)
 	}
 
 	if err = validation.RegisterGinValidators(); err != nil {
-		logger.Fatal("validation.RegisterGinValidators() (Main): ", err)
+		logging.Fatal("register validators failed", "err", err)
 	}
 
 	privateKey, err := jwttoken.LoadECPrivateKey(conf.ECPrivateKeyPath)
 	if err != nil {
-		logger.Fatal("jwttoken.LoadECPrivateKey() (Main): ", err)
+		logging.Fatal("load ec private key failed", "err", err)
 	}
 	publicKey, err := jwttoken.LoadECPublicKey(conf.ECPublicKeyPath)
 	if err != nil {
-		logger.Fatal("jwttoken.LoadECPublicKey() (Main): ", err)
+		logging.Fatal("load ec public key failed", "err", err)
 	}
 	tokenMaker := jwttoken.NewTokenMakerES256(privateKey, publicKey, conf.ClientID, conf.TokenIssuer)
 
@@ -116,6 +120,6 @@ func main() {
 
 	srv := server.NewServer(conf, Version, tokenMaker, middlewaresqlc.New(conn), handlers)
 	if err = srv.Run(ctx); err != nil {
-		logger.Fatal("server.Run() (Main): ", err)
+		logging.Fatal("server run failed", "err", err)
 	}
 }

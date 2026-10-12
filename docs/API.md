@@ -8,6 +8,7 @@ tokens), a personal **notes** CRUD, and a small admin user directory. The whole 
 - **Host:** value of `SERVER_ADDRESS` (e.g. `http://localhost:8080`)
 - **Media type:** `application/vnd.api+json` for every request body and every response — see
   [Content negotiation](#content-negotiation).
+- **Request id:** every response carries an `X-Request-ID` header — see [Request ids](#request-ids).
 
 ---
 
@@ -397,6 +398,24 @@ is about one part of the request, `source` says which — **exactly one** of:
 
 Several errors share the HTTP status when they have the same one; otherwise the response is `400`
 (all `4xx`) or `500`.
+
+### Request ids
+
+**Every response** — success, error, `404` / `405`, even a crash — carries an `X-Request-ID` header,
+and every server log line that request writes has the same `request_id`. A well-formed id the client
+(or a proxy) sends in `X-Request-ID` is kept (letters, digits and `._:-`, at most 128 characters);
+anything else is replaced with a new UUID.
+
+- **Show it next to error messages**, e.g. *"We couldn't save that note. (ref: 3f2a9c1e…)"*. When a
+  user reports it, one search of the logs finds everything that request did.
+- A **cross-origin** browser client can only read the header if the server (or the proxy in front of
+  it) sends `Access-Control-Expose-Headers: X-Request-ID`.
+
+```bash
+curl -i "$BASE/api/notes/999" -H "Authorization: Bearer $TOKEN"
+# HTTP/1.1 404 Not Found
+# X-Request-ID: 3f2a9c1e-7b4d-4e0a-9f1b-2c3d4e5f6a7b
+```
 
 ### Validation error
 
@@ -915,6 +934,8 @@ curl "$BASE/healthz"
    **once** (single-flight across tabs), then retry the original call.
 5. Refresh `401` or *"Your account is no longer active."* → go to the login screen.
 6. `POST /api/auth/logout` on sign-out.
+7. On any error, show `errors[].detail` with the response's `X-Request-ID` as a *"ref: …"* the user
+   can quote to support ([Request ids](#request-ids)).
 
 ### A non-browser client (mobile, service)
 

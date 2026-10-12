@@ -39,16 +39,17 @@ Windows".
 
 - `cmd/api` — entrypoint: config → db pool → validators → token maker → one service/handler per slice →
   `server.Handlers` → `server.NewServer(...).Run(ctx)` (graceful shutdown on SIGINT/SIGTERM).
-- `internal/platform` — infrastructure: `config` (viper, `.env` optional), `server` (`server.go` + `router.go`
-  with the `Handlers` struct), `middleware` (`JSONAPIMediaType`, `AccessTokenMiddleware`, `RequireRole`, its own
-  sqlc for `GetUserIsActive`), `jwttoken` (ES256), `db/tx` (generic transaction helper), `db/migration`,
-  `constant`.
+- `internal/platform` — infrastructure: `config` (viper, `.env` optional), `logging` (`log/slog` setup: `New` /
+  `Setup` / `Check` / `Fatal`, a handler adding `request_id`), `server` (`server.go` + `router.go` with the
+  `Handlers` struct), `middleware` (`RequestID`, `AccessLog`, `JSONAPIMediaType`, `AccessTokenMiddleware`,
+  `RequireRole`, its own sqlc for `GetUserIsActive`), `jwttoken` (ES256), `db/tx` (generic transaction helper),
+  `db/migration`, `constant`.
 - `internal/shared` — cross-cutting: `apperror` (typed error → HTTP status, with a JSON:API `Source`),
   `jsonapi` (documents, serializer, sparse fieldsets, links, error objects, `?include` policy, the query
   parser), `handlerutil` (`ParseQuery` / `BindResource` / `ParamID` / `WriteData` / `WriteMeta` /
   `WriteError`), `validation` (`notblank`, `rfc3339`, `RegisterGinValidators`), `pagination`, `password`
-  (bcrypt), `enum` (`Role`: `user` / `admin`), `dto`, `constant` (context keys, cookie names), `utility`,
-  `testhelper`.
+  (bcrypt), `enum` (`Role`: `user` / `admin`), `requestid` (`Header`, `Key`, `With` / `FromContext` / `Detach`),
+  `dto`, `constant` (context keys, cookie names), `utility` (`SafeGo` / `SafeGoContext`, …), `testhelper`.
 - `internal/features/<domain>/<action>` — the vertical slices: `auth/{register,login,refresh,logout}`, `me`,
   `note/{create,list,detail,update,delete}`, `admin/user`. `<domain>/shared` holds what more than one slice of
   that domain needs (`note/shared`: the `NoteResource`, the include policy, the ownership helpers
@@ -93,6 +94,12 @@ Rules:
 
 ### Request flow
 
+0. Every route (404 / 405 / panic included) runs `RequestID` → `AccessLog` → recovery. `RequestID` keeps an
+   incoming `X-Request-ID` matching `^[A-Za-z0-9._:-]{1,128}$`, else makes a UUID, and sets it on the response
+   header (before the handlers), in the gin context (`requestid.Key`) and in the request context. `AccessLog`
+   writes one `request` record (method, path, status, latency_ms, client_ip, bytes, plus `user_id` once auth
+   has set it): warn with `cancelled=true` when the client went away (request context cancelled), else error
+   for a 5xx, info for the rest.
 1. `middleware.JSONAPIMediaType` (every `/api` route) checks content negotiation first (406 / 415).
 2. `AccessTokenMiddleware` reads the access token from the `app-access-token` cookie, else
    `Authorization: Bearer`, verifies it (ES256, `iss`, `aud` = `CLIENT_ID`, `exp`, `typ = access`), then
@@ -102,7 +109,34 @@ Rules:
    effect), binds the request document with `handlerutil.BindResource(c, ResourceSpec{Type, ID}, &req)`,
    calls the service, and writes with `handlerutil.WriteData` (or `WriteMeta` / `c.Status(204)`).
 4. The service returns `*apperror.AppError` for anything the client should see; any other error becomes a
-   500 in `handlerutil.WriteError`. `jsonapi.WriteErrors` logs 5xx at error level, the rest at warn.
+   500 in `handlerutil.WriteError`. `jsonapi.WriteErrorsContext(ctx, w, ...)` logs the wrapped cause with
+   `status`, `code`, `err`: `request rejected` (warn, 4xx), `request failed` (error, 5xx), or `request
+   cancelled` (warn) for a 5xx whose ctx is cancelled or whose chain holds `context.Canceled` — the ctx is the
+   real signal, since lib/pq reports a cancelled query as a Postgres error. `context.DeadlineExceeded` stays an
+   error (our timeout). `request_id` comes from ctx, else from the response header. `WriteErrors` is the
+   `context.Background()` variant. `AppError.Unwrap()` returns `Err`, so `errors.Is` sees through it; the cause
+   never reaches the response body.
+
+### Logging
+
+- `log/slog` only. `logging.Setup(conf.LogFormat, conf.LogLevel)` in `main` makes the default logger (stdout;
+  `LOG_FORMAT` text / json, `LOG_LEVEL`); its handler adds `request_id` from `requestid.FromContext(ctx)`, which
+  also reads a `*gin.Context` (services get one as their ctx).
+- **Use the `*Context` variant whenever a ctx is in scope** — that's where `request_id` comes from. Short
+  lowercase message + key/value attributes, never a formatted string:
+  `slog.ErrorContext(ctx, "notify: get user failed", "user_id", id, "err", err)`. Background workers use
+  `worker run failed` / `worker job failed` / `worker stopped` with a `worker` attribute.
+- Writing an error from a handler / middleware: pass the **request's** context —
+  `jsonapi.WriteErrorsContext(handlerutil.RequestContext(c), c.Writer, ...)` (`handlerutil.WriteError`,
+  `ParseQuery`, `ParamID` and `AccessTokenMiddleware` do). Not the `*gin.Context`: its `Err()` is always nil, so
+  a cancellation would read as a server error. `RequestContext` falls back to `context.Background()` when
+  `c.Request` is nil (`gin.CreateTestContext`).
+- Startup failures: `logging.Fatal("load config failed", "err", err)`. A `TestMain` may use `log.Fatalf`.
+- A goroutine that outlives the request: `utility.SafeGoContext(requestid.Detach(ctx), fn)` — a panic is
+  logged with the id. **Never `context.WithoutCancel(c)` on a `*gin.Context`**: gin reuses it for the next
+  request. Anything async (an emailer, …) takes a ctx for the same reason.
+- Tests that assert on logs swap the default: `prev := slog.Default(); slog.SetDefault(l); defer
+  slog.SetDefault(prev)` with `l, _ := logging.New(&buf, logging.FormatJSON, "debug")`.
 
 ### Auth
 
@@ -173,7 +207,9 @@ The whole API is JSON:API 1.1; keep it that way in a new slice.
 ### Config
 
 `config.LoadConfig(".")` reads `.env` (optional) then OS env; `Validate()` requires every field except the
-optional `REFRESH_TOKEN_DURATION` (default `168h`), `COOKIE_SECURE` (default `true`) and `COOKIE_DOMAIN`. Durations are Go duration strings (`15m`).
+optional `REFRESH_TOKEN_DURATION` (default `168h`), `COOKIE_SECURE` (default `true`), `COOKIE_DOMAIN`,
+`LOG_FORMAT` (default `text`; `json` in production) and `LOG_LEVEL` (default `info`) — the last two must still
+be values `logging.Check` accepts. Durations are Go duration strings (`15m`).
 See `.env.example`.
 
 ## Testing conventions

@@ -12,6 +12,7 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	internalsharedconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/constant"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/handlerutil"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/jsonapi"
 )
 
@@ -60,8 +61,8 @@ func AccessTokenMiddleware(jwt jwttoken.M, users UserStatusReader) gin.HandlerFu
 				fmt.Errorf("users.GetUserIsActive() (Access Token Middleware): user %d not found: %w", userID, err))
 			return
 		case err != nil:
-			jsonapi.WriteError(c.Writer, apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
-				fmt.Errorf("users.GetUserIsActive() (Access Token Middleware): %w", err))
+			jsonapi.WriteErrorsContext(handlerutil.RequestContext(c), c.Writer, apperror.New(apperror.CodeInternal,
+				apperror.CodeInternal.SafeToThrow(), fmt.Errorf("users.GetUserIsActive() (Access Token Middleware): %w", err)))
 			c.Abort()
 			return
 		case !active:
@@ -102,6 +103,6 @@ func extractToken(c *gin.Context) (string, error) {
 }
 
 func unauthorized(c *gin.Context, message string, err error) {
-	jsonapi.WriteError(c.Writer, apperror.CodeUnauthorized, message, err)
+	jsonapi.WriteErrorsContext(handlerutil.RequestContext(c), c.Writer, apperror.New(apperror.CodeUnauthorized, message, err))
 	c.Abort()
 }
