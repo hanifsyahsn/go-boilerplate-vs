@@ -65,6 +65,8 @@ type SeededRefreshToken struct {
 	ExpiresAt  time.Time
 	RevokedAt  sql.NullTime
 	ReplacedBy uuid.NullUUID
+	// SessionExpiresAt is the login's cap (untrusted device); NULL = none.
+	SessionExpiresAt sql.NullTime
 }
 
 // GetRefreshToken reads a refresh_tokens row.
@@ -73,9 +75,9 @@ func GetRefreshToken(t *testing.T, db *sql.DB, jti uuid.UUID) SeededRefreshToken
 
 	var r SeededRefreshToken
 	err := db.QueryRow(`
-		SELECT jti, user_id, family_id, expires_at, revoked_at, replaced_by
+		SELECT jti, user_id, family_id, expires_at, revoked_at, replaced_by, session_expires_at
 		FROM refresh_tokens WHERE jti = $1
-	`, jti).Scan(&r.Jti, &r.UserID, &r.FamilyID, &r.ExpiresAt, &r.RevokedAt, &r.ReplacedBy)
+	`, jti).Scan(&r.Jti, &r.UserID, &r.FamilyID, &r.ExpiresAt, &r.RevokedAt, &r.ReplacedBy, &r.SessionExpiresAt)
 	require.NoError(t, err, "get refresh token %s", jti)
 	return r
 }

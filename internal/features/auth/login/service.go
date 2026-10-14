@@ -28,7 +28,8 @@ const invalidCredentialsMessage = "The email or password is incorrect."
 type S interface {
 	// Login checks the credentials of an active account and issues a token
 	// pair. The refresh token starts a new family in refresh_tokens (one per
-	// login, i.e. per device).
+	// login, i.e. per device). An untrusted device's family is capped at
+	// untrustedSessionDuration from now; a trusted one slides with no cap.
 	Login(ctx context.Context, req Request) (Result, error)
 }
 
@@ -38,14 +39,17 @@ type service struct {
 	tokenMaker           jwttoken.M
 	accessTokenDuration  time.Duration
 	refreshTokenDuration time.Duration
-	newFamilyID          func() uuid.UUID
+	// untrustedSessionDuration caps a login without trust_device.
+	untrustedSessionDuration time.Duration
+	newFamilyID              func() uuid.UUID
+	now                      func() time.Time
 }
 
 func NewService(
 	querier sqlc.Querier,
 	authSharedQuerier authsharedsqlc.Querier,
 	tokenMaker jwttoken.M,
-	accessTokenDuration, refreshTokenDuration time.Duration,
+	accessTokenDuration, refreshTokenDuration, untrustedSessionDuration time.Duration,
 ) S {
 	return &service{
 		querier:              querier,
@@ -53,7 +57,10 @@ func NewService(
 		tokenMaker:           tokenMaker,
 		accessTokenDuration:  accessTokenDuration,
 		refreshTokenDuration: refreshTokenDuration,
-		newFamilyID:          uuid.New,
+
+		untrustedSessionDuration: untrustedSessionDuration,
+		newFamilyID:              uuid.New,
+		now:                      time.Now,
 	}
 }
 
@@ -80,12 +87,19 @@ func (s *service) Login(ctx context.Context, req Request) (Result, error) {
 			fmt.Errorf("(%s): user %d is not active", feature, user.ID))
 	}
 
+	refreshTokenDuration := s.refreshTokenDuration
+	var sessionExpiresAt sql.NullTime
+	if !req.TrustDevice {
+		sessionExpiresAt = sql.NullTime{Time: s.now().Add(s.untrustedSessionDuration), Valid: true}
+		refreshTokenDuration = min(refreshTokenDuration, s.untrustedSessionDuration)
+	}
+
 	tokens, err := s.tokenMaker.CreateToken(internalshareddto.User{
 		ID:    user.ID,
 		Name:  user.Name,
 		Email: user.Email,
 		Role:  enum.Role(user.Role),
-	}, s.accessTokenDuration, s.refreshTokenDuration)
+	}, s.accessTokenDuration, refreshTokenDuration)
 	if err != nil {
 		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
 			fmt.Errorf("tokenMaker.CreateToken() (%s): %w", feature, err))
@@ -96,6 +110,8 @@ func (s *service) Login(ctx context.Context, req Request) (Result, error) {
 		UserID:    user.ID,
 		FamilyID:  s.newFamilyID(),
 		ExpiresAt: tokens.RefreshTokenExpiresAt,
+
+		SessionExpiresAt: sessionExpiresAt,
 	}); err != nil {
 		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
 			fmt.Errorf("InsertRefreshToken() (%s): %w", feature, err))

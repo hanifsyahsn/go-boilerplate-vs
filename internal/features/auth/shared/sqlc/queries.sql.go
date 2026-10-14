@@ -7,31 +7,34 @@ package sqlc
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 const insertRefreshToken = `-- name: InsertRefreshToken :exec
-INSERT INTO refresh_tokens (jti, user_id, family_id, expires_at)
-VALUES ($1, $2, $3, $4)
+INSERT INTO refresh_tokens (jti, user_id, family_id, expires_at, session_expires_at)
+VALUES ($1, $2, $3, $4, $5)
 `
 
 type InsertRefreshTokenParams struct {
-	Jti       uuid.UUID `json:"jti"`
-	UserID    int64     `json:"user_id"`
-	FamilyID  uuid.UUID `json:"family_id"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Jti              uuid.UUID    `json:"jti"`
+	UserID           int64        `json:"user_id"`
+	FamilyID         uuid.UUID    `json:"family_id"`
+	ExpiresAt        time.Time    `json:"expires_at"`
+	SessionExpiresAt sql.NullTime `json:"session_expires_at"`
 }
 
 // Records an issued refresh token (login starts a family, refresh continues
-// it).
+// it). session_expires_at is NULL for a trusted device (no cap).
 func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error {
 	_, err := q.db.ExecContext(ctx, insertRefreshToken,
 		arg.Jti,
 		arg.UserID,
 		arg.FamilyID,
 		arg.ExpiresAt,
+		arg.SessionExpiresAt,
 	)
 	return err
 }

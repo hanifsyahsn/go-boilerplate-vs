@@ -120,7 +120,7 @@ Ids in **responses are strings** (`"id": "42"`) while `sub` is a number — comp
 | Piece | Where it lives | Lifetime |
 | --- | --- | --- |
 | Access token (ES256 JWT) | cookie `app-access-token` (path `/`), also `meta.access_token` in the login / refresh body | `ACCESS_TOKEN_DURATION` (e.g. 15 min) |
-| Refresh token (ES256 JWT, rotating) | cookie `app-refresh-token` (path `/api/auth`), also `meta.refresh_token` in the login / refresh body | `REFRESH_TOKEN_DURATION` **from its own issue** (default 7 days) |
+| Refresh token (ES256 JWT, rotating) | cookie `app-refresh-token` (path `/api/auth`), also `meta.refresh_token` in the login / refresh body | `REFRESH_TOKEN_DURATION` **from its own issue** (default 7 days); on an untrusted device never past the session's end |
 
 Both cookies are **HttpOnly**, `SameSite=Lax`, `Secure` unless `COOKIE_SECURE=false` (plain-HTTP
 dev), scoped to `COOKIE_DOMAIN` when set. A browser client never reads them: it calls the API with
@@ -129,8 +129,12 @@ dev), scoped to `COOKIE_DOMAIN` when set. A browser client never reads them: it 
 - **Every login starts a session** (a refresh-token *family*): one per device / browser.
 - **Refresh rotates**: each `POST /api/auth/refresh` spends the presented refresh token and returns a
   brand-new pair. The new refresh token lives `REFRESH_TOKEN_DURATION` from *now*, so it is an
-  **idle timeout** — a user who keeps coming back is never logged out; one who's away longer logs in
-  again.
+  **idle timeout** — a user who keeps coming back is never logged out (on a trusted device, below);
+  one who's away longer logs in again.
+- **Trusted vs untrusted device**: a login with `"trust_device": true` slides as above with no cap.
+  Without it (the default) the session ends `UNTRUSTED_SESSION_DURATION` (default 7 days) after the
+  login, however often it refreshes: the last refresh token expires exactly then, and a refresh
+  after it is a `401`.
 - **Reuse detection**: presenting an **already-spent** refresh token revokes the **whole session**
   (it was probably stolen) → `401`, log in again. Exception: within **10 s** of its rotation it's
   treated as two tabs refreshing at once — `401`, but the session survives (the other tab already
@@ -200,6 +204,7 @@ Supports `fields[users]`.
 | --- | --- | --- | --- |
 | `email` | string | yes | valid email, ≤ 255 |
 | `password` | string | yes | ≤ 72 |
+| `trust_device` | boolean | no (default `false`) | `true` ("remember this device"): the session slides with no cap; otherwise it ends `UNTRUSTED_SESSION_DURATION` after the login |
 
 ```bash
 curl -X POST "$BASE/api/auth/login" -H "$CT" -c jar.txt -d '{
@@ -438,7 +443,7 @@ A failed rule is **422 Unprocessable Entity**, one error per field, each with it
 
 The `detail` names the field by its **label**, not its JSON name: `title` → "Title", `body` →
 "Content", `name` → "Name", `email` → "Email", `password` → "Password", `refresh_token` →
-"Refresh token", `is_active` → "Active flag".
+"Refresh token", `trust_device` → "Trust device", `is_active` → "Active flag".
 
 ### Request documents
 

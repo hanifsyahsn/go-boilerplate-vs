@@ -12,7 +12,7 @@ import (
 
 type Querier interface {
 	// Records an issued refresh token (login starts a family, refresh continues
-	// it).
+	// it). session_expires_at is NULL for a trusted device (no cap).
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
 	// Revokes every live token of the family the given token belongs to (logout,
 	// or a rotated token presented again).

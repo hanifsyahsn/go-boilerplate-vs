@@ -8,7 +8,7 @@ WHERE id = $1;
 -- name: LockRefreshToken :one
 -- The presented token's row, locked so two concurrent refreshes of the same
 -- token can't both rotate it.
-SELECT jti, user_id, family_id, revoked_at, replaced_by
+SELECT jti, user_id, family_id, revoked_at, replaced_by, session_expires_at
 FROM refresh_tokens
 WHERE jti = $1
 FOR UPDATE;

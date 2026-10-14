@@ -42,18 +42,19 @@ func (q *Queries) GetUserForRefresh(ctx context.Context, id int64) (GetUserForRe
 }
 
 const lockRefreshToken = `-- name: LockRefreshToken :one
-SELECT jti, user_id, family_id, revoked_at, replaced_by
+SELECT jti, user_id, family_id, revoked_at, replaced_by, session_expires_at
 FROM refresh_tokens
 WHERE jti = $1
 FOR UPDATE
 `
 
 type LockRefreshTokenRow struct {
-	Jti        uuid.UUID     `json:"jti"`
-	UserID     int64         `json:"user_id"`
-	FamilyID   uuid.UUID     `json:"family_id"`
-	RevokedAt  sql.NullTime  `json:"revoked_at"`
-	ReplacedBy uuid.NullUUID `json:"replaced_by"`
+	Jti              uuid.UUID     `json:"jti"`
+	UserID           int64         `json:"user_id"`
+	FamilyID         uuid.UUID     `json:"family_id"`
+	RevokedAt        sql.NullTime  `json:"revoked_at"`
+	ReplacedBy       uuid.NullUUID `json:"replaced_by"`
+	SessionExpiresAt sql.NullTime  `json:"session_expires_at"`
 }
 
 // The presented token's row, locked so two concurrent refreshes of the same
@@ -67,6 +68,7 @@ func (q *Queries) LockRefreshToken(ctx context.Context, jti uuid.UUID) (LockRefr
 		&i.FamilyID,
 		&i.RevokedAt,
 		&i.ReplacedBy,
+		&i.SessionExpiresAt,
 	)
 	return i, err
 }

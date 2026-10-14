@@ -26,6 +26,8 @@ func TestService_Login_I(t *testing.T) {
 	require.NoError(t, err)
 	maker := jwttoken.NewTokenMakerES256(key, &key.PublicKey, "client", "issuer")
 
+	const untrustedTTL = 30 * time.Minute
+
 	testCases := []struct {
 		name     string
 		seed     testhelper.SeedUserParams
@@ -33,9 +35,14 @@ func TestService_Login_I(t *testing.T) {
 		wantCode apperror.Code
 	}{
 		{
-			name: "matching credentials, email case ignored",
+			name: "matching credentials, email case ignored, untrusted device: the session capped",
 			seed: testhelper.SeedUserParams{Email: "jane@example.com", Role: "admin"},
 			req:  Request{Email: "JANE@example.com", Password: testhelper.DefaultPassword},
+		},
+		{
+			name: "trusted device: no cap",
+			seed: testhelper.SeedUserParams{Email: "jane@example.com", Role: "admin"},
+			req:  Request{Email: "jane@example.com", Password: testhelper.DefaultPassword, TrustDevice: true},
 		},
 		{
 			name:     "wrong password",
@@ -56,7 +63,7 @@ func TestService_Login_I(t *testing.T) {
 			defer testhelper.Truncate(t, testDB)
 			userID := testhelper.SeedUser(t, testDB, tc.seed)
 
-			got, err := NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), maker, time.Minute, time.Hour).Login(context.Background(), tc.req)
+			got, err := NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), maker, time.Minute, time.Hour, untrustedTTL).Login(context.Background(), tc.req)
 			if tc.wantCode != "" {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
@@ -76,6 +83,14 @@ func TestService_Login_I(t *testing.T) {
 			stored := testhelper.GetRefreshToken(t, testDB, got.Tokens.RefreshTokenID)
 			require.Equal(t, userID, stored.UserID)
 			require.False(t, stored.RevokedAt.Valid)
+			if tc.req.TrustDevice {
+				require.False(t, stored.SessionExpiresAt.Valid)
+				require.WithinDuration(t, time.Now().Add(time.Hour), got.Tokens.RefreshTokenExpiresAt, 5*time.Second)
+			} else {
+				require.True(t, stored.SessionExpiresAt.Valid)
+				require.WithinDuration(t, time.Now().Add(untrustedTTL), stored.SessionExpiresAt.Time, 5*time.Second)
+				require.WithinDuration(t, time.Now().Add(untrustedTTL), got.Tokens.RefreshTokenExpiresAt, 5*time.Second)
+			}
 		})
 	}
 }

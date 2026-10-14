@@ -36,6 +36,11 @@ func TestService_Refresh_U(t *testing.T) {
 		row.ReplacedBy = uuid.NullUUID{UUID: uuid.New(), Valid: true}
 		return row
 	}
+	cappedIn := func(d time.Duration) sqlc.LockRefreshTokenRow {
+		row := live
+		row.SessionExpiresAt = sql.NullTime{Time: now.Add(d), Valid: true}
+		return row
+	}
 	loggedOut := live
 	loggedOut.RevokedAt = sql.NullTime{Time: now.Add(-time.Second), Valid: true}
 
@@ -80,6 +85,41 @@ func TestService_Refresh_U(t *testing.T) {
 				)
 			},
 			want: Result{Tokens: pair},
+		},
+		{
+			name:  "an untrusted device's token near its cap: the new refresh token ends at the cap, the cap carried over",
+			token: "ref",
+			stub: func(q *MockQuerier, m *jwttoken.MockM) {
+				verified(q, m, cappedIn(time.Hour))
+				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(active, nil)
+				m.EXPECT().CreateToken(gomock.Any(), accessTTL, time.Hour).Return(pair, nil)
+				q.EXPECT().InsertRefreshToken(gomock.Any(), authsharedsqlc.InsertRefreshTokenParams{
+					Jti: pair.RefreshTokenID, UserID: 1, FamilyID: familyID, ExpiresAt: pair.RefreshTokenExpiresAt,
+					SessionExpiresAt: sql.NullTime{Time: now.Add(time.Hour), Valid: true},
+				}).Return(nil)
+				q.EXPECT().RotateRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
+			},
+			want: Result{Tokens: pair},
+		},
+		{
+			name:  "an untrusted device's token far from its cap: the full refresh duration",
+			token: "ref",
+			stub: func(q *MockQuerier, m *jwttoken.MockM) {
+				verified(q, m, cappedIn(30*24*time.Hour))
+				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(active, nil)
+				m.EXPECT().CreateToken(gomock.Any(), accessTTL, refreshTTL).Return(pair, nil)
+				q.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
+				q.EXPECT().RotateRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
+			},
+			want: Result{Tokens: pair},
+		},
+		{
+			name:  "an untrusted device's session past its cap: 401, nothing issued",
+			token: "ref",
+			stub: func(q *MockQuerier, m *jwttoken.MockM) {
+				verified(q, m, cappedIn(-time.Second))
+			},
+			wantCode: apperror.CodeUnauthorized,
 		},
 		{name: "no token", token: "", stub: func(q *MockQuerier, m *jwttoken.MockM) {}, wantCode: apperror.CodeUnauthorized},
 		{

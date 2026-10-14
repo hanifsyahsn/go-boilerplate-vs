@@ -97,7 +97,8 @@ Every response carries an `X-Request-ID` header; show it next to error messages 
 leads straight to the logs.
 
 Refresh tokens rotate on every refresh and live `REFRESH_TOKEN_DURATION` (default 7 days) from the last refresh,
-so an active user stays logged in. A client that doesn't use the cookies must store the new `refresh_token`
+so an active user stays logged in — on a device logged in with `"trust_device": true`. Without it the login
+ends `UNTRUSTED_SESSION_DURATION` (default 7 days) after it, refresh or not. A client that doesn't use the cookies must store the new `refresh_token`
 from `meta` each time: a spent one presented again revokes the whole login.
 
 A new account is always a `user`;

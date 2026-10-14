@@ -52,7 +52,7 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	require.NoError(t, err)
 	tokenMaker := jwttoken.NewTokenMakerES256(key, &key.PublicKey, "test-client", "test-issuer")
 
-	const accessTTL, refreshTTL = 15 * time.Minute, 24 * time.Hour
+	const accessTTL, refreshTTL, untrustedTTL = 15 * time.Minute, 24 * time.Hour, 24 * time.Hour
 	cookies := authshared.CookieConfig{}
 	authSharedQuerier := authsharedsqlc.New(db)
 	noteSharedQuerier := notesharedsqlc.New(db)
@@ -60,7 +60,7 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	handlers := Handlers{
 		Register: authregister.NewHandler(authregister.NewService(authregistersqlc.New(db))),
 		Login: authlogin.NewHandler(
-			authlogin.NewService(authloginsqlc.New(db), authSharedQuerier, tokenMaker, accessTTL, refreshTTL),
+			authlogin.NewService(authloginsqlc.New(db), authSharedQuerier, tokenMaker, accessTTL, refreshTTL, untrustedTTL),
 			cookies,
 		),
 		Refresh: authrefresh.NewHandler(

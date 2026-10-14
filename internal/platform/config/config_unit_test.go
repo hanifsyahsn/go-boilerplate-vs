@@ -35,6 +35,7 @@ func TestLoadConfig_Env_U(t *testing.T) {
 				require.Equal(t, "test", c.Environment)
 				require.Equal(t, 15*time.Minute, c.AccessTokenDuration)
 				require.Equal(t, 168*time.Hour, c.RefreshTokenDuration)
+				require.Equal(t, 7*24*time.Hour, c.UntrustedSessionDuration)
 				require.True(t, c.CookieSecure)
 				require.Empty(t, c.CookieDomain)
 				require.Equal(t, "text", c.LogFormat)
@@ -66,6 +67,13 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			},
 		},
 		{
+			name:     "an untrusted session duration read",
+			override: map[string]string{"UNTRUSTED_SESSION_DURATION": "24h"},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Equal(t, 24*time.Hour, c.UntrustedSessionDuration)
+			},
+		},
+		{
 			name:     "optional cookie knobs read",
 			override: map[string]string{"COOKIE_SECURE": "false", "COOKIE_DOMAIN": "example.com"},
 			wantCheck: func(t *testing.T, c Config) {
@@ -76,6 +84,7 @@ func TestLoadConfig_Env_U(t *testing.T) {
 		{name: "a missing required var", override: map[string]string{"CLIENT_ID": ""}, wantErr: "CLIENT_ID is required"},
 		{name: "an invalid duration", override: map[string]string{"ACCESS_TOKEN_DURATION": "soon"}, wantErr: "ACCESS_TOKEN_DURATION"},
 		{name: "an invalid refresh duration", override: map[string]string{"REFRESH_TOKEN_DURATION": "later"}, wantErr: "REFRESH_TOKEN_DURATION"},
+		{name: "an invalid untrusted session duration", override: map[string]string{"UNTRUSTED_SESSION_DURATION": "never"}, wantErr: "UNTRUSTED_SESSION_DURATION"},
 		{name: "an invalid bool", override: map[string]string{"COOKIE_SECURE": "maybe"}, wantErr: "COOKIE_SECURE"},
 	}
 
@@ -84,6 +93,7 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			for k, v := range validEnv {
 				t.Setenv(k, v)
 			}
+			t.Setenv("UNTRUSTED_SESSION_DURATION", "")
 			t.Setenv("COOKIE_SECURE", "")
 			t.Setenv("COOKIE_DOMAIN", "")
 			t.Setenv("LOG_FORMAT", "")

@@ -30,7 +30,10 @@ func TestService_Login_U(t *testing.T) {
 	refreshExp := time.Now().Add(24 * time.Hour)
 	pair := jwttoken.Pair{AccessToken: "acc", RefreshToken: "ref", RefreshTokenID: uuid.New(), RefreshTokenExpiresAt: refreshExp}
 	familyID := uuid.New()
+	now := time.Now()
 	insert := authsharedsqlc.InsertRefreshTokenParams{Jti: pair.RefreshTokenID, UserID: 1, FamilyID: familyID, ExpiresAt: refreshExp}
+	capped := insert
+	capped.SessionExpiresAt = sql.NullTime{Time: now.Add(12 * time.Hour), Valid: true}
 
 	testCases := []struct {
 		name     string
@@ -41,13 +44,23 @@ func TestService_Login_U(t *testing.T) {
 		wantMsg  string
 	}{
 		{
-			name: "right password, active: a token pair with the DB role, the refresh token recorded in a new family",
-			req:  Request{Email: " jane@example.com ", Password: "Passw0rd!"},
+			name: "right password, trusted device: a token pair with the DB role, the refresh token recorded in a new family with no cap",
+			req:  Request{Email: " jane@example.com ", Password: "Passw0rd!", TrustDevice: true},
 			stub: func(q *sqlc.MockQuerier, sq *authsharedsqlc.MockQuerier, m *jwttoken.MockM) {
 				q.EXPECT().GetUserForLogin(gomock.Any(), "jane@example.com").Return(active, nil)
 				m.EXPECT().CreateToken(internalshareddto.User{ID: 1, Name: "Jane", Email: "jane@example.com", Role: enum.RoleAdmin},
 					15*time.Minute, 24*time.Hour).Return(pair, nil)
 				sq.EXPECT().InsertRefreshToken(gomock.Any(), insert).Return(nil)
+			},
+			want: Result{User: authshared.UserResource{ID: "1", Name: "Jane", Email: "jane@example.com", Role: "admin"}, Tokens: pair},
+		},
+		{
+			name: "untrusted device: the family capped at the untrusted session duration, the refresh token no longer than it",
+			req:  Request{Email: "jane@example.com", Password: "Passw0rd!"},
+			stub: func(q *sqlc.MockQuerier, sq *authsharedsqlc.MockQuerier, m *jwttoken.MockM) {
+				q.EXPECT().GetUserForLogin(gomock.Any(), "jane@example.com").Return(active, nil)
+				m.EXPECT().CreateToken(gomock.Any(), 15*time.Minute, 12*time.Hour).Return(pair, nil)
+				sq.EXPECT().InsertRefreshToken(gomock.Any(), capped).Return(nil)
 			},
 			want: Result{User: authshared.UserResource{ID: "1", Name: "Jane", Email: "jane@example.com", Role: "admin"}, Tokens: pair},
 		},
@@ -112,8 +125,9 @@ func TestService_Login_U(t *testing.T) {
 			m := jwttoken.NewMockM(ctrl)
 			tc.stub(q, sq, m)
 
-			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour)
+			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour)
 			svc.(*service).newFamilyID = func() uuid.UUID { return familyID }
+			svc.(*service).now = func() time.Time { return now }
 
 			got, err := svc.Login(context.Background(), tc.req)
 			if tc.wantCode != "" {
