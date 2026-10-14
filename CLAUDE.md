@@ -157,7 +157,11 @@ Rules:
   row, issues a **new pair** (both cookies replaced, both tokens in `meta`), inserts the successor in the same
   family and marks the old one `revoked_at` + `replaced_by`. The new refresh token lives
   `REFRESH_TOKEN_DURATION` (optional, default 7 days) from now, so it's an idle timeout: a user who keeps
-  coming back is never logged out; one who's away longer logs in again. No absolute session cap.
+  coming back is never logged out; one who's away longer logs in again.
+- **Trusted vs untrusted device** (migration 000005): login's optional `trust_device` attribute. Trusted →
+  `refresh_tokens.session_expires_at` NULL, the session slides with no cap. Untrusted (the default) →
+  `session_expires_at = login + UNTRUSTED_SESSION_DURATION` (optional, default 7 days), copied to every
+  successor; refresh issues a token no longer than what's left and is a 401 past it.
 - **Reuse detection**: a spent token presented again revokes its whole family (→ 401), since it was probably
   stolen. Exception: within `reuseGrace` (10s, `refresh/service.go`) of its rotation it's treated as two tabs
   refreshing at once — 401, family kept. Clients should still single-flight their refresh calls.
@@ -211,7 +215,7 @@ The whole API is JSON:API 1.1; keep it that way in a new slice.
 ### Config
 
 `config.LoadConfig(".")` reads `.env` (optional) then OS env; `Validate()` requires every field except the
-optional `REFRESH_TOKEN_DURATION` (default `168h`), `COOKIE_SECURE` (default `true`), `COOKIE_DOMAIN`,
+optional `REFRESH_TOKEN_DURATION` (default `168h`), `UNTRUSTED_SESSION_DURATION` (default `168h`), `COOKIE_SECURE` (default `true`), `COOKIE_DOMAIN`,
 `LOG_FORMAT` (default `text`; `json` in production) and `LOG_LEVEL` (default `info`) — the last two must still
 be values `logging.Check` accepts. Durations are Go duration strings (`15m`).
 See `.env.example`.

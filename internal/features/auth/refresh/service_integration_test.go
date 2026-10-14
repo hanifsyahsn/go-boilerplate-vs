@@ -30,6 +30,7 @@ func TestService_Refresh_I(t *testing.T) {
 	maker := jwttoken.NewTokenMakerES256(key, &key.PublicKey, "client", "issuer")
 
 	minuteAgo := time.Now().Add(-time.Minute)
+	inAnHour := time.Now().Add(time.Hour)
 
 	testCases := []struct {
 		name string
@@ -38,12 +39,29 @@ func TestService_Refresh_I(t *testing.T) {
 		stored func(sibling uuid.UUID) *testhelper.SeedRefreshTokenParams
 		// siblingRevoked: whether the family's other live token ends revoked.
 		siblingRevoked bool
-		wantCode       apperror.Code
+		// wantCap: the session cap the new token inherits, nil => none.
+		wantCap  *time.Time
+		wantCode apperror.Code
 	}{
 		{
 			name:   "a live token: rotated, a new pair in the same family with the role from the DB",
 			seed:   testhelper.SeedUserParams{Role: "admin"},
 			stored: func(uuid.UUID) *testhelper.SeedRefreshTokenParams { return &testhelper.SeedRefreshTokenParams{} },
+		},
+		{
+			name: "an untrusted device near its cap: the new refresh token ends at the cap and inherits it",
+			seed: testhelper.SeedUserParams{Role: "user"},
+			stored: func(uuid.UUID) *testhelper.SeedRefreshTokenParams {
+				return &testhelper.SeedRefreshTokenParams{SessionExpiresAt: &inAnHour}
+			},
+			wantCap: &inAnHour,
+		},
+		{
+			name: "an untrusted device past its cap is refused",
+			stored: func(uuid.UUID) *testhelper.SeedRefreshTokenParams {
+				return &testhelper.SeedRefreshTokenParams{SessionExpiresAt: &minuteAgo}
+			},
+			wantCode: apperror.CodeUnauthorized,
 		},
 		{
 			name:     "a deactivated user gets none, the token stays live",
@@ -106,7 +124,11 @@ func TestService_Refresh_I(t *testing.T) {
 
 			_, err = maker.VerifyRefreshToken(got.Tokens.RefreshToken)
 			require.NoError(t, err)
-			require.WithinDuration(t, time.Now().Add(refreshTTL), got.Tokens.RefreshTokenExpiresAt, 5*time.Second)
+			wantExp := time.Now().Add(refreshTTL)
+			if tc.wantCap != nil {
+				wantExp = *tc.wantCap
+			}
+			require.WithinDuration(t, wantExp, got.Tokens.RefreshTokenExpiresAt, 5*time.Second)
 
 			old := testhelper.GetRefreshToken(t, testDB, pair.RefreshTokenID)
 			require.True(t, old.RevokedAt.Valid)
@@ -116,6 +138,12 @@ func TestService_Refresh_I(t *testing.T) {
 			require.Equal(t, familyID, next.FamilyID)
 			require.Equal(t, userID, next.UserID)
 			require.False(t, next.RevokedAt.Valid)
+			if tc.wantCap != nil {
+				require.True(t, next.SessionExpiresAt.Valid)
+				require.WithinDuration(t, *tc.wantCap, next.SessionExpiresAt.Time, time.Millisecond)
+			} else {
+				require.False(t, next.SessionExpiresAt.Valid)
+			}
 		})
 	}
 }

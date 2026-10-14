@@ -95,6 +95,8 @@ type SeedRefreshTokenParams struct {
 	// ReplacedBy (rotated) or not (logged out / family revoked).
 	RevokedAt  *time.Time
 	ReplacedBy uuid.NullUUID
+	// SessionExpiresAt caps the login (untrusted device); nil => no cap.
+	SessionExpiresAt *time.Time
 }
 
 // SeedRefreshToken inserts a refresh_tokens row and returns its family id.
@@ -109,9 +111,9 @@ func SeedRefreshToken(t *testing.T, db *sql.DB, p SeedRefreshTokenParams) uuid.U
 	}
 
 	_, err := db.Exec(`
-		INSERT INTO refresh_tokens (jti, user_id, family_id, expires_at, revoked_at, replaced_by)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, p.Jti, p.UserID, p.FamilyID, p.ExpiresAt, p.RevokedAt, p.ReplacedBy)
+		INSERT INTO refresh_tokens (jti, user_id, family_id, expires_at, revoked_at, replaced_by, session_expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, p.Jti, p.UserID, p.FamilyID, p.ExpiresAt, p.RevokedAt, p.ReplacedBy, p.SessionExpiresAt)
 	require.NoError(t, err, "seed refresh token")
 
 	return p.FamilyID

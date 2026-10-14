@@ -23,7 +23,12 @@ type Config struct {
 	// rotate, so it's the idle timeout: a user who doesn't come back within
 	// it logs in again. Optional, defaults to DefaultRefreshTokenDuration.
 	RefreshTokenDuration time.Duration `mapstructure:"REFRESH_TOKEN_DURATION"`
-	TokenIssuer          string        `mapstructure:"TOKEN_ISSUER"`
+	// UntrustedSessionDuration caps a login from an untrusted device (one
+	// without trust_device): its refresh tokens still rotate, but none lives
+	// past login + this. A trusted device's session slides with no cap.
+	// Optional, defaults to DefaultUntrustedSessionDuration.
+	UntrustedSessionDuration time.Duration `mapstructure:"UNTRUSTED_SESSION_DURATION"`
+	TokenIssuer              string        `mapstructure:"TOKEN_ISSUER"`
 	// ClientID is the access token's audience (`aud`), checked on verify.
 	ClientID         string `mapstructure:"CLIENT_ID"`
 	ECPrivateKeyPath string `mapstructure:"EC_PRIVATE_KEY_PATH"`
@@ -43,6 +48,10 @@ type Config struct {
 
 // DefaultRefreshTokenDuration is REFRESH_TOKEN_DURATION when unset: 7 days.
 const DefaultRefreshTokenDuration = 7 * 24 * time.Hour
+
+// DefaultUntrustedSessionDuration is UNTRUSTED_SESSION_DURATION when unset: 7
+// days.
+const DefaultUntrustedSessionDuration = 7 * 24 * time.Hour
 
 // LOG_FORMAT / LOG_LEVEL when unset.
 const (
@@ -84,26 +93,35 @@ func LoadConfig(path string) (Config, error) {
 		refreshTokenDuration = DefaultRefreshTokenDuration
 	}
 
+	untrustedSessionDuration, err := getDurationEnv(v, "UNTRUSTED_SESSION_DURATION")
+	if err != nil {
+		return Config{}, err
+	}
+	if untrustedSessionDuration == 0 {
+		untrustedSessionDuration = DefaultUntrustedSessionDuration
+	}
+
 	cookieSecure, err := getBoolEnv(v, "COOKIE_SECURE", true)
 	if err != nil {
 		return Config{}, err
 	}
 
 	config := Config{
-		Environment:          v.GetString("ENVIRONMENT"),
-		ServerAddress:        v.GetString("SERVER_ADDRESS"),
-		DBDriver:             v.GetString("DB_DRIVER"),
-		DBSource:             v.GetString("DB_SOURCE"),
-		AccessTokenDuration:  accessTokenDuration,
-		RefreshTokenDuration: refreshTokenDuration,
-		TokenIssuer:          v.GetString("TOKEN_ISSUER"),
-		ClientID:             v.GetString("CLIENT_ID"),
-		ECPrivateKeyPath:     v.GetString("EC_PRIVATE_KEY_PATH"),
-		ECPublicKeyPath:      v.GetString("EC_PUBLIC_KEY_PATH"),
-		CookieSecure:         cookieSecure,
-		CookieDomain:         v.GetString("COOKIE_DOMAIN"),
-		LogFormat:            getStringEnv(v, "LOG_FORMAT", DefaultLogFormat),
-		LogLevel:             getStringEnv(v, "LOG_LEVEL", DefaultLogLevel),
+		Environment:              v.GetString("ENVIRONMENT"),
+		ServerAddress:            v.GetString("SERVER_ADDRESS"),
+		DBDriver:                 v.GetString("DB_DRIVER"),
+		DBSource:                 v.GetString("DB_SOURCE"),
+		AccessTokenDuration:      accessTokenDuration,
+		RefreshTokenDuration:     refreshTokenDuration,
+		UntrustedSessionDuration: untrustedSessionDuration,
+		TokenIssuer:              v.GetString("TOKEN_ISSUER"),
+		ClientID:                 v.GetString("CLIENT_ID"),
+		ECPrivateKeyPath:         v.GetString("EC_PRIVATE_KEY_PATH"),
+		ECPublicKeyPath:          v.GetString("EC_PUBLIC_KEY_PATH"),
+		CookieSecure:             cookieSecure,
+		CookieDomain:             v.GetString("COOKIE_DOMAIN"),
+		LogFormat:                getStringEnv(v, "LOG_FORMAT", DefaultLogFormat),
+		LogLevel:                 getStringEnv(v, "LOG_LEVEL", DefaultLogLevel),
 	}
 
 	if err = config.Validate(); err != nil {
@@ -151,7 +169,7 @@ func getBoolEnv(v *viper.Viper, key string, defaultVal bool) (bool, error) {
 }
 
 // Validate enforces every required field. Optional knobs
-// (REFRESH_TOKEN_DURATION, COOKIE_*, LOG_*) get their defaults in LoadConfig;
+// (REFRESH_TOKEN_DURATION, UNTRUSTED_SESSION_DURATION, COOKIE_*, LOG_*) get their defaults in LoadConfig;
 // LOG_FORMAT / LOG_LEVEL must still be values logging accepts.
 func (c Config) Validate() error {
 	required := []struct {

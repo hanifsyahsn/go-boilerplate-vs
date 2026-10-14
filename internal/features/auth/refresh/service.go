@@ -30,7 +30,9 @@ type S interface {
 	// Refresh trades a valid refresh token for a new access + refresh token
 	// pair (rotation): the presented token is spent and the new one expires
 	// REFRESH_TOKEN_DURATION from now, so a user who keeps coming back is
-	// never logged out. The user is re-read, so the new token carries the
+	// never logged out — on a trusted device. An untrusted device's login
+	// carries a session_expires_at: the new token never outlives it, and
+	// past it the refresh is a 401. The user is re-read, so the new token carries the
 	// current role, and a deactivated user gets none. A spent token
 	// presented again (after reuseGrace) revokes every token of its login.
 	Refresh(ctx context.Context, refreshToken string) (Result, error)
@@ -111,6 +113,15 @@ func (s *service) Refresh(ctx context.Context, refreshToken string) (Result, err
 			return nil
 		}
 
+		refreshTokenDuration := s.refreshTokenDuration
+		if token.SessionExpiresAt.Valid {
+			left := token.SessionExpiresAt.Time.Sub(s.now())
+			if left <= 0 {
+				return sessionExpired(fmt.Errorf("(%s): session of token %s ended at %s", feature, jti, token.SessionExpiresAt.Time))
+			}
+			refreshTokenDuration = min(refreshTokenDuration, left)
+		}
+
 		user, err := q.GetUserForRefresh(ctx, userID)
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && !user.IsActive) {
 			return apperror.New(apperror.CodeUnauthorized, "Your account is no longer active.",
@@ -125,7 +136,7 @@ func (s *service) Refresh(ctx context.Context, refreshToken string) (Result, err
 			Name:  user.Name,
 			Email: user.Email,
 			Role:  enum.Role(user.Role),
-		}, s.accessTokenDuration, s.refreshTokenDuration)
+		}, s.accessTokenDuration, refreshTokenDuration)
 		if err != nil {
 			return internalError(fmt.Errorf("tokenMaker.CreateToken() (%s): %w", feature, err))
 		}
@@ -135,6 +146,8 @@ func (s *service) Refresh(ctx context.Context, refreshToken string) (Result, err
 			UserID:    user.ID,
 			FamilyID:  token.FamilyID,
 			ExpiresAt: pair.RefreshTokenExpiresAt,
+
+			SessionExpiresAt: token.SessionExpiresAt,
 		}); err != nil {
 			return internalError(fmt.Errorf("InsertRefreshToken() (%s): %w", feature, err))
 		}

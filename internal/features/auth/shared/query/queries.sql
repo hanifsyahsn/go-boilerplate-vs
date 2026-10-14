@@ -1,8 +1,8 @@
 -- name: InsertRefreshToken :exec
 -- Records an issued refresh token (login starts a family, refresh continues
--- it).
-INSERT INTO refresh_tokens (jti, user_id, family_id, expires_at)
-VALUES ($1, $2, $3, $4);
+-- it). session_expires_at is NULL for a trusted device (no cap).
+INSERT INTO refresh_tokens (jti, user_id, family_id, expires_at, session_expires_at)
+VALUES ($1, $2, $3, $4, $5);
 
 -- name: RevokeRefreshTokenFamily :exec
 -- Revokes every live token of the family the given token belongs to (logout,

@@ -97,7 +97,7 @@ func main() {
 		Register: authregistersvc.NewHandler(authregistersvc.NewService(authregistersqlc.New(conn))),
 		Login: authloginsvc.NewHandler(
 			authloginsvc.NewService(authloginsqlc.New(conn), authSharedQuerier, tokenMaker,
-				conf.AccessTokenDuration, conf.RefreshTokenDuration),
+				conf.AccessTokenDuration, conf.RefreshTokenDuration, conf.UntrustedSessionDuration),
 			cookies,
 		),
 		Refresh: authrefreshsvc.NewHandler(
