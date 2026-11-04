@@ -30,16 +30,21 @@ Index:
   goroutines, log assertions in tests). Sections: *Logging*.
 - `.claude/rules/auth.md` — Register, login, token rotation, trusted / untrusted sessions, reuse detection,
   logout. Sections: *Auth*.
+- `.claude/rules/slice-patterns.md` — reference code for the recurring slice patterns (owned resource + 404,
+  create + read-back, lock-before-write tx over two queriers, partial PATCH, list filter/sort/page, tests,
+  sqlc block). Kept even when no slice uses a pattern — see its *Maintenance rule*.
 
 Cross-topic map (touching the left → also read the right):
 
-- **A new slice / endpoint** → `jsonapi.md` (both sections) + `logging.md`.
+- **A new slice / endpoint** → `jsonapi.md` (both sections) + `logging.md` + `slice-patterns.md`.
+- **Deleting a slice** → `slice-patterns.md`: drop only its `Used by:` entries, never a pattern.
 - **Middleware / router** (`internal/platform/middleware`, `server`) → `jsonapi.md` + `logging.md` (+ `auth.md`
   for `AccessTokenMiddleware` / `RequireRole`).
 - **Users, roles, tokens, cookies, `refresh_tokens`** → `auth.md` + `jsonapi.md` (*Request documents*).
 - **An error shape / status code** → `jsonapi.md` (*Errors*, *Request flow* step 4) + `logging.md`.
 - **A goroutine / background worker** → `logging.md`.
-- **A migration** → *Gotchas* here + the rule of the table's feature (`users` / `refresh_tokens` → `auth.md`).
+- **A migration** → *Gotchas* here + the rule of the table's feature (`users` / `refresh_tokens` → `auth.md`)
+  + `slice-patterns.md` §1 for an owned, soft-deleted table.
 
 ## Commands
 
@@ -111,9 +116,10 @@ Rules:
 - A slice that writes in a transaction declares `Querier interface { sqlc.Querier; sharedsqlc.Querier }` in
   `store.go`; `RunInTx` binds both to one `*sql.Tx` (`txQueries` embeds both, the shared one under the alias
   `sharedQuerier`). `mockgen -source=store.go` emits `MockStoreI` + `MockQuerier`; unit tests make
-  `RunInTx` call `fn(mockQuerier)` (see `note/update/service_unit_test.go`).
+  `RunInTx` call `fn(mockQuerier)` (see `slice-patterns.md` §3 and §7).
 - Lock before you write: update/delete start with `LockNoteForUpdate` (`FOR UPDATE`) inside the tx.
-- Not-yours reads as not-found: another user's note is a 404 with the same message as a missing one.
+- Not-yours reads as not-found: another user's note is a 404 with the same message as a missing one
+  (`slice-patterns.md` §1).
 
 ### Adding a slice (checklist)
 
