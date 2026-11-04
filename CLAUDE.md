@@ -9,6 +9,38 @@ It keeps one layering, error model and test conventions across the services buil
 **fully JSON:API 1.1** on both sides (request documents, content negotiation, query parameters, errors) — see
 *JSON:API*. The shipped example domain is `notes`; auth is local (bcrypt passwords + ES256 JWTs).
 
+## Instruction files — read first
+
+This file holds what applies everywhere. The topic sections live in **path-scoped rules** under `.claude/rules/`
+(moved verbatim on 2026-11-04; the full original is in git history before that commit). Each rule loads by itself
+when a file matching its `paths:` is read / edited, but **don't rely on that alone**:
+
+- **Before designing or changing anything**, read (with the Read tool) every rule whose topic the task touches —
+  the folders you edit **and** the cross-topic map below — and start each plan / design proposal with a line
+  `Context read: <rule files>` so the user can see what was read.
+- A "see *Section*" reference anywhere points to the section of that name; the index below says which file has it.
+- **A new slice / folder** → add it to the `paths:` of every rule whose topic it touches, in the same change, and to
+  the cross-topic map. A new section → into the rule of its topic (or a new rule, kept under 40,000 characters),
+  never dropped.
+
+Index:
+- `.claude/rules/jsonapi.md` — Request flow (middleware order, handler pattern, error writing) and JSON:API 1.1
+  (media type, request documents, query parameters, responses, errors). Sections: *Request flow*; *JSON:API*.
+- `.claude/rules/logging.md` — `log/slog` conventions (`*Context` variants, `request_id` / `user_id`, detached
+  goroutines, log assertions in tests). Sections: *Logging*.
+- `.claude/rules/auth.md` — Register, login, token rotation, trusted / untrusted sessions, reuse detection,
+  logout. Sections: *Auth*.
+
+Cross-topic map (touching the left → also read the right):
+
+- **A new slice / endpoint** → `jsonapi.md` (both sections) + `logging.md`.
+- **Middleware / router** (`internal/platform/middleware`, `server`) → `jsonapi.md` + `logging.md` (+ `auth.md`
+  for `AccessTokenMiddleware` / `RequireRole`).
+- **Users, roles, tokens, cookies, `refresh_tokens`** → `auth.md` + `jsonapi.md` (*Request documents*).
+- **An error shape / status code** → `jsonapi.md` (*Errors*, *Request flow* step 4) + `logging.md`.
+- **A goroutine / background worker** → `logging.md`.
+- **A migration** → *Gotchas* here + the rule of the table's feature (`users` / `refresh_tokens` → `auth.md`).
+
 ## Commands
 
 Tooling on PATH: `go`, `sqlc`, `migrate` (golang-migrate CLI), `mockgen` (github.com/golang/mock), `openssl`,
@@ -91,126 +123,6 @@ Rules:
 4. Add the handler to `server.Handlers`, one `Route` call in `NewRouter` (public / authed / admin group), wire
    it in `cmd/api/main.go`, and a case in `server/router_unit_test.go`.
 5. Tests: handler unit (MockS), service unit (MockQuerier / MockStoreI), service integration (real Postgres).
-
-### Request flow
-
-0. Every route (404 / 405 / panic included) runs `RequestID` → `AccessLog` → recovery. `RequestID` keeps an
-   incoming `X-Request-ID` matching `^[A-Za-z0-9._:-]{1,128}$`, else makes a UUID, and sets it on the response
-   header (before the handlers), in the gin context (`requestid.Key`) and in the request context. `AccessLog`
-   writes one `request` record (method, path, status, latency_ms, client_ip, bytes; `user_id` comes from the
-   handler once auth has put the caller on the request context): warn with `cancelled=true` when the client went away (request context cancelled), else error
-   for a 5xx, info for the rest.
-1. `middleware.JSONAPIMediaType` (every `/api` route) checks content negotiation first (406 / 415).
-2. `AccessTokenMiddleware` reads the access token from the `app-access-token` cookie, else
-   `Authorization: Bearer`, verifies it (ES256, `iss`, `aud` = `CLIENT_ID`, `exp`, `typ = access`), then
-   re-reads `users.is_active` on **every** request (inactive / deleted → 401, DB error → 500). It sets
-   `user_id` and `user_role` in the gin context, and the caller on the request context
-   (`requestuser.With`) so logs written with `c.Request.Context()` carry `user_id`. `RequireRole(enum.RoleAdmin)` gates `/api/admin`.
-3. The handler parses the query with `handlerutil.ParseQuery(c, type, spec)` **first** (before any side
-   effect), binds the request document with `handlerutil.BindResource(c, ResourceSpec{Type, ID}, &req)`,
-   calls the service, and writes with `handlerutil.WriteData` (or `WriteMeta` / `c.Status(204)`).
-4. The service returns `*apperror.AppError` for anything the client should see; any other error becomes a
-   500 in `handlerutil.WriteError`. `jsonapi.WriteErrorsContext(ctx, w, ...)` logs the wrapped cause with
-   `status`, `code`, `err`: `request rejected` (warn, 4xx), `request failed` (error, 5xx), or `request
-   cancelled` (warn) for a 5xx whose ctx is cancelled or whose chain holds `context.Canceled` — the ctx is the
-   real signal, since lib/pq reports a cancelled query as a Postgres error. `context.DeadlineExceeded` stays an
-   error (our timeout). `request_id` comes from ctx, else from the response header. `WriteErrors` is the
-   `context.Background()` variant. `AppError.Unwrap()` returns `Err`, so `errors.Is` sees through it; the cause
-   never reaches the response body.
-
-### Logging
-
-- `log/slog` only. `logging.Setup(conf.LogFormat, conf.LogLevel)` in `main` makes the default logger (stdout;
-  `LOG_FORMAT` text / json, `LOG_LEVEL`); its handler adds `request_id` (`requestid.FromContext`) and the
-  caller's `user_id` (`requestuser.FromContext`) to every record; both also read a `*gin.Context` (services get
-  one as their ctx).
-- **Use the `*Context` variant whenever a ctx is in scope** — that's where `request_id` comes from. Short
-  lowercase message + key/value attributes, never a formatted string:
-  `slog.ErrorContext(ctx, "notify: get note failed", "note_id", id, "err", err)`. **`user_id` always means the
-  caller and comes from ctx** — never add it by hand on the request path; name another user for what it is
-  (`target_user_id`, `recipient_id`). Background workers use `worker run failed` / `worker job failed` /
-  `worker stopped` with a `worker` attribute, and (no request ctx) may log `user_id` for the user they process.
-- Writing an error from a handler / middleware: pass the **request's** context —
-  `jsonapi.WriteErrorsContext(handlerutil.RequestContext(c), c.Writer, ...)` (`handlerutil.WriteError`,
-  `ParseQuery`, `ParamID` and `AccessTokenMiddleware` do). Not the `*gin.Context`: its `Err()` is always nil, so
-  a cancellation would read as a server error. `RequestContext` falls back to `context.Background()` when
-  `c.Request` is nil (`gin.CreateTestContext`).
-- Startup failures: `logging.Fatal("load config failed", "err", err)`. A `TestMain` may use `log.Fatalf`.
-- A goroutine that outlives the request: `utility.SafeGoContext(requestid.Detach(ctx), fn)` — `Detach` keeps
-  the request id and the caller, so its logs (and a recovered panic) carry both. **Never `context.WithoutCancel(c)` on a `*gin.Context`**: gin reuses it for the next
-  request. Anything async (an emailer, …) takes a ctx for the same reason.
-- Tests that assert on logs swap the default: `prev := slog.Default(); slog.SetDefault(l); defer
-  slog.SetDefault(prev)` with `l, _ := logging.New(&buf, logging.FormatJSON, "debug")`.
-
-### Auth
-
-- Register takes a `users` document; role is always `user` (a `role` attribute is a 403); email unique
-  ignoring case (`users_email_lower_key`, pq `23505` → 409). 201 with the account, no `Location` (a plain user
-  has no URL of its own).
-- Login takes a `sessions` document (`email`, `password`). One 401 message for unknown email and wrong
-  password; "no longer active" only after the password matched. Sets `app-access-token` (path `/`) and
-  `app-refresh-token` (path `/api/auth`) HttpOnly, SameSite=Lax cookies (`COOKIE_SECURE`, `COOKIE_DOMAIN`), and
-  answers with the account as `data` and the tokens under `meta` for non-browser clients.
-- Tokens carry `typ` (`access` / `refresh`); each verify rejects the other type.
-- **Refresh tokens rotate** (migration 000004, table `refresh_tokens`, one row per refresh token keyed on its
-  `jti`). Login starts a *family* (one per login / device). `POST /api/auth/refresh` locks the presented token's
-  row, issues a **new pair** (both cookies replaced, both tokens in `meta`), inserts the successor in the same
-  family and marks the old one `revoked_at` + `replaced_by`. The new refresh token lives
-  `REFRESH_TOKEN_DURATION` (optional, default 7 days) from now, so it's an idle timeout: a user who keeps
-  coming back is never logged out; one who's away longer logs in again.
-- **Trusted vs untrusted device** (migration 000005): login's optional `trust_device` attribute. Trusted →
-  `refresh_tokens.session_expires_at` NULL, the session slides with no cap. Untrusted (the default) →
-  `session_expires_at = login + UNTRUSTED_SESSION_DURATION` (optional, default 7 days), copied to every
-  successor; refresh issues a token no longer than what's left and is a 401 past it.
-- **Reuse detection**: a spent token presented again revokes its whole family (→ 401), since it was probably
-  stolen. Exception: within `reuseGrace` (10s, `refresh/service.go`) of its rotation it's treated as two tabs
-  refreshing at once — 401, family kept. Clients should still single-flight their refresh calls.
-- Refresh re-reads the user, so the new access token carries the **current** role and a deactivated user gets
-  none. An unknown jti (no row) is a 401.
-- Refresh / logout take the token from the cookie, else an optional `sessions` document
-  (`{"data":{"type":"sessions","attributes":{"refresh_token":"..."}}}`). Refresh answers with a meta-only
-  document.
-- Logout revokes the presented token's family and clears the cookies; a missing / invalid token is still a
-  204. The access token is a stateless JWT and stays valid until it
-  expires — keep `ACCESS_TOKEN_DURATION` short.
-
-### JSON:API
-
-The whole API is JSON:API 1.1; keep it that way in a new slice.
-
-- **Media type** (`middleware.JSONAPIMediaType`, on `/api`): a request body must be
-  `Content-Type: application/vnd.api+json` with no parameter but `profile` (else 415); an `Accept` that lists the
-  JSON:API type only with other parameters is a 406. No extensions are supported. Every response has
-  `Vary: Accept`. `/healthz` sits outside `/api`.
-- **Request documents** (`handlerutil.BindResource` → `DecodeResource`): `{"data": {"type", "id"?,
-  "attributes"}}`; the attributes decode into the slice's `Request` and are validated with gin binding tags.
-  No `data` / not one object → 400; wrong `type` → 409; an `id` on a create (client-generated) → 403; on an
-  update the `id` is required and must equal the URL's (else 409); any `relationships` → 403; an attribute the
-  `Request` doesn't declare (read-only, unknown) → 403; a wrong JSON type → 422; a failed rule → 422 per field.
-  Every error carries `source.pointer` (`/data/attributes/title`).
-- **Updates are `PATCH` and partial**: `Request` fields are pointers, nil keeps the current value (`note/update`
-  → `COALESCE(sqlc.narg(...), col)`; `admin/user` with nothing to change just reads the user back).
-- **Query parameters** (`handlerutil.ParseQuery` with the endpoint's `jsonapi.QuerySpec`): `include` (an
-  `IncludeConfig{Allowed, Default}`, opt-in with a server default — never hardcode a policy), `fields[TYPE]`
-  (sparse fieldsets; `Fields` maps each type the response carries to its resource struct), `sort` (one field,
-  `-` for descending, from `SortConfig.Allowed`; the SQL orders with a `CASE` per value), `page[number]` /
-  `page[size]`, `filter[NAME]` (`Filters`). Whatever the spec leaves out is a 400 with `source.parameter`, and
-  so is any other all-lowercase name (reserved by the spec); names with a non a-z character are
-  implementation-specific and ignored. An endpoint with no parameters still calls `ParseQuery` with an empty
-  spec (delete, refresh, logout).
-- **Responses** (`jsonapi.WriteData` via `handlerutil.WriteData`): `jsonapi.version`, `data`, `included`
-  (each related resource once, never one that's also primary data), `meta`, `links.self`; a
-  `pagination.Meta` meta adds `first` / `last` / `prev` / `next` (`null` when unavailable). Struct tags drive
-  serialization: `jsonapi:"id"`, `json:"name"` for an attribute, `jsonapi:"relation,<name>,<type>"` for a
-  relationship (nil pointer → `data: null`, slice → to-many). A create is 201 with a `Location` header; a
-  delete / logout 204 with no body.
-- **Costly relationships** (to-many, big tables): `include` / `fields` only trim at serialization, so pass
-  the `Query` (or two bools) to the service and load by need — `q.Includes("path")` → full rows;
-  else `q.WantsField(type, "rel")` → ids only (linkage); else skip it. Never render an empty to-many to mean
-  "not loaded". A cheap to-one (note → `created_by` via JOIN) just always loads.
-- **Errors**: `{"jsonapi", "errors": [{status, code, title, detail, source}]}`; several errors take their
-  shared status, else 400 (all 4xx) / 500. Unknown routes (404), a wrong method (405) and panics (500) are
-  JSON:API errors too (`router.go`). A non-numeric path id is a 404 (it names no resource).
 
 ### Config
 
