@@ -76,6 +76,20 @@ back. `make check_short` (unit tests only) is for iterating; it doesn't replace 
   tests didn't run — don't present `check_short` as `check`.
 - Decision 0014 (`docs/decisions/0014-after-coding-check.md`).
 
+### A piece: done checklist, size, review stop (decision 0016)
+
+- **Done, in this order:** `make check` green → `docs/API.md` updated if the API changed → every agreed
+  behaviour has an outcome-asserting test, reported as a behaviour → test mapping → 100% coverage of new,
+  non-generated code (`make test_coverage`; coverage supports, the mapping answers "is it safe?"). Only then
+  `/code-review`.
+- **One piece = one endpoint, one small feature or one complete bug fix**, with its tests; it builds and passes
+  on its own and is its own commit (committed when the user orders it). Plan a ticket as a list of pieces up
+  front. Not 5-line slivers (each review has a base cost), not the whole ticket as one diff.
+- **Review stops by rule.** Fix now only: a bug in normal use (wrong result, wrong access, broken data), a
+  security hole, a break of the `docs/API.md` contract. Everything else → the backlog
+  (`docs/review-backlog.local.md`, gitignored — read it before a review so declined findings aren't argued
+  again) without a long discussion. One round per piece; a second only to check the fixes of a fix-now finding.
+
 ## Commands
 
 Tooling on PATH: `go`, `sqlc`, `migrate` (golang-migrate CLI), `mockgen` (github.com/golang/mock), `openssl`,

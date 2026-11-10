@@ -25,6 +25,12 @@ Tooling on PATH: `go`, `sqlc`, `migrate` (golang-migrate CLI), `mockgen` (`githu
 It must pass before you commit or open a PR (`make fmt` fixes formatting; `make check_short` skips the
 integration tests while iterating).
 
+**Work in pieces.** One piece is one endpoint, one small feature or one complete bug fix, with its tests, in its
+own commit. It's ready for review when `make check` passes, `docs/API.md` reflects any API change, every agreed
+behaviour has a test that asserts the outcome, and the new code is fully covered (`make test_coverage`). Review
+fixes only bugs in normal use, security holes and API-contract breaks; the rest goes to the backlog. One review
+round per piece (decision 0016).
+
 ```sh
 make check               # gofmt + go vet + lint + go test ./...
 make lint                # staticcheck + golangci-lint only
