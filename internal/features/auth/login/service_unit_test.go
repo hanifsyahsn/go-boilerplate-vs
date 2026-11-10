@@ -131,7 +131,7 @@ func TestService_Login_U(t *testing.T) {
 			svc.(*service).now = func() time.Time { return now }
 
 			got, err := svc.Login(context.Background(), tc.req)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)
@@ -161,7 +161,7 @@ func TestService_Login_FailureLimit_U(t *testing.T) {
 		email, password string
 		user            *sqlc.GetUserForLoginRow
 		readErr         error
-		wantCode        apperror.Code // "" = success
+		wantCode        apperror.Code // zero = success
 	}
 	unknown := func(email string) attempt {
 		return attempt{email: email, password: "x", readErr: sql.ErrNoRows, wantCode: apperror.CodeUnauthorized}
@@ -213,13 +213,13 @@ func TestService_Login_FailureLimit_U(t *testing.T) {
 					}
 					q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(row, a.readErr)
 				}
-				if a.wantCode == "" {
+				if a.wantCode.IsZero() {
 					m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil)
 					sq.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
 				}
 
 				_, err := svc.Login(context.Background(), Request{Email: a.email, Password: a.password})
-				if a.wantCode == "" {
+				if a.wantCode.IsZero() {
 					require.NoError(t, err, "attempt %d", i)
 					continue
 				}

@@ -135,60 +135,146 @@ func TestFieldPointer(t *testing.T) {
 	}
 }
 
-func TestCode_Title(t *testing.T) {
-	tests := []struct {
-		name     string
-		code     Code
-		expected string
-	}{
-		{"internal", CodeInternal, "Internal Server Error"},
-		{"not found", CodeNotFound, "Not Found"},
-		{"conflict", CodeConflict, "Conflict"},
-		{"unauthorized", CodeUnauthorized, "Unauthorized"},
-		{"bad request", CodeBadRequest, "Bad Request"},
-		{"token expired", CodeTokenExpired, "Token Expired"},
-		{"too many requests", CodeTooManyRequests, "Too Many Requests"},
-		{"unprocessable entity", CodeUnprocessableEntity, "Unprocessable Entity"},
-		{"forbidden", CodeForbidden, "Forbidden"},
-		{"method not allowed", CodeMethodNotAllowed, "Method Not Allowed"},
-		{"not acceptable", CodeNotAcceptable, "Not Acceptable"},
-		{"unsupported media type", CodeUnsupportedMedia, "Unsupported Media Type"},
-		{"unknown code defaults to internal", Code("some_unknown_code"), "Internal Server Error"},
-		{"empty code defaults to internal", Code(""), "Internal Server Error"},
-	}
+// genericCodes is every code apperror declares, with the id, status and title
+// the API has always sent for it: changing one is a breaking change for clients.
+var genericCodes = []struct {
+	name   string
+	code   Code
+	id     string
+	status int
+	title  string
+}{
+	{"internal", CodeInternal, "internal_error", http.StatusInternalServerError, "Internal Server Error"},
+	{"not found", CodeNotFound, "not_found", http.StatusNotFound, "Not Found"},
+	{"conflict", CodeConflict, "conflict", http.StatusConflict, "Conflict"},
+	{"unauthorized", CodeUnauthorized, "unauthorized", http.StatusUnauthorized, "Unauthorized"},
+	{"forbidden", CodeForbidden, "forbidden", http.StatusForbidden, "Forbidden"},
+	{"bad request", CodeBadRequest, "bad_request", http.StatusBadRequest, "Bad Request"},
+	{"token expired", CodeTokenExpired, "token_expired", http.StatusUnauthorized, "Token Expired"},
+	{"too many requests", CodeTooManyRequests, "too_many_requests", http.StatusTooManyRequests, "Too Many Requests"},
+	{"unprocessable entity", CodeUnprocessableEntity, "unprocessable_entity", http.StatusUnprocessableEntity, "Unprocessable Entity"},
+	{"invalid request body", CodeInvalidRequestBody, "invalid_request_body", http.StatusUnprocessableEntity, "Unprocessable Entity"},
+	{"method not allowed", CodeMethodNotAllowed, "method_not_allowed", http.StatusMethodNotAllowed, "Method Not Allowed"},
+	{"not acceptable", CodeNotAcceptable, "not_acceptable", http.StatusNotAcceptable, "Not Acceptable"},
+	{"unsupported media type", CodeUnsupportedMedia, "unsupported_media_type", http.StatusUnsupportedMediaType, "Unsupported Media Type"},
+}
 
-	for _, tt := range tests {
+func TestGenericCodes_KeepTheirIDStatusAndTitle_U(t *testing.T) {
+	for _, tt := range genericCodes {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, tt.code.Title())
+			assert.Equal(t, tt.id, tt.code.String())
+			assert.Equal(t, tt.status, tt.code.Status())
+			assert.Equal(t, tt.title, tt.code.Title())
+			assert.False(t, tt.code.IsZero())
 		})
 	}
 }
 
-func TestMapToHTTPStatus(t *testing.T) {
-	tests := []struct {
-		name     string
-		code     Code
-		expected int
+func TestGenericCodes_HaveUniqueIDs_U(t *testing.T) {
+	seen := map[string]string{}
+	for _, tt := range genericCodes {
+		if other, ok := seen[tt.code.String()]; ok {
+			t.Fatalf("%s and %s share the id %q", other, tt.name, tt.code.String())
+		}
+		seen[tt.code.String()] = tt.name
+	}
+}
+
+func TestNewCode_U(t *testing.T) {
+	testCases := []struct {
+		name      string
+		build     func() Code
+		wantID    string
+		wantStat  int
+		wantTitle string
+		wantPanic string
 	}{
-		{"not found", CodeNotFound, http.StatusNotFound},
-		{"conflict", CodeConflict, http.StatusConflict},
-		{"unauthorized", CodeUnauthorized, http.StatusUnauthorized},
-		{"bad request", CodeBadRequest, http.StatusBadRequest},
-		{"too many requests", CodeTooManyRequests, http.StatusTooManyRequests},
-		{"internal", CodeInternal, http.StatusInternalServerError},
-		{"unprocessable", CodeUnprocessableEntity, http.StatusUnprocessableEntity},
-		{"token expired", CodeTokenExpired, http.StatusUnauthorized},
-		{"forbidden", CodeForbidden, http.StatusForbidden},
-		{"method not allowed", CodeMethodNotAllowed, http.StatusMethodNotAllowed},
-		{"not acceptable", CodeNotAcceptable, http.StatusNotAcceptable},
-		{"unsupported media type", CodeUnsupportedMedia, http.StatusUnsupportedMediaType},
-		{"unknown code defaults to 500", Code("some_unknown_code"), http.StatusInternalServerError},
-		{"empty code defaults to 500", Code(""), http.StatusInternalServerError},
+		{
+			name:      "a domain code takes the status it is declared with and its status text as title",
+			build:     func() Code { return NewCode("note_archived", http.StatusConflict) },
+			wantID:    "note_archived",
+			wantStat:  http.StatusConflict,
+			wantTitle: "Conflict",
+		},
+		{
+			name:      "WithTitle overrides the title and keeps id and status",
+			build:     func() Code { return NewCode("token_gone", http.StatusUnauthorized).WithTitle("Token Gone") },
+			wantID:    "token_gone",
+			wantStat:  http.StatusUnauthorized,
+			wantTitle: "Token Gone",
+		},
+		{
+			name:      "an empty id is refused",
+			build:     func() Code { return NewCode("", http.StatusConflict) },
+			wantPanic: "apperror.NewCode: empty id",
+		},
+		{
+			name:      "a success status is refused",
+			build:     func() Code { return NewCode("ok", http.StatusOK) },
+			wantPanic: `apperror.NewCode("ok"): status 200 is not an error status (400–599)`,
+		},
+		{
+			name:      "a status above 599 is refused",
+			build:     func() Code { return NewCode("weird", 600) },
+			wantPanic: `apperror.NewCode("weird"): status 600 is not an error status (400–599)`,
+		},
+		{
+			name:      "an empty override title is refused",
+			build:     func() Code { return NewCode("x", http.StatusConflict).WithTitle("") },
+			wantPanic: `apperror.Code("x").WithTitle: empty title`,
+		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, MapToHTTPStatus(tt.code))
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.wantPanic != "" {
+				require.PanicsWithValue(t, tc.wantPanic, func() { tc.build() })
+				return
+			}
+			c := tc.build()
+			assert.Equal(t, tc.wantID, c.String())
+			assert.Equal(t, tc.wantStat, c.Status())
+			assert.Equal(t, tc.wantTitle, c.Title())
+		})
+	}
+}
+
+func TestCode_Zero_U(t *testing.T) {
+	testCases := []struct {
+		name string
+		code Code
+		want bool
+	}{
+		{"the zero code is zero", Code{}, true},
+		{"a declared code is not zero", CodeNotFound, false},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.code.IsZero())
+		})
+	}
+
+	t.Run("the zero code answers 500 / Internal Server Error with an empty id", func(t *testing.T) {
+		var c Code
+		assert.Equal(t, http.StatusInternalServerError, c.Status())
+		assert.Equal(t, "Internal Server Error", c.Title())
+		assert.Empty(t, c.String())
+	})
+}
+
+func TestCode_Comparable_U(t *testing.T) {
+	testCases := []struct {
+		name string
+		a, b Code
+		want bool
+	}{
+		{"the same code is equal", CodeConflict, CodeConflict, true},
+		{"two codes with the same status are different", CodeConflict, NewCode("note_archived", http.StatusConflict), false},
+		{"a re-declared code with the same id and status is equal", NewCode("conflict", http.StatusConflict), CodeConflict, true},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.a == tc.b)
 		})
 	}
 }
@@ -202,10 +288,10 @@ func TestCode_SafeToThrow(t *testing.T) {
 		{"internal", CodeInternal, "Something went wrong, please try again."},
 		{"too many requests", CodeTooManyRequests, "Too many requests."},
 		{"unauthorized", CodeUnauthorized, "You're not authorized to perform this action."},
-		{"unknown code defaults", Code("some_unknown_code"), "Internal Server Error."},
+		{"a code without its own message defaults", NewCode("some_domain_code", http.StatusConflict), "Internal Server Error."},
 		{"not found defaults (no explicit case)", CodeNotFound, "Internal Server Error."},
 		{"bad request defaults (no explicit case)", CodeBadRequest, "Internal Server Error."},
-		{"empty code defaults", Code(""), "Internal Server Error."},
+		{"the zero code defaults", Code{}, "Internal Server Error."},
 	}
 
 	for _, tt := range tests {

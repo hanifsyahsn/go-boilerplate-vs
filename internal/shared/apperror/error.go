@@ -9,23 +9,83 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-type Code string
+// Code identifies a kind of error for the client (a JSON:API error's "code") and
+// carries its HTTP status and title, so a code can't exist without them: a code
+// is made only with NewCode, at package level next to the logic that returns it.
+//
+//	var CodeNoteArchived = apperror.NewCode("note_archived", http.StatusConflict)
+//
+// The zero Code is an unknown error: 500 / "Internal Server Error". Codes are
+// comparable (==, switch) and safe to share.
+type Code struct {
+	id     string
+	status int
+	title  string
+}
 
-// please create a unique code when client needs a specific logic to handle
-const (
-	CodeInternal            Code = "internal_error"
-	CodeNotFound            Code = "not_found"
-	CodeConflict            Code = "conflict"
-	CodeUnauthorized        Code = "unauthorized"
-	CodeForbidden           Code = "forbidden"
-	CodeBadRequest          Code = "bad_request"
-	CodeTokenExpired        Code = "token_expired"
-	CodeTooManyRequests     Code = "too_many_requests"
-	CodeUnprocessableEntity Code = "unprocessable_entity"
-	CodeInvalidRequestBody  Code = "invalid_request_body"
-	CodeMethodNotAllowed    Code = "method_not_allowed"
-	CodeNotAcceptable       Code = "not_acceptable"
-	CodeUnsupportedMedia    Code = "unsupported_media_type"
+// NewCode makes a code with its HTTP status; the title is http.StatusText(status)
+// unless WithTitle overrides it. It panics on an empty id or a status outside
+// 400–599: codes are declared in package-level vars, so a bad one stops the
+// program at startup.
+func NewCode(id string, status int) Code {
+	if id == "" {
+		panic("apperror.NewCode: empty id")
+	}
+	if status < 400 || status > 599 {
+		panic(fmt.Sprintf("apperror.NewCode(%q): status %d is not an error status (400–599)", id, status))
+	}
+	return Code{id: id, status: status, title: http.StatusText(status)}
+}
+
+// WithTitle returns a copy of c with its own title, for a code whose title isn't
+// its status text (token_expired → 401 "Token Expired").
+func (c Code) WithTitle(title string) Code {
+	if title == "" {
+		panic(fmt.Sprintf("apperror.Code(%q).WithTitle: empty title", c.id))
+	}
+	c.title = title
+	return c
+}
+
+// String is the code's id, the JSON:API error's "code" member.
+func (c Code) String() string { return c.id }
+
+// IsZero reports whether c is the zero Code (no code).
+func (c Code) IsZero() bool { return c == Code{} }
+
+// Status is the code's HTTP status; 500 for the zero Code.
+func (c Code) Status() int {
+	if c.status == 0 {
+		return http.StatusInternalServerError
+	}
+	return c.status
+}
+
+// Title is the code's title (a JSON:API error's "title"); "Internal Server
+// Error" for the zero Code.
+func (c Code) Title() string {
+	if c.title == "" {
+		return http.StatusText(http.StatusInternalServerError)
+	}
+	return c.title
+}
+
+// The generic codes. A domain declares its own the same way, in its own package.
+// Please create a unique code when the client needs a specific logic to handle.
+var (
+	CodeInternal            = NewCode("internal_error", http.StatusInternalServerError)
+	CodeNotFound            = NewCode("not_found", http.StatusNotFound)
+	CodeConflict            = NewCode("conflict", http.StatusConflict)
+	CodeUnauthorized        = NewCode("unauthorized", http.StatusUnauthorized)
+	CodeForbidden           = NewCode("forbidden", http.StatusForbidden)
+	CodeBadRequest          = NewCode("bad_request", http.StatusBadRequest)
+	CodeTokenExpired        = NewCode("token_expired", http.StatusUnauthorized).WithTitle("Token Expired")
+	CodeTooManyRequests     = NewCode("too_many_requests", http.StatusTooManyRequests)
+	CodeUnprocessableEntity = NewCode("unprocessable_entity", http.StatusUnprocessableEntity)
+	CodeInvalidRequestBody  = NewCode("invalid_request_body", http.StatusUnprocessableEntity)
+	CodeMethodNotAllowed    = NewCode("method_not_allowed", http.StatusMethodNotAllowed)
+	CodeNotAcceptable       = NewCode("not_acceptable", http.StatusNotAcceptable)
+	CodeUnsupportedMedia    = NewCode("unsupported_media_type", http.StatusUnsupportedMediaType)
 )
 
 type AppError struct {
@@ -228,72 +288,6 @@ func sizeBound(label, bound, n string, k reflect.Kind) string {
 		return fmt.Sprintf("%s must contain %s %s item(s).", label, bound, n)
 	default:
 		return fmt.Sprintf("%s must be %s %s characters long.", label, bound, n)
-	}
-}
-
-func (c Code) Title() string {
-	switch c {
-	case CodeInternal:
-		return "Internal Server Error"
-	case CodeNotFound:
-		return "Not Found"
-	case CodeConflict:
-		return "Conflict"
-	case CodeUnauthorized:
-		return "Unauthorized"
-	case CodeBadRequest:
-		return "Bad Request"
-	case CodeTokenExpired:
-		return "Token Expired"
-	case CodeTooManyRequests:
-		return "Too Many Requests"
-	case CodeUnprocessableEntity:
-		return "Unprocessable Entity"
-	case CodeForbidden:
-		return "Forbidden"
-	case CodeInvalidRequestBody:
-		return "Unprocessable Entity"
-	case CodeMethodNotAllowed:
-		return "Method Not Allowed"
-	case CodeNotAcceptable:
-		return "Not Acceptable"
-	case CodeUnsupportedMedia:
-		return "Unsupported Media Type"
-	default:
-		return "Internal Server Error"
-	}
-}
-
-func MapToHTTPStatus(code Code) int {
-	switch code {
-	case CodeNotFound:
-		return http.StatusNotFound
-	case CodeConflict:
-		return http.StatusConflict
-	case CodeUnauthorized:
-		return http.StatusUnauthorized
-	case CodeBadRequest:
-		return http.StatusBadRequest
-	case CodeTooManyRequests:
-		return http.StatusTooManyRequests
-	case CodeInternal:
-		return http.StatusInternalServerError
-	case CodeUnprocessableEntity:
-		return http.StatusUnprocessableEntity
-	case CodeTokenExpired:
-		return http.StatusUnauthorized
-	case CodeForbidden:
-		return http.StatusForbidden
-	case CodeInvalidRequestBody:
-		return http.StatusUnprocessableEntity
-	case CodeMethodNotAllowed:
-		return http.StatusMethodNotAllowed
-	case CodeNotAcceptable:
-		return http.StatusNotAcceptable
-	case CodeUnsupportedMedia:
-		return http.StatusUnsupportedMediaType
-	default:
-		return http.StatusInternalServerError
 	}
 }
 

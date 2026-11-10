@@ -39,7 +39,7 @@ func TestService_Get_U(t *testing.T) {
 			q.EXPECT().GetMe(gomock.Any(), userID).Return(tc.row, tc.readErr)
 
 			got, err := NewService(q).Get(context.Background(), userID)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)

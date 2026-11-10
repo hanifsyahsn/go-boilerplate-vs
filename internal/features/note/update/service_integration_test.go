@@ -74,7 +74,7 @@ func TestService_Update_I(t *testing.T) {
 			id := tc.arrange(t, testDB, me, other)
 
 			got, err := NewService(NewStore(testDB)).Update(context.Background(), id, tc.req, me)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)

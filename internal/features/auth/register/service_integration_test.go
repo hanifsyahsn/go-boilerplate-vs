@@ -37,7 +37,7 @@ func TestService_Register_I(t *testing.T) {
 
 			got, err := NewService(sqlc.New(testDB)).Register(context.Background(),
 				Request{Name: "Jane", Email: tc.email, Password: "Passw0rd!"})
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)

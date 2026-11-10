@@ -148,7 +148,7 @@ func WriteErrorsContext(ctx context.Context, w http.ResponseWriter, errs ...*app
 	objects := make([]ErrorObject, 0, len(errs))
 	status := 0
 	for _, e := range errs {
-		s := apperror.MapToHTTPStatus(e.Code)
+		s := e.Code.Status()
 		switch {
 		case status == 0:
 			status = s
@@ -159,7 +159,7 @@ func WriteErrorsContext(ctx context.Context, w http.ResponseWriter, errs ...*app
 		}
 
 		if e.Err != nil {
-			args := []any{"status", s, "code", string(e.Code), "err", e.Err}
+			args := []any{"status", s, "code", e.Code.String(), "err", e.Err}
 			if reqID != "" {
 				args = append(args, requestid.Key, reqID)
 			}
@@ -186,7 +186,7 @@ func WriteErrorsContext(ctx context.Context, w http.ResponseWriter, errs ...*app
 func newErrorObject(e *apperror.AppError, status int) ErrorObject {
 	return ErrorObject{
 		Status: strconv.Itoa(status),
-		Code:   string(e.Code),
+		Code:   e.Code.String(),
 		Title:  e.Code.Title(),
 		Detail: e.Message,
 		Source: e.Source,

@@ -60,7 +60,7 @@ func TestService_List_U(t *testing.T) {
 			tc.stub(q)
 
 			items, meta, err := NewService(q).List(context.Background(), tc.req)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)
@@ -145,7 +145,7 @@ func TestService_Update_U(t *testing.T) {
 			tc.stub(q)
 
 			got, err := NewService(q).Update(context.Background(), tc.userID, UpdateRequest{IsActive: tc.isActive}, 1)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)

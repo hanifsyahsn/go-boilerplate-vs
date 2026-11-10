@@ -34,7 +34,7 @@ func TestGetOwnedNote_U(t *testing.T) {
 			q.EXPECT().GetNoteByID(gomock.Any(), int64(5)).Return(tc.row, tc.readErr)
 
 			got, err := GetOwnedNote(context.Background(), q, 5, 7, "test")
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)
@@ -66,7 +66,7 @@ func TestLockOwnedNote_U(t *testing.T) {
 			q.EXPECT().LockNoteForUpdate(gomock.Any(), int64(5)).Return(tc.row, tc.lockErr)
 
 			err := LockOwnedNote(context.Background(), q, 5, 7, "test")
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)

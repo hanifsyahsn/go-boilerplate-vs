@@ -69,7 +69,7 @@ func TestService_Get_U(t *testing.T) {
 			tc.stub(q)
 
 			got, err := NewService(q).Get(context.Background(), noteID, userID)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)

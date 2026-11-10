@@ -62,7 +62,7 @@ func TestService_Register_U(t *testing.T) {
 
 			svc := &service{querier: q, hash: func(string) (string, error) { return "hashed", tc.hashErr }}
 			got, err := svc.Register(context.Background(), req)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)

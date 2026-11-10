@@ -67,7 +67,7 @@ func TestService_Delete_U(t *testing.T) {
 				func(ctx context.Context, fn func(Querier) error) error { return fn(q) })
 
 			err := NewService(store).Delete(context.Background(), noteID, userID)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)

@@ -57,7 +57,7 @@ func TestService_Get_I(t *testing.T) {
 			id := tc.arrange(t, testDB, me, other)
 
 			got, err := NewService(notesharedsqlc.New(testDB)).Get(context.Background(), id, me)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)

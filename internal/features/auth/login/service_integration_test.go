@@ -66,7 +66,7 @@ func TestService_Login_I(t *testing.T) {
 
 			got, err := NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), maker, time.Minute, time.Hour, untrustedTTL,
 				ratelimit.New(5, time.Minute)).Login(context.Background(), tc.req)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)

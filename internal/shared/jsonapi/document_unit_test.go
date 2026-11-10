@@ -112,6 +112,20 @@ func TestWriteErrors_U(t *testing.T) {
 				`"detail":"Wrong type.","source":{"pointer":"/data/type"}}]}`,
 		},
 		{
+			name:       "a domain-declared code is sent with the status and title it was declared with",
+			errs:       []*apperror.AppError{apperror.New(apperror.NewCode("note_archived", http.StatusConflict), "The note is archived.", nil)},
+			wantStatus: http.StatusConflict,
+			want: `{"jsonapi":{"version":"1.1"},"errors":[{"status":"409","code":"note_archived","title":"Conflict",` +
+				`"detail":"The note is archived."}]}`,
+		},
+		{
+			name:       "a code with its own title keeps it",
+			errs:       []*apperror.AppError{apperror.New(apperror.CodeTokenExpired, "Expired.", nil)},
+			wantStatus: http.StatusUnauthorized,
+			want: `{"jsonapi":{"version":"1.1"},"errors":[{"status":"401","code":"token_expired","title":"Token Expired",` +
+				`"detail":"Expired."}]}`,
+		},
+		{
 			name: "several of one status keep it",
 			errs: []*apperror.AppError{
 				apperror.New(apperror.CodeUnprocessableEntity, "A.", nil),
@@ -243,7 +257,7 @@ func TestWriteErrorsContext_Log_U(t *testing.T) {
 			}
 			WriteErrorsContext(tc.ctx(), w, tc.err)
 
-			require.Equal(t, apperror.MapToHTTPStatus(tc.err.Code), w.Code)
+			require.Equal(t, tc.err.Code.Status(), w.Code)
 			if tc.err.Err != nil {
 				require.NotContains(t, w.Body.String(), tc.err.Err.Error(), "the cause is never in the body")
 			}
@@ -258,7 +272,7 @@ func TestWriteErrorsContext_Log_U(t *testing.T) {
 			require.Equal(t, tc.wantLevel, rec["level"])
 			require.Equal(t, tc.wantMsg, rec["msg"])
 			require.Equal(t, float64(w.Code), rec["status"])
-			require.Equal(t, string(tc.err.Code), rec["code"])
+			require.Equal(t, tc.err.Code.String(), rec["code"])
 			require.Equal(t, tc.err.Err.Error(), rec["err"])
 			if tc.wantID != "" {
 				require.Equal(t, tc.wantID, rec[requestid.Key])

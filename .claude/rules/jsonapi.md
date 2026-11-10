@@ -82,3 +82,7 @@ The whole API is JSON:API 1.1; keep it that way in a new slice.
 - **Errors**: `{"jsonapi", "errors": [{status, code, title, detail, source}]}`; several errors take their
   shared status, else 400 (all 4xx) / 500. Unknown routes (404), a wrong method (405) and panics (500) are
   JSON:API errors too (`router.go`). A non-numeric path id is a 404 (it names no resource).
+- **Error codes** (`apperror.Code`) carry their status and title: a domain declares its own in its package,
+  `var CodeNoteArchived = apperror.NewCode("note_archived", http.StatusConflict)` (`.WithTitle("...")` only when
+  the title isn't the status text), never in `internal/shared/apperror`. Read them with `Status()` / `Title()` /
+  `String()`; the zero `Code{}` is 500. Decision 0015.

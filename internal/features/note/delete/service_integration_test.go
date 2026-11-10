@@ -53,7 +53,7 @@ func TestService_Delete_I(t *testing.T) {
 			id := tc.arrange(t, testDB, me, other)
 
 			err := NewService(NewStore(testDB)).Delete(context.Background(), id, me)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)
@@ -63,7 +63,7 @@ func TestService_Delete_I(t *testing.T) {
 
 			stored := testhelper.GetNote(t, testDB, id)
 			require.Equal(t, tc.wantDeleted, stored.DeletedAt.Valid)
-			if tc.wantDeleted && tc.wantCode == "" {
+			if tc.wantDeleted && tc.wantCode.IsZero() {
 				require.Equal(t, me, stored.DeletedBy.Int64)
 			}
 		})

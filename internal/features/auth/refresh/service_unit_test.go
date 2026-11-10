@@ -278,7 +278,7 @@ func TestService_Refresh_U(t *testing.T) {
 			svc.(*service).now = func() time.Time { return now }
 
 			got, err := svc.Refresh(context.Background(), tc.token)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)

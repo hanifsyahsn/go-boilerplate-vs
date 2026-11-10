@@ -106,7 +106,7 @@ func TestService_Refresh_I(t *testing.T) {
 			}
 
 			got, err := NewService(NewStore(testDB), maker, time.Minute, refreshTTL).Refresh(context.Background(), pair.RefreshToken)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)

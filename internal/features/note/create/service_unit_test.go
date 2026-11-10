@@ -60,7 +60,7 @@ func TestService_Create_U(t *testing.T) {
 			tc.stub(q, sq)
 
 			got, err := NewService(sq, q).Create(context.Background(), tc.req, userID)
-			if tc.wantCode != "" {
+			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)
