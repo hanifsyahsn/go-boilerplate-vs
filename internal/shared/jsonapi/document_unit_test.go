@@ -148,6 +148,12 @@ func TestWriteErrors_U(t *testing.T) {
 				`{"status":"409","code":"conflict","title":"Conflict","detail":"B."}]}`,
 		},
 		{
+			name:       "called with no error: a 500 with an empty errors list, never a 200",
+			errs:       nil,
+			wantStatus: http.StatusInternalServerError,
+			want:       `{"jsonapi":{"version":"1.1"},"errors":[]}`,
+		},
+		{
 			name: "a 5xx among them: 500",
 			errs: []*apperror.AppError{
 				apperror.New(apperror.CodeConflict, "A.", nil),

@@ -288,6 +288,7 @@ func TestCode_SafeToThrow(t *testing.T) {
 		{"internal", CodeInternal, "Something went wrong, please try again."},
 		{"too many requests", CodeTooManyRequests, "Too many requests."},
 		{"unauthorized", CodeUnauthorized, "You're not authorized to perform this action."},
+		{"invalid request body", CodeInvalidRequestBody, "We couldn't process your request. Please check your input and try again, or contact support if the problem continues."},
 		{"a code without its own message defaults", NewCode("some_domain_code", http.StatusConflict), "Internal Server Error."},
 		{"not found defaults (no explicit case)", CodeNotFound, "Internal Server Error."},
 		{"bad request defaults (no explicit case)", CodeBadRequest, "Internal Server Error."},
