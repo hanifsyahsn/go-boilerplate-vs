@@ -49,6 +49,20 @@ Cross-topic map (touching the left → also read the right):
 - **A migration** → *Gotchas* here + the rule of the table's feature (`users` / `refresh_tokens` → `auth.md`)
   + `slice-patterns.md` §1 for an owned, soft-deleted table.
 
+## Decisions and derivatives
+
+This boilerplate is the **spearhead** of the services derived from it. Architecture decisions are made, built and
+tested here first; the derivatives follow. The log is `docs/decisions/` (numbered files, listed in its
+`README.md`). **This repo is public:** the derivatives' names, paths, plans and the adoption tracker live only in
+the gitignored `docs/decisions/DERIVATIVES.local.md` — never put them in a tracked file.
+
+- **A global change** (anything a derivative would also want: security, auth, logging, JSON:API, tooling, test
+  conventions, slice patterns) → a new decision file + a row in the local tracker, and **remind the user at
+  the end to tell the derivatives** (they adopt one repo at a time, on the user's order). Purely local changes
+  (the `notes` example domain, wording) don't need one.
+- Building an *accepted* decision → set its status to built here, keep the tracker's derivative columns as they are.
+- A derivative that adopts → its tracker cells change (and that repo's `CLAUDE.md` records it).
+
 ## Commands
 
 Tooling on PATH: `go`, `sqlc`, `migrate` (golang-migrate CLI), `mockgen` (github.com/golang/mock), `openssl`,

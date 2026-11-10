@@ -69,3 +69,6 @@ desktop.ini
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Private notes (public repo): derivatives tracker
+*.local.md
