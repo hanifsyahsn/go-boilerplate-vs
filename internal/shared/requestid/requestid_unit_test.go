@@ -32,7 +32,8 @@ func TestFromContext_U(t *testing.T) {
 			wantID: "from-gin",
 		},
 		{
-			name:   "a plain string key also works",
+			name: "a plain string key also works",
+			//lint:ignore SA1029 a plain string key is what a *gin.Context exposes
 			ctx:    func() context.Context { return context.WithValue(context.Background(), Key, "untyped") }, //nolint:staticcheck // what a *gin.Context exposes
 			wantID: "untyped",
 		},
@@ -66,7 +67,7 @@ func TestDetach_U(t *testing.T) {
 			parent: func() (context.Context, context.CancelFunc) {
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())
 				c.Set(Key, "from-gin")
-				c.Set(internalsharedconstant.UserIdKey, int64(1))
+				c.Set(internalsharedconstant.UserIDKey, int64(1))
 				c.Set("other", "x")
 				return c, func() {}
 			},

@@ -68,7 +68,7 @@ func TestHandler_List_U(t *testing.T) {
 			tc.stub(svc)
 
 			r := gin.New()
-			r.Use(func(c *gin.Context) { c.Set(internalsharedconstant.UserIdKey, int64(7)); c.Next() })
+			r.Use(func(c *gin.Context) { c.Set(internalsharedconstant.UserIDKey, int64(7)); c.Next() })
 			Route(r.Group("/api"), NewHandler(svc))
 
 			req := httptest.NewRequest(http.MethodGet, "/api/notes"+tc.query, nil)

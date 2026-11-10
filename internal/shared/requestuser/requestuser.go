@@ -28,7 +28,7 @@ func FromContext(ctx context.Context) (int64, bool) {
 	if id, ok := ctx.Value(ctxKey{}).(int64); ok {
 		return id, true
 	}
-	if id, ok := ctx.Value(internalsharedconstant.UserIdKey).(int64); ok {
+	if id, ok := ctx.Value(internalsharedconstant.UserIDKey).(int64); ok {
 		return id, true
 	}
 	return 0, false

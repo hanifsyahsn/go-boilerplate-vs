@@ -39,7 +39,7 @@ func (h *handler) Update(c *gin.Context) {
 		return
 	}
 
-	note, err := h.service.Update(c, id, req, c.GetInt64(internalsharedconstant.UserIdKey))
+	note, err := h.service.Update(c, id, req, c.GetInt64(internalsharedconstant.UserIDKey))
 	if handlerutil.WriteError(c, err, "Update Note Handler") {
 		return
 	}

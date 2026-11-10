@@ -52,7 +52,7 @@ func (maker *MakerES256) CreateToken(user internalshareddto.User, accessTokenDur
 		platformconstant.AudienceKey:       maker.clientID,
 		platformconstant.ExpirationKey:     refreshExp.Unix(),
 		platformconstant.IssuedAtKey:       now.Unix(),
-		platformconstant.JsonWebTokenIDKey: refreshID.String(),
+		platformconstant.JSONWebTokenIDKey: refreshID.String(),
 	}
 	refreshToken, err := jwt.NewWithClaims(jwt.SigningMethodES256, refreshClaims).SignedString(maker.privateKey)
 	if err != nil {
@@ -82,7 +82,7 @@ func (maker *MakerES256) GenerateAccessToken(user internalshareddto.User, access
 		platformconstant.AudienceKey:       maker.clientID,
 		platformconstant.ExpirationKey:     exp.Unix(),
 		platformconstant.IssuedAtKey:       now.Unix(),
-		platformconstant.JsonWebTokenIDKey: uuid.New().String(),
+		platformconstant.JSONWebTokenIDKey: uuid.New().String(),
 	}
 
 	token, err := jwt.NewWithClaims(jwt.SigningMethodES256, claims).SignedString(maker.privateKey)
@@ -127,7 +127,7 @@ func (maker *MakerES256) verify(tokenString, wantType string) (jwt.MapClaims, er
 	if typ, _ := claims[platformconstant.TokenTypeKey].(string); typ != wantType {
 		return nil, fmt.Errorf("token type %q, want %q", typ, wantType)
 	}
-	if jti, _ := claims[platformconstant.JsonWebTokenIDKey].(string); jti == "" {
+	if jti, _ := claims[platformconstant.JSONWebTokenIDKey].(string); jti == "" {
 		return nil, errors.New("token has no jti claim")
 	}
 	if _, err = SubjectID(claims); err != nil {
@@ -150,7 +150,7 @@ func SubjectID(claims jwt.MapClaims) (int64, error) {
 // TokenID reads the `jti` claim as a UUID (every token this maker issues has
 // one). The refresh token's jti is its row in refresh_tokens.
 func TokenID(claims jwt.MapClaims) (uuid.UUID, error) {
-	jti, _ := claims[platformconstant.JsonWebTokenIDKey].(string)
+	jti, _ := claims[platformconstant.JSONWebTokenIDKey].(string)
 	id, err := uuid.Parse(jti)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("token has no valid jti claim: %w", err)

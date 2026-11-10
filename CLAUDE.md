@@ -64,9 +64,22 @@ was ported from or that some service has (had) a gap. Only we, the first party, 
 - Building an *accepted* decision → set its status to built here, keep the tracker's derivative columns as they are.
 - A derivative that adopts → its tracker cells change (and that repo's `CLAUDE.md` records it).
 
+## After coding — `make check` (mandatory, humans and AI)
+
+Every change to Go code ends with **`make check`**: gofmt → go vet → `make lint` (staticcheck + golangci-lint)
+→ `go test ./...` (full suite, Docker). All four must pass before the work is called done, committed or handed
+back. `make check_short` (unit tests only) is for iterating; it doesn't replace the final `make check`.
+- A formatting finding → `make fmt`. A lint finding → fix it, or silence a false positive on its own line with
+  the reason (see *Gotchas*). Never loosen `.golangci.yml` / `staticcheck.conf` to get green without the user's
+  OK.
+- Report the result as it is: which step failed and its output. If Docker isn't available, say the integration
+  tests didn't run — don't present `check_short` as `check`.
+- Decision 0014 (`docs/decisions/0014-after-coding-check.md`).
+
 ## Commands
 
 Tooling on PATH: `go`, `sqlc`, `migrate` (golang-migrate CLI), `mockgen` (github.com/golang/mock), `openssl`,
+`staticcheck` + `golangci-lint` (`make lint_install`, pinned versions in the Makefile),
 and a running Docker engine for integration tests (testcontainers). For `make sec` also `gosec`, `govulncheck`,
 `gitleaks` (`make sec_install`, pinned versions in the Makefile) and `semgrep` (`pipx install semgrep`, or
 `pip install --user semgrep` and put its Scripts / bin folder on PATH). `make` reads `.env` and exports it.
@@ -84,6 +97,11 @@ make sec                       # gosec (medium+, no generated code), semgrep (p/
                                # gitleaks (git history); runs all four, fails at the end if any failed.
                                # Local only: `make sec SEC_PASSWORD=imsureitislocal`, typed on the command
                                # line (a value from .env / the environment is refused)
+
+make check                     # AFTER CODING: gofmt, go vet, lint, go test ./... (full); fails if any step did
+make check_short               # same with go test -short (no Docker) — for iterating, not the final run
+make lint                      # staticcheck (staticcheck.conf) + golangci-lint (.golangci.yml)
+make fmt                       # apply gofmt + goimports
 
 go test ./... -short           # unit tests only (no Docker)
 go test ./...                  # full suite; TestMain starts a migrated postgres:17 container per package
@@ -192,6 +210,14 @@ See `.env.example`.
   `// nosemgrep: <rule-id>` on the line before. Never a blanket exclude. Current ones: the cookie names and the
   login message (G101), the configurable `Secure` cookie (G124 + semgrep), pagination's bounded int32 offset
   (G115).
+- **Lint (`make lint`) stays green**, same rule: fix, or silence on its own line with the reason —
+  `//nolint:<linter> // why` (golangci-lint; `nolintlint` rejects one without a linter name or a reason),
+  `//lint:ignore <check> why` on the line before (standalone staticcheck; a golangci `//nolint` doesn't reach it).
+  staticcheck runs every check but ST1000. Current ones: logout returns nil for an unusable token (nilerr),
+  refresh's `%v` on a possibly-nil err (errorlint), the plain string context key test (SA1029). Scoped config
+  exclusions: noctx in tests / `testhelper`, testifylint `float-compare` (JSON numbers are float64).
+- **Go files are LF** (`*.go text eol=lf` in `.gitattributes`): with `core.autocrlf=true` a CRLF checkout fails
+  gofmt. Writing a file from Python on Windows emits CRLF — use `newline=''` or the editor tools.
 - **Go version = go.mod `toolchain` + the Dockerfile builder image, bumped together** (`go1.26.10` /
   `golang:1.26.10-alpine`). `GOTOOLCHAIN=auto` makes the local `go` download and use the `toolchain` version for
   this module only; `build.sh` doesn't pull, so the image is pinned rather than a floating `1.26` tag (which

@@ -33,7 +33,7 @@ func (h *handler) Delete(c *gin.Context) {
 		return
 	}
 
-	err := h.service.Delete(c, id, c.GetInt64(internalsharedconstant.UserIdKey))
+	err := h.service.Delete(c, id, c.GetInt64(internalsharedconstant.UserIDKey))
 	if handlerutil.WriteError(c, err, "Delete Note Handler") {
 		return
 	}

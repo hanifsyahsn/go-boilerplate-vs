@@ -19,9 +19,15 @@ make run                                   # http://localhost:8080
 ```
 
 Tooling on PATH: `go`, `sqlc`, `migrate` (golang-migrate CLI), `mockgen` (`github.com/golang/mock`), `openssl`,
-and Docker (for Postgres and the integration tests).
+`staticcheck` + `golangci-lint` (`make lint_install`), and Docker (for Postgres and the integration tests).
+
+**After coding, always run `make check`** — gofmt, go vet, staticcheck + golangci-lint, then the full test suite.
+It must pass before you commit or open a PR (`make fmt` fixes formatting; `make check_short` skips the
+integration tests while iterating).
 
 ```sh
+make check               # gofmt + go vet + lint + go test ./...
+make lint                # staticcheck + golangci-lint only
 go test ./... -short     # unit tests only, no Docker
 go test ./...            # + integration tests (testcontainers starts Postgres)
 make sqlc                # regenerate */sqlc after editing query/*.sql or a migration

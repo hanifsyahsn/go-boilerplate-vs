@@ -33,7 +33,7 @@ func (h *handler) Get(c *gin.Context) {
 		return
 	}
 
-	item, err := h.service.Get(c, c.GetInt64(internalsharedconstant.UserIdKey))
+	item, err := h.service.Get(c, c.GetInt64(internalsharedconstant.UserIDKey))
 	if handlerutil.WriteError(c, err, "Me Handler") {
 		return
 	}

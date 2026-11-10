@@ -72,7 +72,7 @@ func AccessTokenMiddleware(jwt jwttoken.M, users UserStatusReader) gin.HandlerFu
 			return
 		}
 
-		c.Set(internalsharedconstant.UserIdKey, userID)
+		c.Set(internalsharedconstant.UserIDKey, userID)
 		// The request context too: the access log, the error writer and other
 		// middlewares log with c.Request.Context(), which doesn't see gin keys.
 		c.Request = c.Request.WithContext(requestuser.With(c.Request.Context(), userID))

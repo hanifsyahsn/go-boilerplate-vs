@@ -116,7 +116,7 @@ func fieldLabel(obj interface{}, namespace string) string {
 	t := reflect.TypeOf(obj)
 
 	for i, part := range parts {
-		if t.Kind() == reflect.Ptr {
+		if t.Kind() == reflect.Pointer {
 			t = t.Elem()
 		}
 		if t.Kind() != reflect.Struct {

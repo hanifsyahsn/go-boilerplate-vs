@@ -32,7 +32,7 @@ func (h *handler) Get(c *gin.Context) {
 		return
 	}
 
-	note, err := h.service.Get(c, id, c.GetInt64(internalsharedconstant.UserIdKey))
+	note, err := h.service.Get(c, id, c.GetInt64(internalsharedconstant.UserIDKey))
 	if handlerutil.WriteError(c, err, "Detail Note Handler") {
 		return
 	}

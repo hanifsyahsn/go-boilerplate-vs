@@ -27,7 +27,7 @@ func (h *handler) List(c *gin.Context) {
 		return
 	}
 
-	notes, meta, err := h.service.List(c, requestFromQuery(q), c.GetInt64(internalsharedconstant.UserIdKey))
+	notes, meta, err := h.service.List(c, requestFromQuery(q), c.GetInt64(internalsharedconstant.UserIDKey))
 	if handlerutil.WriteError(c, err, "List Note Handler") {
 		return
 	}

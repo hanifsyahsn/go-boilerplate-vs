@@ -31,7 +31,6 @@ func PtrFromNullString(n sql.NullString) *string {
 	return &s
 }
 
-// NullInt64 wraps an int64 as an always-valid sql.NullInt64.
 // PtrFromNullInt64 returns nil for an invalid NullInt64, else a pointer to its value.
 func PtrFromNullInt64(n sql.NullInt64) *int64 {
 	if !n.Valid {
@@ -41,6 +40,7 @@ func PtrFromNullInt64(n sql.NullInt64) *int64 {
 	return &v
 }
 
+// NullInt64 wraps an int64 as an always-valid sql.NullInt64.
 func NullInt64(i int64) sql.NullInt64 {
 	return sql.NullInt64{Int64: i, Valid: true}
 }

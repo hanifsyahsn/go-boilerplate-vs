@@ -57,7 +57,7 @@ func (h *handler) Update(c *gin.Context) {
 		return
 	}
 
-	item, err := h.service.Update(c, id, req, c.GetInt64(internalsharedconstant.UserIdKey))
+	item, err := h.service.Update(c, id, req, c.GetInt64(internalsharedconstant.UserIDKey))
 	if handlerutil.WriteError(c, err, "Admin User Handler Update") {
 		return
 	}

@@ -136,7 +136,7 @@ func TestHandler_U(t *testing.T) {
 			tc.stub(svc)
 
 			r := gin.New()
-			r.Use(func(c *gin.Context) { c.Set(internalsharedconstant.UserIdKey, int64(1)); c.Next() })
+			r.Use(func(c *gin.Context) { c.Set(internalsharedconstant.UserIDKey, int64(1)); c.Next() })
 			Route(r.Group("/api/admin"), NewHandler(svc))
 
 			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))

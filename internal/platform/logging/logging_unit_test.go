@@ -202,7 +202,7 @@ func TestHandler_UserID_U(t *testing.T) {
 
 	ginCtx := func() context.Context {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
-		c.Set(internalsharedconstant.UserIdKey, int64(7))
+		c.Set(internalsharedconstant.UserIDKey, int64(7))
 		return c
 	}
 

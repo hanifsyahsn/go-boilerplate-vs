@@ -20,6 +20,8 @@ Statuses: **built** = implemented in the boilerplate · **accepted** = agreed, n
 | [0010](0010-api-key.md) | API-key middleware for service-to-service calls | accepted |
 | [0011](0011-ops-notifier.md) | Ops alerts through a `Notifier` interface (Telegram first) | accepted |
 | [0012](0012-patterns-in-slice-patterns.md) | Recurring derivative patterns go into `slice-patterns.md` | accepted |
+| [0013](0013-lint.md) | Lint: staticcheck + golangci-lint (`make lint`) | built |
+| [0014](0014-after-coding-check.md) | After coding: `make check` (gofmt, go vet, lint, go test), humans and AI | built |
 
 The list of derivatives, where each decision came from and the adoption tracker are kept out of this public repo,
 in a gitignored `DERIVATIVES.local.md` next to this file on the maintainer's machine.

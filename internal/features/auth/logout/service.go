@@ -35,12 +35,12 @@ func (s *service) Logout(ctx context.Context, refreshToken string) error {
 
 	claims, err := s.tokenMaker.VerifyRefreshToken(refreshToken)
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // an invalid / expired token has nothing to revoke: logout still succeeds
 	}
 	jti, err := jwttoken.TokenID(claims)
 	if err != nil {
 		// defensive: VerifyRefreshToken already checked jti
-		return nil
+		return nil //nolint:nilerr // unreachable after VerifyRefreshToken; logout still succeeds
 	}
 
 	if err = s.authSharedQuerier.RevokeRefreshTokenFamily(ctx, jti); err != nil {

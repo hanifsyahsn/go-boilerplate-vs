@@ -34,7 +34,7 @@ func (h *handler) Create(c *gin.Context) {
 		return
 	}
 
-	note, err := h.service.Create(c, req, c.GetInt64(internalsharedconstant.UserIdKey))
+	note, err := h.service.Create(c, req, c.GetInt64(internalsharedconstant.UserIDKey))
 	if handlerutil.WriteError(c, err, "Create Note Handler") {
 		return
 	}

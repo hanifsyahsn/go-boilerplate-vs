@@ -123,7 +123,7 @@ func TestHandler_Create_U(t *testing.T) {
 			tc.stub(svc)
 
 			r := gin.New()
-			r.Use(func(c *gin.Context) { c.Set(internalsharedconstant.UserIdKey, int64(7)); c.Next() })
+			r.Use(func(c *gin.Context) { c.Set(internalsharedconstant.UserIDKey, int64(7)); c.Next() })
 			Route(r.Group("/api"), NewHandler(svc))
 
 			req := httptest.NewRequest(http.MethodPost, "/api/notes"+tc.query, strings.NewReader(tc.body))

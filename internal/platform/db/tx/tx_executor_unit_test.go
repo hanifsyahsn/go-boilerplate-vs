@@ -11,6 +11,9 @@ import (
 )
 
 func TestTx_Executor(t *testing.T) {
+	errFn := errors.New("something went wrong")
+	errRollback := errors.New("rollback failed")
+
 	// identity factory: Q = *sql.Tx, so the "queries" object IS the tx itself.
 	// Keeps this test self-contained without depending on any generated sqlc package.
 	identityFactory := func(tx *sql.Tx) *sql.Tx {
@@ -83,24 +86,25 @@ func TestTx_Executor(t *testing.T) {
 			},
 		},
 		{
-			name: "failed - fn(tx) failed, rollback also fails",
+			name: "fn and rollback both fail: the error still wraps both, so errors.Is finds the fn error",
 			callSetup: func(ctx context.Context, db DBExecutor) error {
 				return Exec(
 					ctx,
 					db,
 					identityFactory,
 					func(tx *sql.Tx) error {
-						return errors.New("something went wrong")
+						return errFn
 					},
 				)
 			},
 			mockSetup: func(sqlMock sqlmock.Sqlmock) {
 				sqlMock.ExpectBegin()
-				sqlMock.ExpectRollback().WillReturnError(errors.New("rollback failed"))
+				sqlMock.ExpectRollback().WillReturnError(errRollback)
 			},
 			expectedResult: func(err error) {
-				require.ErrorContains(t, err, "tx err")
-				require.ErrorContains(t, err, "rb err")
+				require.EqualError(t, err, "tx err: something went wrong, rb err: rollback failed")
+				require.ErrorIs(t, err, errFn)
+				require.ErrorIs(t, err, errRollback)
 			},
 		},
 	}

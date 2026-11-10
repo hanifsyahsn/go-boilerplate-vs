@@ -104,7 +104,7 @@ func TestAccessLog_U(t *testing.T) {
 			r.Use(RequestID(), AccessLog())
 			r.GET("/x", func(c *gin.Context) {
 				if tc.userID != 0 {
-					c.Set(internalsharedconstant.UserIdKey, tc.userID)
+					c.Set(internalsharedconstant.UserIDKey, tc.userID)
 					if !tc.ginOnly {
 						c.Request = c.Request.WithContext(requestuser.With(c.Request.Context(), tc.userID))
 					}

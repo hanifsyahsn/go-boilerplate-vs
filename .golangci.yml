@@ -1,0 +1,53 @@
+# golangci-lint v2 — `make lint` (also runs staticcheck on its own; see staticcheck.conf).
+# Version pinned in the Makefile (GOLANGCI_LINT_VERSION). A finding is fixed, or a false positive is
+# silenced on its own line with the reason: `//nolint:<linter> // why`. Never a blanket exclude.
+# Security linters (gosec) are not here: `make sec` runs them.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose       # an http.Response body that is never closed
+    - copyloopvar     # loop-variable copies that Go 1.22+ makes useless
+    - errorlint       # errors compared with == / type-asserted instead of errors.Is / As
+    - misspell
+    - nilerr          # `if err != nil { return nil }`
+    - noctx           # HTTP / SQL calls without a context
+    - nolintlint      # a //nolint without a linter name or a reason
+    - rowserrcheck    # sql.Rows.Err() never checked
+    - sloglint        # log/slog: *Context variants, no mixed key-value / attr styles
+    - sqlclosecheck   # sql.Rows / Stmt never closed
+    - testifylint     # require / assert misuse
+    - unconvert       # a conversion to the type the value already has
+    - usestdlibvars   # http.MethodGet / http.StatusOK instead of literals
+  settings:
+    staticcheck:
+      checks: ["all", "-ST1000"] # same set as staticcheck.conf; ST1000 = package comment on every package
+    sloglint:
+      context: scope # a ctx in scope → the *Context variant (rules/logging.md)
+      no-mixed-args: true
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    errorlint:
+      errorf: true
+    testifylint:
+      disable:
+        - float-compare # JSON numbers decode to float64; the tests compare exact integers on purpose
+  exclusions:
+    generated: strict # sqlc and mockgen output carry "Code generated ... DO NOT EDIT."
+    rules:
+      # httptest requests and test seeding don't need a caller's context; production code still does.
+      - path: (_test\.go|internal/shared/testhelper/)
+        linters: [noctx]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: strict

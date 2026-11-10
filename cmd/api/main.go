@@ -73,7 +73,7 @@ func main() {
 	if err != nil {
 		logging.Fatal("open db failed", "err", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	conn.SetMaxOpenConns(25)
 	conn.SetMaxIdleConns(25)

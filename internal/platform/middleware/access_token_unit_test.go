@@ -102,7 +102,7 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 			r.Use(AccessTokenMiddleware(m, q))
 			r.GET("/", func(c *gin.Context) {
 				reqUser, _ := requestuser.FromContext(c.Request.Context())
-				c.String(http.StatusOK, "%d:%s|request ctx:%d", c.GetInt64(internalsharedconstant.UserIdKey),
+				c.String(http.StatusOK, "%d:%s|request ctx:%d", c.GetInt64(internalsharedconstant.UserIDKey),
 					c.GetString(internalsharedconstant.UserRoleKey), reqUser)
 			})
 

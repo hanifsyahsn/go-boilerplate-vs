@@ -71,7 +71,7 @@ func TestAppError_Unwrap_U(t *testing.T) {
 			require.Equal(t, tc.wantIs, errors.Is(tc.err, tc.target))
 
 			var appErr *AppError
-			require.True(t, errors.As(tc.err, &appErr))
+			require.ErrorAs(t, tc.err, &appErr)
 			require.Equal(t, tc.wantCode, appErr.Code, "the outermost AppError")
 		})
 	}
@@ -264,8 +264,8 @@ func TestValidatorError(t *testing.T) {
 	err := v.Struct(payload)
 	require.Error(t, err)
 
-	valErrs, ok := err.(validator.ValidationErrors)
-	require.True(t, ok)
+	var valErrs validator.ValidationErrors
+	require.ErrorAs(t, err, &valErrs)
 
 	results := ValidatorError(valErrs, payload)
 	require.Len(t, results, len(valErrs))

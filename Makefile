@@ -98,6 +98,47 @@ sec_install:
 	go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	go install github.com/zricethezav/gitleaks/v8@$(GITLEAKS_VERSION)
 
+# Lint (static analysis + formatting). Runs anywhere, no guard: no secrets, no outbound calls.
+# staticcheck runs on its own (staticcheck.conf) and inside golangci-lint (.golangci.yml, same checks);
+# both run even when the first fails, and the target fails at the end if either did. A finding is fixed,
+# or a false positive silenced on its line with a reason: `//nolint:<linter> // why` (golangci-lint),
+# `//lint:ignore <check> why` on the line before (staticcheck). `make fmt` applies gofmt + goimports.
+# Tools: `make lint_install` (pinned; golangci-lint must be built with a Go >= go.mod's).
+STATICCHECK_VERSION ?= v0.8.2
+GOLANGCI_LINT_VERSION ?= v2.15.0
+
+lint:
+	@status=0; \
+	echo "== staticcheck"; staticcheck ./... || status=1; \
+	echo "== golangci-lint"; golangci-lint run ./... || status=1; \
+	if [ $$status -ne 0 ]; then echo "== lint: FAILED (see above)"; else echo "== lint: all clean"; fi; \
+	exit $$status
+
+fmt:
+	golangci-lint fmt ./...
+
+# After coding — the standard, for humans and AI alike (decision 0014): gofmt, go vet, lint, go test, in that
+# order. Every step runs; the target fails at the end if any did. `make check` runs the full test suite
+# (Docker); `make check_short` only the unit tests, for quick iterations — `make check` before calling it done.
+CHECK_TEST_FLAGS ?=
+
+check:
+	@status=0; \
+	echo "== gofmt"; out=$$(gofmt -l $$(git ls-files '*.go')); \
+	if [ -n "$$out" ]; then echo "$$out"; echo "not gofmt-ed: run make fmt"; status=1; fi; \
+	echo "== go vet"; go vet ./... || status=1; \
+	echo "== lint"; "$(MAKE)" --no-print-directory lint || status=1; \
+	echo "== go test $(CHECK_TEST_FLAGS)"; DOCKER_HOST=$(DOCKER_HOST) go test -count=1 $(CHECK_TEST_FLAGS) ./... || status=1; \
+	if [ $$status -ne 0 ]; then echo "== check: FAILED (see above)"; else echo "== check: all clean"; fi; \
+	exit $$status
+
+check_short:
+	@"$(MAKE)" --no-print-directory check CHECK_TEST_FLAGS=-short
+
+lint_install:
+	go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
 # Run
 run:
 	go run cmd/api/main.go
@@ -109,4 +150,4 @@ ec_private:
 ec_public:
 	openssl ec -in internal/platform/config/ec-private.pem -pubout -out internal/platform/config/ec-public.pem
 
-.PHONY: sec sec_install test test_short test_only test_package test_coverage coverage_report_view mock sqlc migrate_create migrate_up migrate_up1 migrate_down migrate_down1 migrate_dirty run ec_private ec_public
+.PHONY: check check_short lint fmt lint_installsec sec_install test test_short test_only test_package test_coverage coverage_report_view mock sqlc migrate_create migrate_up migrate_up1 migrate_down migrate_down1 migrate_dirty run ec_private ec_public

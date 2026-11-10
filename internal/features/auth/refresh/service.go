@@ -125,7 +125,7 @@ func (s *service) Refresh(ctx context.Context, refreshToken string) (Result, err
 		user, err := q.GetUserForRefresh(ctx, userID)
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && !user.IsActive) {
 			return apperror.New(apperror.CodeUnauthorized, "Your account is no longer active.",
-				fmt.Errorf("GetUserForRefresh(%d) (%s): missing or inactive: %v", userID, feature, err))
+				fmt.Errorf("GetUserForRefresh(%d) (%s): missing or inactive: %v", userID, feature, err)) //nolint:errorlint // err is nil for an inactive user; %w would print %!w(<nil>)
 		}
 		if err != nil {
 			return internalError(fmt.Errorf("GetUserForRefresh(%d) (%s): %w", userID, feature, err))

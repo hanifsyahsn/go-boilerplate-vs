@@ -65,9 +65,9 @@ func TestCookies_U(t *testing.T) {
 			require.True(t, got.Secure)
 			require.Equal(t, http.SameSiteLaxMode, got.SameSite)
 			if tc.wantDelete {
-				require.Less(t, got.MaxAge, 0)
+				require.Negative(t, got.MaxAge)
 			} else {
-				require.Greater(t, got.MaxAge, 0)
+				require.Positive(t, got.MaxAge)
 			}
 		})
 	}

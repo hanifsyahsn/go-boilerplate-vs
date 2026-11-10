@@ -161,7 +161,7 @@ q, ok := handlerutil.ParseQuery(c, shared.NotesRT, shared.NoteQuery)
 if !ok { return }
 var req Request
 if !handlerutil.BindResource(c, handlerutil.ResourceSpec{Type: shared.NotesRT}, &req) { return }
-note, err := h.service.Create(c, req, c.GetInt64(internalsharedconstant.UserIdKey))
+note, err := h.service.Create(c, req, c.GetInt64(internalsharedconstant.UserIDKey))
 if handlerutil.WriteError(c, err, "Create Note Handler") { return }
 c.Header("Location", path.Join(c.Request.URL.Path, note.ID))
 handlerutil.WriteData(c, http.StatusCreated, shared.NotesRT, note, q, nil)
@@ -377,7 +377,7 @@ gomock.InOrder(
 
 ```go
 r := gin.New()
-r.Use(func(c *gin.Context) { c.Set(internalsharedconstant.UserIdKey, int64(7)); c.Next() })
+r.Use(func(c *gin.Context) { c.Set(internalsharedconstant.UserIDKey, int64(7)); c.Next() })
 Route(r.Group("/api"), NewHandler(svc))
 ```
 

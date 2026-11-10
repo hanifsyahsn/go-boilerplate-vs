@@ -9,7 +9,7 @@ const (
 	ExpirationKey     = "exp"
 	IssuedAtKey       = "iat"
 	IssuerKey         = "iss"
-	JsonWebTokenIDKey = "jti"
+	JSONWebTokenIDKey = "jti"
 	AudienceKey       = "aud"
 	// TokenTypeKey tells an access token from a refresh token, so a refresh
 	// token can't be replayed as an access token (and vice versa).
