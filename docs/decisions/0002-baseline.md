@@ -1,6 +1,6 @@
 # 0002 — Baseline
 
-Status: built (everything below exists in the boilerplate as of commit 953708c)
+Status: built (everything below exists in the boilerplate as of commit 19268e6)
 
 What a derivative follows from the boilerplate today. Details live in `CLAUDE.md` and `.claude/rules/`.
 

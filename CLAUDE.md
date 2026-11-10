@@ -54,7 +54,8 @@ Cross-topic map (touching the left → also read the right):
 This boilerplate is the **spearhead** of the services derived from it. Architecture decisions are made, built and
 tested here first; the derivatives follow. The log is `docs/decisions/` (numbered files, listed in its
 `README.md`). **This repo is public:** the derivatives' names, paths, plans and the adoption tracker live only in
-the gitignored `docs/decisions/DERIVATIVES.local.md` — never put them in a tracked file.
+the gitignored `docs/decisions/DERIVATIVES.local.md` — never put them in a tracked file, nor where a piece of code
+was ported from or that some service has (had) a gap. Only we, the first party, know the derivatives' weaknesses.
 
 - **A global change** (anything a derivative would also want: security, auth, logging, JSON:API, tooling, test
   conventions, slice patterns) → a new decision file + a row in the local tracker, and **remind the user at
