@@ -15,21 +15,26 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+// SetupTestDB starts a migrated Postgres container; a failed start is retried
+// (startContainer — the packages of one `go test ./...` race for the Ryuk
+// reaper).
 func SetupTestDB(ctx context.Context, migrationPath string) (*sql.DB, func()) {
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "postgres:17",
-			ExposedPorts: []string{"5432/tcp"},
-			Env: map[string]string{
-				"POSTGRES_USER":     "test",
-				"POSTGRES_PASSWORD": "test",
-				"POSTGRES_DB":       "test",
+	container, err := startContainer("postgres", func() (testcontainers.Container, error) {
+		return testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+			ContainerRequest: testcontainers.ContainerRequest{
+				Image:        "postgres:17",
+				ExposedPorts: []string{"5432/tcp"},
+				Env: map[string]string{
+					"POSTGRES_USER":     "test",
+					"POSTGRES_PASSWORD": "test",
+					"POSTGRES_DB":       "test",
+				},
+				WaitingFor: wait.ForLog("database system is ready to accept connections").
+					WithOccurrence(2).
+					WithStartupTimeout(60 * time.Second),
 			},
-			WaitingFor: wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(60 * time.Second),
-		},
-		Started: true,
+			Started: true,
+		})
 	})
 	if err != nil {
 		log.Fatalf("failed to start container: %v", err)

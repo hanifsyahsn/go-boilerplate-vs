@@ -12,6 +12,7 @@ import (
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	platformconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/testhelper"
 	"github.com/stretchr/testify/require"
@@ -63,7 +64,8 @@ func TestService_Login_I(t *testing.T) {
 			defer testhelper.Truncate(t, testDB)
 			userID := testhelper.SeedUser(t, testDB, tc.seed)
 
-			got, err := NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), maker, time.Minute, time.Hour, untrustedTTL).Login(context.Background(), tc.req)
+			got, err := NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), maker, time.Minute, time.Hour, untrustedTTL,
+				ratelimit.New(5, time.Minute)).Login(context.Background(), tc.req)
 			if tc.wantCode != "" {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)

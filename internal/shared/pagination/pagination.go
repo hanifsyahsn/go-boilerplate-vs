@@ -2,9 +2,16 @@
 // paginated list endpoint, and the "meta" envelope it answers with.
 package pagination
 
+import "math"
+
 const (
 	DefaultPageSize = 20
 	MaxPageSize     = 100
+	// MaxPage is the highest page[number] used: the SQL offset is an int32,
+	// and (MaxPage-1) * MaxPageSize is the largest multiple that still fits,
+	// so a huge page[number] can't wrap the offset negative (a Postgres
+	// error → 500). Any page past the data is empty anyway.
+	MaxPage = math.MaxInt32/MaxPageSize + 1
 )
 
 // Request is embedded in a list endpoint's query struct. Out-of-range values
@@ -21,6 +28,9 @@ func (r Request) Resolve() (page, pageSize int, limit, offset int32) {
 	if page < 1 {
 		page = 1
 	}
+	if page > MaxPage {
+		page = MaxPage
+	}
 
 	pageSize = r.PageSize
 	if pageSize < 1 {
@@ -30,7 +40,9 @@ func (r Request) Resolve() (page, pageSize int, limit, offset int32) {
 		pageSize = MaxPageSize
 	}
 
-	return page, pageSize, int32(pageSize), int32((page - 1) * pageSize)
+	// Both fit: pageSize <= MaxPageSize, and (page-1)*pageSize <=
+	// (MaxPage-1)*MaxPageSize <= math.MaxInt32 (also in a 32-bit int).
+	return page, pageSize, int32(pageSize), int32((page - 1) * pageSize) // #nosec G115 -- bounded above
 }
 
 // Meta is the pagination envelope, written under the response "meta" object.

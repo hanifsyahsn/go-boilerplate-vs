@@ -36,6 +36,7 @@ import (
 	updatenote "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/update"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/testhelper"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/validation"
 	"github.com/stretchr/testify/require"
@@ -53,6 +54,9 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	tokenMaker := jwttoken.NewTokenMakerES256(key, &key.PublicKey, "test-client", "test-issuer")
 
 	const accessTTL, refreshTTL, untrustedTTL = 15 * time.Minute, 24 * time.Hour, 24 * time.Hour
+	// testLimit keeps the rate limits out of the way: these flows log in many
+	// times from httptest's one address. The limits themselves are unit-tested.
+	const testLimit = 1000
 	cookies := authshared.CookieConfig{}
 	authSharedQuerier := authsharedsqlc.New(db)
 	noteSharedQuerier := notesharedsqlc.New(db)
@@ -60,7 +64,8 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	handlers := Handlers{
 		Register: authregister.NewHandler(authregister.NewService(authregistersqlc.New(db))),
 		Login: authlogin.NewHandler(
-			authlogin.NewService(authloginsqlc.New(db), authSharedQuerier, tokenMaker, accessTTL, refreshTTL, untrustedTTL),
+			authlogin.NewService(authloginsqlc.New(db), authSharedQuerier, tokenMaker, accessTTL, refreshTTL, untrustedTTL,
+				ratelimit.New(testLimit, time.Minute)),
 			cookies,
 		),
 		Refresh: authrefresh.NewHandler(
@@ -80,7 +85,10 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 		AdminUser: adminuser.NewHandler(adminuser.NewService(adminusersqlc.New(db))),
 	}
 
-	return NewRouter("test-version", tokenMaker, middlewaresqlc.New(db), handlers)
+	r, err := NewRouter("test-version", tokenMaker, middlewaresqlc.New(db), handlers,
+		Security{AuthIPLimit: ratelimit.New(testLimit, time.Minute)})
+	require.NoError(t, err)
+	return r
 }
 
 // apiClient sends JSON:API requests to the router in-process.

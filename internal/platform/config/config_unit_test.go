@@ -40,8 +40,20 @@ func TestLoadConfig_Env_U(t *testing.T) {
 				require.Empty(t, c.CookieDomain)
 				require.Equal(t, "text", c.LogFormat)
 				require.Equal(t, "info", c.LogLevel)
+				require.Empty(t, c.TrustedProxies, "no proxy trusted by default")
 			},
 		},
+		{
+			name:     "trusted proxies read as a trimmed list of IPs and CIDRs",
+			override: map[string]string{"TRUSTED_PROXIES": " 10.0.0.1, 192.168.0.0/16 ,,2001:db8::1"},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Equal(t, []string{"10.0.0.1", "192.168.0.0/16", "2001:db8::1"}, c.TrustedProxies)
+			},
+		},
+		{name: "a trusted proxy that is neither an IP nor a CIDR", override: map[string]string{"TRUSTED_PROXIES": "10.0.0.1,proxy.local"},
+			wantErr: `TRUSTED_PROXIES: "proxy.local" is not an IP or a CIDR`},
+		{name: "a trusted proxy CIDR with a bad mask", override: map[string]string{"TRUSTED_PROXIES": "10.0.0.0/33"},
+			wantErr: `TRUSTED_PROXIES: "10.0.0.0/33"`},
 		{
 			name:     "log format and level read",
 			override: map[string]string{"LOG_FORMAT": "json", "LOG_LEVEL": "debug"},
@@ -98,6 +110,7 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			t.Setenv("COOKIE_DOMAIN", "")
 			t.Setenv("LOG_FORMAT", "")
 			t.Setenv("LOG_LEVEL", "")
+			t.Setenv("TRUSTED_PROXIES", "")
 			for k, v := range tc.override {
 				t.Setenv(k, v)
 			}

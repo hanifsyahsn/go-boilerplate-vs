@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
@@ -44,6 +46,12 @@ type Config struct {
 	// LogLevel is the minimum level logged: debug, info (default), warn or
 	// error.
 	LogLevel string `mapstructure:"LOG_LEVEL"`
+	// TrustedProxies are the reverse proxies (IPs or CIDRs) whose
+	// X-Forwarded-For / X-Real-IP gin believes when it works out the client's
+	// IP (the per-IP rate limit, the access log). Optional, comma separated;
+	// empty trusts no proxy, so the client IP is the connection's address.
+	// Behind a proxy, list it — otherwise every client shares its IP.
+	TrustedProxies []string `mapstructure:"TRUSTED_PROXIES"`
 }
 
 // DefaultRefreshTokenDuration is REFRESH_TOKEN_DURATION when unset: 7 days.
@@ -122,6 +130,7 @@ func LoadConfig(path string) (Config, error) {
 		CookieDomain:             v.GetString("COOKIE_DOMAIN"),
 		LogFormat:                getStringEnv(v, "LOG_FORMAT", DefaultLogFormat),
 		LogLevel:                 getStringEnv(v, "LOG_LEVEL", DefaultLogLevel),
+		TrustedProxies:           getListEnv(v, "TRUSTED_PROXIES"),
 	}
 
 	if err = config.Validate(); err != nil {
@@ -136,6 +145,18 @@ func getStringEnv(v *viper.Viper, key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+// getListEnv reads a comma-separated env var, trimming each entry and dropping
+// empty ones; unset is nil.
+func getListEnv(v *viper.Viper, key string) []string {
+	var out []string
+	for _, item := range strings.Split(v.GetString(key), ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func getDurationEnv(v *viper.Viper, key string) (time.Duration, error) {
@@ -169,8 +190,9 @@ func getBoolEnv(v *viper.Viper, key string, defaultVal bool) (bool, error) {
 }
 
 // Validate enforces every required field. Optional knobs
-// (REFRESH_TOKEN_DURATION, UNTRUSTED_SESSION_DURATION, COOKIE_*, LOG_*) get their defaults in LoadConfig;
-// LOG_FORMAT / LOG_LEVEL must still be values logging accepts.
+// (REFRESH_TOKEN_DURATION, UNTRUSTED_SESSION_DURATION, COOKIE_*, LOG_*, TRUSTED_PROXIES) get their defaults in LoadConfig;
+// LOG_FORMAT / LOG_LEVEL must still be values logging accepts, and each
+// TRUSTED_PROXIES entry an IP or a CIDR.
 func (c Config) Validate() error {
 	required := []struct {
 		key   string
@@ -196,5 +218,20 @@ func (c Config) Validate() error {
 	if err := logging.Check(c.LogFormat, c.LogLevel); err != nil {
 		errs = append(errs, fmt.Errorf("LOG_FORMAT / LOG_LEVEL: %w", err))
 	}
+	for _, proxy := range c.TrustedProxies {
+		if !validProxy(proxy) {
+			errs = append(errs, fmt.Errorf("TRUSTED_PROXIES: %q is not an IP or a CIDR", proxy))
+		}
+	}
 	return errors.Join(errs...)
+}
+
+// validProxy reports whether s is an IP or a CIDR, the forms gin's
+// SetTrustedProxies accepts.
+func validProxy(s string) bool {
+	if net.ParseIP(s) != nil {
+		return true
+	}
+	_, _, err := net.ParseCIDR(s)
+	return err == nil
 }

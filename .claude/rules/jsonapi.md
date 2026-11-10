@@ -19,13 +19,15 @@ auth.md (`AccessTokenMiddleware`, the auth documents). What applies everywhere i
 
 ### Request flow
 
-0. Every route (404 / 405 / panic included) runs `RequestID` → `AccessLog` → recovery. `RequestID` keeps an
+0. Every route (404 / 405 / panic included) runs `RequestID` → `AccessLog` → recovery; the engine trusts only
+   `TRUSTED_PROXIES` for the client IP (see auth.md *Rate limits and the client IP*). `RequestID` keeps an
    incoming `X-Request-ID` matching `^[A-Za-z0-9._:-]{1,128}$`, else makes a UUID, and sets it on the response
    header (before the handlers), in the gin context (`requestid.Key`) and in the request context. `AccessLog`
    writes one `request` record (method, path, status, latency_ms, client_ip, bytes; `user_id` comes from the
    handler once auth has put the caller on the request context): warn with `cancelled=true` when the client went away (request context cancelled), else error
    for a 5xx, info for the rest.
-1. `middleware.JSONAPIMediaType` (every `/api` route) checks content negotiation first (406 / 415).
+1. `middleware.JSONAPIMediaType` (every `/api` route) checks content negotiation first (406 / 415). Register and
+   login then pass `middleware.RateLimitByIP` (429 past the per-IP budget).
 2. `AccessTokenMiddleware` reads the access token from the `app-access-token` cookie, else
    `Authorization: Bearer`, verifies it (ES256, `iss`, `aud` = `CLIENT_ID`, `exp`, `typ = access`), then
    re-reads `users.is_active` on **every** request (inactive / deleted → 401, DB error → 500). It sets

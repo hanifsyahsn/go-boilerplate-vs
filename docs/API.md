@@ -148,6 +148,16 @@ dev), scoped to `COOKIE_DOMAIN` when set. A browser client never reads them: it 
 
 All `/api/auth/*` endpoints are **public** (no access token).
 
+**Rate limits** (in memory, per server instance):
+
+| Limit | Applies to | Past it |
+| --- | --- | --- |
+| 300 requests / 15 min **per client IP** | register + login together (refresh and logout are never limited) | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` |
+| 5 **failed** logins / 15 min **per email** | login: an unknown email and a wrong password both count; a successful login resets it | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login for that email, the right password too, until the window ends |
+
+The client IP is the connection's address; `X-Forwarded-For` / `X-Real-IP` count only from a proxy listed in
+`TRUSTED_PROXIES`. On a 429, show the message and don't retry automatically.
+
 ### `POST /api/auth/register`
 
 Creates an account. The role is always `user` — there is no way to register an admin.
@@ -194,6 +204,7 @@ Supports `fields[users]`.
 | 409 | `conflict` | `That email is already registered.` (any case: `JANE@example.com` = `jane@example.com`) |
 | 403 | `forbidden` | an attribute that isn't writable — `"role" can't be set on this endpoint.` |
 | 422 | `unprocessable_entity` | a field failed validation — one error per field (see [Validation error](#validation-error)) |
+| 429 | `too_many_requests` | the IP used up its register + login budget (see *Rate limits* above) |
 | 500 | `internal_error` | hashing / DB failure |
 
 ### `POST /api/auth/login`
@@ -247,6 +258,7 @@ Set-Cookie: app-refresh-token=eyJhbGciOi…; Path=/api/auth; Max-Age=604799; Htt
 | 401 | `unauthorized` | `The email or password is incorrect.` — the **same** message for an unknown email and a wrong password, so an account's existence never leaks |
 | 401 | `unauthorized` | `Your account is no longer active.` — only **after** the password matched |
 | 422 | `unprocessable_entity` | a field failed validation |
+| 429 | `too_many_requests` | the email used up its failed logins, or the IP its register + login budget (see *Rate limits* above) |
 | 500 | `internal_error` | token signing / DB failure |
 
 ### `POST /api/auth/refresh`
@@ -476,7 +488,7 @@ other character (`_t`, `cacheBust`) is implementation-specific and **ignored**.
 | `include` | comma list of relationships to expand into `included`. Each endpoint has a **default** (notes: `created_by`); `include=` (empty) expands nothing |
 | `fields[TYPE]` | sparse fieldsets: comma list of the attributes / relationships of `TYPE` to return, e.g. `fields[notes]=title&fields[users]=name` |
 | `sort` | **one** field, `-` prefix for descending, e.g. `-created_at` |
-| `page[number]` / `page[size]` | 1-based page / size. Clamped, never rejected: number < 1 → 1, size < 1 → 20, size > 100 → 100 |
+| `page[number]` / `page[size]` | 1-based page / size. Clamped, never rejected: number < 1 → 1, number > 21474837 → 21474837 (any page past the data is empty), size < 1 → 20, size > 100 → 100 |
 | `filter[NAME]` | the endpoint's filters |
 
 A paginated list answers with `meta` and four pagination links (`null` when there's no such page):
@@ -507,6 +519,7 @@ The links keep the request's other parameters (filters, sort, fields) — follow
 | `conflict` | 409 | Email already registered; wrong resource `type`; body `id` ≠ URL id; an admin deactivating themselves |
 | `unsupported_media_type` | 415 | See [Content negotiation](#content-negotiation) |
 | `unprocessable_entity` | 422 | A field failed validation / has the wrong JSON type |
+| `too_many_requests` | 429 | Register / login rate limit (per IP, or failed logins per email) |
 | `internal_error` | 500 | Unexpected server error (`Something went wrong, please try again.`) — also a panic |
 
 ---

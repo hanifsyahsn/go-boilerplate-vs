@@ -1,6 +1,7 @@
 package pagination
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,10 @@ func TestRequest_Resolve_U(t *testing.T) {
 		{name: "explicit page", req: Request{Page: 3, PageSize: 10}, wantPage: 3, wantPageSize: 10, wantLimit: 10, wantOffset: 20},
 		{name: "negative page is page 1", req: Request{Page: -2, PageSize: 5}, wantPage: 1, wantPageSize: 5, wantLimit: 5, wantOffset: 0},
 		{name: "page_size capped", req: Request{Page: 2, PageSize: 1000}, wantPage: 2, wantPageSize: 100, wantLimit: 100, wantOffset: 100},
+		{name: "the highest page keeps a positive offset that fits an int32",
+			req: Request{Page: MaxPage, PageSize: 100}, wantPage: MaxPage, wantPageSize: 100, wantLimit: 100, wantOffset: 2147483600},
+		{name: "a huge page[number] is capped at MaxPage, the offset never wraps negative",
+			req: Request{Page: math.MaxInt32, PageSize: 100}, wantPage: MaxPage, wantPageSize: 100, wantLimit: 100, wantOffset: 2147483600},
 	}
 
 	for _, tc := range testCases {

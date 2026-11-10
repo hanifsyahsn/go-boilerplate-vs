@@ -46,7 +46,10 @@ func setCookie(c *gin.Context, cfg CookieConfig, name, value, path string, expir
 	if maxAge <= 0 {
 		maxAge = -1 // delete now
 	}
-	http.SetCookie(c.Writer, &http.Cookie{
+	// Secure comes from COOKIE_SECURE, default true; only plain-HTTP local
+	// development turns it off. HttpOnly and SameSite are always set.
+	// nosemgrep: go.lang.security.audit.net.cookie-missing-secure.cookie-missing-secure
+	http.SetCookie(c.Writer, &http.Cookie{ // #nosec G124 -- Secure is COOKIE_SECURE (default true)
 		Name:     name,
 		Value:    value,
 		Path:     path,

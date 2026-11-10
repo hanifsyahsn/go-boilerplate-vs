@@ -5,6 +5,6 @@ package constant
 const (
 	UserIdKey             = "user_id"
 	UserRoleKey           = "user_role"
-	AccessTokenCookieKey  = "app-access-token"
-	RefreshTokenCookieKey = "app-refresh-token"
+	AccessTokenCookieKey  = "app-access-token"  // #nosec G101 -- a cookie name, not a credential
+	RefreshTokenCookieKey = "app-refresh-token" // #nosec G101 -- a cookie name, not a credential
 )

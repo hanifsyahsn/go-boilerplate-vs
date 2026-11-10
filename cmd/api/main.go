@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	adminusersvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user"
 	adminusersqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user/sqlc"
 	authloginsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login"
@@ -33,6 +34,7 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/server"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/validation"
 
@@ -41,6 +43,17 @@ import (
 
 // Version is set at build time (-ldflags "-X main.Version=...").
 var Version = "dev"
+
+// Rate limits (in memory, one instance — see internal/platform/ratelimit).
+const (
+	// authIPLimit / authIPWindow cap register + login together per client IP.
+	// Generous on purpose: an office behind one NAT shares an IP.
+	authIPLimit  = 300
+	authIPWindow = 15 * time.Minute
+	// loginFailureLimit / loginFailureWindow cap failed logins per email.
+	loginFailureLimit  = 5
+	loginFailureWindow = 15 * time.Minute
+)
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -97,7 +110,8 @@ func main() {
 		Register: authregistersvc.NewHandler(authregistersvc.NewService(authregistersqlc.New(conn))),
 		Login: authloginsvc.NewHandler(
 			authloginsvc.NewService(authloginsqlc.New(conn), authSharedQuerier, tokenMaker,
-				conf.AccessTokenDuration, conf.RefreshTokenDuration, conf.UntrustedSessionDuration),
+				conf.AccessTokenDuration, conf.RefreshTokenDuration, conf.UntrustedSessionDuration,
+				ratelimit.New(loginFailureLimit, loginFailureWindow)),
 			cookies,
 		),
 		Refresh: authrefreshsvc.NewHandler(
@@ -118,7 +132,14 @@ func main() {
 		AdminUser: adminusersvc.NewHandler(adminusersvc.NewService(adminusersqlc.New(conn))),
 	}
 
-	srv := server.NewServer(conf, Version, tokenMaker, middlewaresqlc.New(conn), handlers)
+	gin.SetMode(server.GinMode(conf.Environment))
+	srv, err := server.NewServer(conf, Version, tokenMaker, middlewaresqlc.New(conn), handlers, server.Security{
+		TrustedProxies: conf.TrustedProxies,
+		AuthIPLimit:    ratelimit.New(authIPLimit, authIPWindow),
+	})
+	if err != nil {
+		logging.Fatal("build server failed", "err", err)
+	}
 	if err = srv.Run(ctx); err != nil {
 		logging.Fatal("server run failed", "err", err)
 	}

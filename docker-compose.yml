@@ -35,6 +35,9 @@ services:
       - .env
     environment:
       DB_SOURCE: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:${DB_PORT}/${DB_NAME}?sslmode=disable
+    # The app runs as uid 10001 (Dockerfile USER), so the key files must be
+    # readable by it on the host, e.g. `sudo chown 10001 internal/platform/config/ec-*.pem`
+    # (keeps the private key 600) — otherwise startup fails with "permission denied".
     volumes:
       - ./internal/platform/config/ec-private.pem:/app/internal/platform/config/ec-private.pem:ro
       - ./internal/platform/config/ec-public.pem:/app/internal/platform/config/ec-public.pem:ro

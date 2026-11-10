@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -158,7 +159,7 @@ func TokenID(claims jwt.MapClaims) (uuid.UUID, error) {
 }
 
 func LoadECPrivateKey(path string) (*ecdsa.PrivateKey, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path)) // path from EC_*_KEY_PATH (operator config), never request input
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +171,7 @@ func LoadECPrivateKey(path string) (*ecdsa.PrivateKey, error) {
 }
 
 func LoadECPublicKey(path string) (*ecdsa.PublicKey, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path)) // path from EC_*_KEY_PATH (operator config), never request input
 	if err != nil {
 		return nil, err
 	}

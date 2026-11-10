@@ -1,0 +1,25 @@
+# Project rules for `make sec` (semgrep scan --config .semgrep/). Each rule pins
+# a convention from CLAUDE.md / .claude/rules so a new slice can't drift from it.
+rules:
+  - id: no-gin-default
+    languages: [go]
+    severity: ERROR
+    message: >-
+      gin.Default() trusts every proxy (a client can set its own IP through
+      X-Forwarded-For) and adds gin's own logger and recovery. Use gin.New() with
+      the middleware in server.NewRouter (RequestID, AccessLog, JSON:API recovery)
+      and SetTrustedProxies from TRUSTED_PROXIES.
+    pattern: gin.Default(...)
+
+  - id: no-without-cancel-on-gin-context
+    languages: [go]
+    severity: ERROR
+    message: >-
+      gin reuses a *gin.Context for the next request, so context.WithoutCancel(c)
+      outlives it with the wrong values. Use requestid.Detach(ctx) for work that
+      outlives the request (see .claude/rules/logging.md).
+    patterns:
+      - pattern: context.WithoutCancel($C)
+      - metavariable-type:
+          metavariable: $C
+          type: "*gin.Context"

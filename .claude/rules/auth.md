@@ -5,6 +5,11 @@ paths:
   - "internal/features/admin/**"
   - "internal/platform/middleware/access_token*"
   - "internal/platform/middleware/require_role*"
+  - "internal/platform/middleware/rate_limit*"
+  - "internal/platform/ratelimit/**"
+  - "internal/platform/server/**"
+  - "internal/platform/config/**"
+  - ".semgrep/**"
   - "internal/platform/jwttoken/**"
   - "internal/shared/password/**"
   - "internal/shared/enum/**"
@@ -48,3 +53,42 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
 - Logout revokes the presented token's family and clears the cookies; a missing / invalid token is still a
   204. The access token is a stateless JWT and stays valid until it
   expires — keep `ACCESS_TOKEN_DURATION` short.
+
+### Rate limits and the client IP
+
+Added 2026-11-09 as the boilerplate's base security.
+
+- **Client IP = `c.ClientIP()`, never a header read by hand.** `server.NewRouter` calls
+  `r.SetTrustedProxies(Security.TrustedProxies)` (`TRUSTED_PROXIES`); empty passes `nil` = trust no proxy, so the
+  IP is the connection's address and a forged `X-Forwarded-For` changes nothing. gin's default (no call) trusts
+  **every** peer — that's what let a client pick its own IP. Behind nginx / a load balancer, list its IP or CIDR,
+  else every client shares the proxy's IP. Each entry is validated in `Config.Validate()` (IP or CIDR) and again
+  by gin; `NewRouter` / `NewServer` return the error and `main` stops.
+- **`internal/platform/ratelimit.Limiter`**: in-memory fixed window per key — `Allow` (count a hit, within
+  limit?), `Blocked` (used up, without a hit), `Reset` (forget the key); expired buckets are swept once per window.
+  One instance only (see *Gotchas* in CLAUDE.md).
+- **Per IP** (`middleware.RateLimitByIP(limiter, "auth")`, `Security.AuthIPLimit`, **required** — `NewRouter`
+  refuses nil): register and login share one budget, 300 / 15 min per IP (`authIPLimit` / `authIPWindow` in
+  `main.go`; generous because an office NAT shares one IP). Past it → 429 `too_many_requests`, detail
+  `middleware.TooManyRequestsMessage`, the handler never runs. **Refresh and logout are not IP-limited**: they run
+  off the refresh cookie on every open tab.
+- **Per email, failed logins** (`login` service, its own limiter, 5 / 15 min — `loginFailureLimit` /
+  `loginFailureWindow`): key `login:` + trimmed, lowercased email (as `GetUserForLogin` matches it). An unknown
+  email and a wrong password both count (so a 429 doesn't reveal whether the email exists); the right password
+  clears the count — a deactivated account included, it isn't a guess; once used up, every attempt for that
+  email is a 429 *before the DB read*, the right password too, until the window ends. Known trade-off: anyone can
+  lock an email out for one window.
+- **A new public endpoint** (no access token) goes into the `limited` group in `router.go` unless, like
+  refresh, it runs automatically per tab. **One that sends email** (verify link, password reset) also needs a
+  per-recipient limit in its service (e.g. 3 / h), or it can be used to spam any address through our SMTP.
+- Tests: `middleware/rate_limit_unit_test.go`, `server/router_unit_test.go` (`TestNewRouter_Security_U` — which
+  routes are limited, forged vs trusted `X-Forwarded-For`; `TestNewRouter_SecurityErrors_U`),
+  `login/service_unit_test.go` (`TestService_Login_FailureLimit_U`), config's `TRUSTED_PROXIES` cases.
+  Integration routers pass a high limit (`testLimit`) so multi-login flows from httptest's one address pass.
+- `make sec SEC_PASSWORD=imsureitislocal` (local only — see *Gotchas* in CLAUDE.md; gosec without generated code, semgrep with `p/golang` + `.semgrep/`, govulncheck, gitleaks over git
+  history) is the security scan; it runs all four and fails at the end if any failed, and must stay green (see
+  *Gotchas* in CLAUDE.md for `#nosec` / `nosemgrep`). `.semgrep/gin.yml` bans `gin.Default()` (trusts every
+  proxy) and `context.WithoutCancel` on a `*gin.Context`. A convention worth enforcing gets a rule there.
+- **Login timing**: an unknown email still spends one bcrypt comparison (`password.CheckOrWaste("", …)` against a
+  dummy hash), so the response time doesn't reveal which emails have an account; `password.Check` never matches
+  an empty hash. `TestService_Login_TimingEqualized_U` pins it.

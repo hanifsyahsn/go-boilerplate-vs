@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -22,6 +23,7 @@ import (
 	updatenote "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/update"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/jsonapi"
 	"github.com/stretchr/testify/require"
 )
@@ -96,7 +98,8 @@ func TestNewRouter_U(t *testing.T) {
 				users.EXPECT().GetUserIsActive(gomock.Any(), int64(1)).Return(true, nil)
 			}
 
-			r := NewRouter("test-version", maker, users, h.handlers())
+			r, err := NewRouter("test-version", maker, users, h.handlers(), Security{AuthIPLimit: ratelimit.New(100, time.Minute)})
+			require.NoError(t, err)
 
 			req := httptest.NewRequest(tc.method, tc.path, nil)
 			if tc.body != "" {
@@ -117,6 +120,116 @@ func TestNewRouter_U(t *testing.T) {
 			if tc.wantBody != "" {
 				require.JSONEq(t, tc.wantBody, w.Body.String())
 			}
+		})
+	}
+}
+
+// TestNewRouter_Security_U pins the base protection: register and login share
+// one per-IP budget, refresh and logout have none, and the client IP comes
+// from X-Forwarded-For only when the connection is a trusted proxy.
+func TestNewRouter_Security_U(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	type call struct {
+		method, path string
+		remote       string // the connection's IP
+		xff          string // X-Forwarded-For, "" = none
+		wantCode     int
+	}
+	ok := func(c *gin.Context) { c.Status(http.StatusTeapot) }
+	login := func(remote, xff string, want int) call {
+		return call{method: http.MethodPost, path: "/api/auth/login", remote: remote, xff: xff, wantCode: want}
+	}
+
+	testCases := []struct {
+		name    string
+		trusted []string
+		calls   []call // against a 2-per-window auth limit
+	}{
+		{name: "login past the per-IP limit is a 429", calls: []call{
+			login("10.0.0.1", "", http.StatusTeapot), login("10.0.0.1", "", http.StatusTeapot),
+			login("10.0.0.1", "", http.StatusTooManyRequests),
+		}},
+		{name: "register past the per-IP limit is a 429", calls: []call{
+			{method: http.MethodPost, path: "/api/auth/register", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/register", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/register", remote: "10.0.0.1", wantCode: http.StatusTooManyRequests},
+		}},
+		{name: "register and login share one per-IP budget", calls: []call{
+			{method: http.MethodPost, path: "/api/auth/register", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/register", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			login("10.0.0.1", "", http.StatusTooManyRequests),
+		}},
+		{name: "refresh is never IP-limited (every open tab calls it)", calls: []call{
+			{method: http.MethodPost, path: "/api/auth/refresh", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/refresh", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/refresh", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+		}},
+		{name: "logout is never IP-limited", calls: []call{
+			{method: http.MethodPost, path: "/api/auth/logout", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/logout", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/logout", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+		}},
+		{name: "with no trusted proxy a forged X-Forwarded-For doesn't escape the limit", calls: []call{
+			login("10.0.0.1", "1.1.1.1", http.StatusTeapot), login("10.0.0.1", "2.2.2.2", http.StatusTeapot),
+			login("10.0.0.1", "3.3.3.3", http.StatusTooManyRequests),
+		}},
+		{name: "an untrusted peer's X-Forwarded-For is ignored even when proxies are configured", trusted: []string{"10.0.0.9"}, calls: []call{
+			login("10.0.0.1", "1.1.1.1", http.StatusTeapot), login("10.0.0.1", "2.2.2.2", http.StatusTeapot),
+			login("10.0.0.1", "3.3.3.3", http.StatusTooManyRequests),
+		}},
+		{name: "behind a trusted proxy each forwarded client has its own budget", trusted: []string{"10.0.0.0/24"}, calls: []call{
+			login("10.0.0.9", "1.1.1.1", http.StatusTeapot), login("10.0.0.9", "1.1.1.1", http.StatusTeapot),
+			login("10.0.0.9", "2.2.2.2", http.StatusTeapot),
+			login("10.0.0.9", "1.1.1.1", http.StatusTooManyRequests),
+		}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			h := newMocks(ctrl)
+			h.register.EXPECT().Register(gomock.Any()).Do(ok).AnyTimes()
+			h.login.EXPECT().Login(gomock.Any()).Do(ok).AnyTimes()
+			h.refresh.EXPECT().Refresh(gomock.Any()).Do(ok).AnyTimes()
+			h.logout.EXPECT().Logout(gomock.Any()).Do(ok).AnyTimes()
+
+			r, err := NewRouter("test-version", jwttoken.NewMockM(ctrl), middlewaresqlc.NewMockQuerier(ctrl), h.handlers(),
+				Security{TrustedProxies: tc.trusted, AuthIPLimit: ratelimit.New(2, time.Minute)})
+			require.NoError(t, err)
+
+			for i, c := range tc.calls {
+				req := httptest.NewRequest(c.method, c.path, nil)
+				req.RemoteAddr = c.remote + ":4321"
+				if c.xff != "" {
+					req.Header.Set("X-Forwarded-For", c.xff)
+				}
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				require.Equal(t, c.wantCode, w.Code, "call %d: %s", i, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestNewRouter_SecurityErrors_U(t *testing.T) {
+	testCases := []struct {
+		name    string
+		sec     Security
+		wantErr string
+	}{
+		{name: "no auth IP limit: refused, the auth routes must never run unlimited",
+			sec: Security{}, wantErr: "AuthIPLimit is required"},
+		{name: "a trusted proxy gin can't parse is refused",
+			sec: Security{TrustedProxies: []string{"not-an-ip"}, AuthIPLimit: ratelimit.New(1, time.Minute)}, wantErr: "trusted proxies"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			r, err := NewRouter("v", jwttoken.NewMockM(ctrl), middlewaresqlc.NewMockQuerier(ctrl), newMocks(ctrl).handlers(), tc.sec)
+			require.ErrorContains(t, err, tc.wantErr)
+			require.Nil(t, r)
 		})
 	}
 }

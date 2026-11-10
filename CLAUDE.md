@@ -29,7 +29,7 @@ Index:
 - `.claude/rules/logging.md` — `log/slog` conventions (`*Context` variants, `request_id` / `user_id`, detached
   goroutines, log assertions in tests). Sections: *Logging*.
 - `.claude/rules/auth.md` — Register, login, token rotation, trusted / untrusted sessions, reuse detection,
-  logout. Sections: *Auth*.
+  logout, rate limits and the client IP (trusted proxies). Sections: *Auth*; *Rate limits and the client IP*.
 - `.claude/rules/slice-patterns.md` — reference code for the recurring slice patterns (owned resource + 404,
   create + read-back, lock-before-write tx over two queriers, partial PATCH, list filter/sort/page, tests,
   sqlc block). Kept even when no slice uses a pattern — see its *Maintenance rule*.
@@ -41,6 +41,9 @@ Cross-topic map (touching the left → also read the right):
 - **Middleware / router** (`internal/platform/middleware`, `server`) → `jsonapi.md` + `logging.md` (+ `auth.md`
   for `AccessTokenMiddleware` / `RequireRole`).
 - **Users, roles, tokens, cookies, `refresh_tokens`** → `auth.md` + `jsonapi.md` (*Request documents*).
+- **A rate limit, a public endpoint, the client IP / `TRUSTED_PROXIES`** (`internal/platform/ratelimit`,
+  `middleware/rate_limit.go`, `server.Security`) → `auth.md` (*Rate limits and the client IP*) + `jsonapi.md`
+  (*Request flow*).
 - **An error shape / status code** → `jsonapi.md` (*Errors*, *Request flow* step 4) + `logging.md`.
 - **A goroutine / background worker** → `logging.md`.
 - **A migration** → *Gotchas* here + the rule of the table's feature (`users` / `refresh_tokens` → `auth.md`)
@@ -49,7 +52,9 @@ Cross-topic map (touching the left → also read the right):
 ## Commands
 
 Tooling on PATH: `go`, `sqlc`, `migrate` (golang-migrate CLI), `mockgen` (github.com/golang/mock), `openssl`,
-and a running Docker engine for integration tests (testcontainers). `make` reads `.env` and exports it.
+and a running Docker engine for integration tests (testcontainers). For `make sec` also `gosec`, `govulncheck`,
+`gitleaks` (`make sec_install`, pinned versions in the Makefile) and `semgrep` (`pipx install semgrep`, or
+`pip install --user semgrep` and put its Scripts / bin folder on PATH). `make` reads `.env` and exports it.
 
 ```sh
 make run                       # go run cmd/api/main.go
@@ -60,11 +65,19 @@ make sqlc                      # regenerate every */sqlc package
 make mock SOURCE=path/file.go DESTINATION=path/mock_file.go PKG_NAME=pkg
 make ec_private && make ec_public
 ./build.sh && ./deploy.sh      # image go_boilerplate_vs_api:$(cat VERSION); deploy = graceful SIGTERM swap
+make sec                       # gosec (medium+, no generated code), semgrep (p/golang + .semgrep/), govulncheck,
+                               # gitleaks (git history); runs all four, fails at the end if any failed.
+                               # Local only: `make sec SEC_PASSWORD=imsureitislocal`, typed on the command
+                               # line (a value from .env / the environment is refused)
 
 go test ./... -short           # unit tests only (no Docker)
 go test ./...                  # full suite; TestMain starts a migrated postgres:17 container per package
 go test -run '^TestService_Update_I$' ./internal/features/note/update -count=1
 ```
+
+The Postgres container start goes through `testhelper.startContainer`, which retries a failed start up to 3 times
+(2 s, 4 s): the packages of one `go test ./...` share one Ryuk reaper and the first ones race to create it ("wait
+for reaper … unexpected container status "created""). Ryuk stays on — it cleans up after a crash / Ctrl-C.
 
 On Windows the Makefile sets `DOCKER_HOST=npipe:////./pipe/docker_engine` for the test targets. Set it yourself for a plain
 `go test ./...` — without it testcontainers' auto-detection intermittently fails with "rootless Docker is not supported on
@@ -78,9 +91,10 @@ Windows".
   `server.Handlers` → `server.NewServer(...).Run(ctx)` (graceful shutdown on SIGINT/SIGTERM).
 - `internal/platform` — infrastructure: `config` (viper, `.env` optional), `logging` (`log/slog` setup: `New` /
   `Setup` / `Check` / `Fatal`, a handler adding `request_id`), `server` (`server.go` + `router.go` with the
-  `Handlers` struct), `middleware` (`RequestID`, `AccessLog`, `JSONAPIMediaType`, `AccessTokenMiddleware`,
-  `RequireRole`, its own sqlc for `GetUserIsActive`), `jwttoken` (ES256), `db/tx` (generic transaction helper),
-  `db/migration`, `constant`.
+  `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `JSONAPIMediaType`,
+  `RateLimitByIP`, `AccessTokenMiddleware`, `RequireRole`, its own sqlc for `GetUserIsActive`), `ratelimit`
+  (in-memory fixed-window counter — see *Rate limits and the client IP*), `jwttoken` (ES256), `db/tx` (generic
+  transaction helper), `db/migration`, `constant`.
 - `internal/shared` — cross-cutting: `apperror` (typed error → HTTP status, with a JSON:API `Source`),
   `jsonapi` (documents, serializer, sparse fieldsets, links, error objects, `?include` policy, the query
   parser), `handlerutil` (`ParseQuery` / `BindResource` / `ParamID` / `WriteData` / `WriteMeta` /
@@ -134,8 +148,9 @@ Rules:
 
 `config.LoadConfig(".")` reads `.env` (optional) then OS env; `Validate()` requires every field except the
 optional `REFRESH_TOKEN_DURATION` (default `168h`), `UNTRUSTED_SESSION_DURATION` (default `168h`), `COOKIE_SECURE` (default `true`), `COOKIE_DOMAIN`,
-`LOG_FORMAT` (default `text`; `json` in production) and `LOG_LEVEL` (default `info`) — the last two must still
-be values `logging.Check` accepts. Durations are Go duration strings (`15m`).
+`LOG_FORMAT` (default `text`; `json` in production), `LOG_LEVEL` (default `info`) — those two must still
+be values `logging.Check` accepts — and `TRUSTED_PROXIES` (comma-separated IPs / CIDRs, default none; each entry
+is checked, see *Rate limits and the client IP*). Durations are Go duration strings (`15m`).
 See `.env.example`.
 
 ## Testing conventions
@@ -152,5 +167,28 @@ See `.env.example`.
 - `.env` and `*.pem` are gitignored; never commit keys or secrets.
 - `sqlc.yaml` has one block per slice with queries — a new one needs its entry, then `make sqlc`.
 - `updated_at` is maintained by the `update_updated_at_column()` trigger on every table that has it.
+- **`make sec` runs only on a developer's machine**, unlocked by `SEC_PASSWORD=imsureitislocal` typed on the
+  command line (`$(origin SEC_PASSWORD)` must be `command line`, so a `.env` copied to a server can't carry it).
+  `ENVIRONMENT` can't be the switch: laptops and the dev server both run `development`. A server gains nothing
+  from the scan (same source) and would pay CPU, outbound calls and `.env` secrets exported to the tools. Never
+  put `SEC_PASSWORD` in `.env` / `.env.example`.
+- **Security scan (`make sec`) stays green.** A finding is fixed, or — when it's a false positive — silenced on
+  its own line with the reason: `// #nosec G101 -- a cookie name, not a credential`,
+  `// nosemgrep: <rule-id>` on the line before. Never a blanket exclude. Current ones: the cookie names and the
+  login message (G101), the configurable `Secure` cookie (G124 + semgrep), pagination's bounded int32 offset
+  (G115).
+- **Go version = go.mod `toolchain` + the Dockerfile builder image, bumped together** (`go1.26.10` /
+  `golang:1.26.10-alpine`). `GOTOOLCHAIN=auto` makes the local `go` download and use the `toolchain` version for
+  this module only; `build.sh` doesn't pull, so the image is pinned rather than a floating `1.26` tag (which
+  reuses whatever is cached on the host). Most `govulncheck` hits are stdlib, fixed only by a newer patch release.
+- **The container runs as uid 10001** (non-root, `USER` in the Dockerfile): files mounted into it (the EC keys)
+  must be readable by that uid.
+- **gin runs in release mode except when `ENVIRONMENT=development`** (`server.GinMode`, set in `main`): no route
+  dump or gin debug output on a deployed server.
+- **Rate limits are in memory** (`internal/platform/ratelimit`): they hold for one instance. Running several
+  replicas multiplies every limit by the replica count — move the counters to a shared store (Redis) first.
+  Behind a reverse proxy, `TRUSTED_PROXIES` must list it, or every client shares the proxy's IP.
+- `.semgrep/` is `make sec`'s project ruleset; `semgrep --config .semgrep/` errors if the folder is missing, so
+  keep at least one rule there.
 - `refresh_tokens` grows by one row per refresh and nothing prunes it yet; add a periodic
   `DELETE FROM refresh_tokens WHERE expires_at < now()` job when it matters.

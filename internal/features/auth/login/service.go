@@ -13,6 +13,7 @@ import (
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	internalshareddto "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/dto"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/enum"
@@ -23,13 +24,22 @@ const feature = "Login service"
 
 // invalidCredentialsMessage is the one 401 for an unknown email and a wrong
 // password alike, so a login never tells which emails exist.
-const invalidCredentialsMessage = "The email or password is incorrect."
+const invalidCredentialsMessage = "The email or password is incorrect." // #nosec G101 -- a user-facing message, not a credential
+
+// tooManyFailuresMessage is the 429 once an email used up its failed logins.
+const tooManyFailuresMessage = "Too many wrong attempts. Please wait a few minutes and try again."
 
 type S interface {
 	// Login checks the credentials of an active account and issues a token
 	// pair. The refresh token starts a new family in refresh_tokens (one per
 	// login, i.e. per device). An untrusted device's family is capped at
 	// untrustedSessionDuration from now; a trusted one slides with no cap.
+	//
+	// Failed logins are capped per email (the failures limiter): an unknown
+	// email and a wrong password both count, a success clears the count, and
+	// once the window is used up every attempt for that email is a 429
+	// without touching the DB — the right password included, until the
+	// window ends.
 	Login(ctx context.Context, req Request) (Result, error)
 }
 
@@ -41,8 +51,13 @@ type service struct {
 	refreshTokenDuration time.Duration
 	// untrustedSessionDuration caps a login without trust_device.
 	untrustedSessionDuration time.Duration
-	newFamilyID              func() uuid.UUID
-	now                      func() time.Time
+	// failures counts wrong credentials per email (failureKey).
+	failures *ratelimit.Limiter
+	// checkPassword is password.CheckOrWaste; a seam for the test that pins
+	// the unknown-email path still spends a bcrypt comparison.
+	checkPassword func(hash, plain string) bool
+	newFamilyID   func() uuid.UUID
+	now           func() time.Time
 }
 
 func NewService(
@@ -50,6 +65,7 @@ func NewService(
 	authSharedQuerier authsharedsqlc.Querier,
 	tokenMaker jwttoken.M,
 	accessTokenDuration, refreshTokenDuration, untrustedSessionDuration time.Duration,
+	failures *ratelimit.Limiter,
 ) S {
 	return &service{
 		querier:              querier,
@@ -59,14 +75,34 @@ func NewService(
 		refreshTokenDuration: refreshTokenDuration,
 
 		untrustedSessionDuration: untrustedSessionDuration,
+		failures:                 failures,
+		checkPassword:            password.CheckOrWaste,
 		newFamilyID:              uuid.New,
 		now:                      time.Now,
 	}
 }
 
+// failureKey is the failures limiter's key for an email: trimmed and
+// lowercased, the way GetUserForLogin matches it, so "Jane@x.com " and
+// "jane@x.com" share one count.
+func failureKey(email string) string {
+	return "login:" + strings.ToLower(strings.TrimSpace(email))
+}
+
 func (s *service) Login(ctx context.Context, req Request) (Result, error) {
+	key := failureKey(req.Email)
+	if s.failures.Blocked(key) {
+		return Result{}, apperror.New(apperror.CodeTooManyRequests, tooManyFailuresMessage,
+			fmt.Errorf("(%s): login failures exceeded for an email", feature))
+	}
+
 	user, err := s.querier.GetUserForLogin(ctx, strings.TrimSpace(req.Email))
 	if errors.Is(err, sql.ErrNoRows) {
+		// Spend a bcrypt comparison anyway, so an unknown email answers in
+		// about the time a wrong password does and timing doesn't reveal
+		// which emails have an account.
+		s.checkPassword("", req.Password)
+		s.failures.Allow(key)
 		return Result{}, apperror.New(apperror.CodeUnauthorized, invalidCredentialsMessage,
 			fmt.Errorf("GetUserForLogin() (%s): unknown email: %w", feature, err))
 	}
@@ -75,10 +111,14 @@ func (s *service) Login(ctx context.Context, req Request) (Result, error) {
 			fmt.Errorf("GetUserForLogin() (%s): %w", feature, err))
 	}
 
-	if !password.Check(user.PasswordHash, req.Password) {
+	if !s.checkPassword(user.PasswordHash, req.Password) {
+		s.failures.Allow(key)
 		return Result{}, apperror.New(apperror.CodeUnauthorized, invalidCredentialsMessage,
 			fmt.Errorf("(%s): wrong password for user %d", feature, user.ID))
 	}
+
+	// The credentials are right: the email's failures start over.
+	s.failures.Reset(key)
 
 	// Checked after the password, so only the account holder learns it's
 	// deactivated.

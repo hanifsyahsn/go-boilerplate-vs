@@ -19,14 +19,20 @@ type Server struct {
 	httpServer *http.Server
 }
 
-func NewServer(conf config.Config, version string, tokenMaker jwttoken.M, userStatus middleware.UserStatusReader, handlers Handlers) *Server {
+// NewServer builds the HTTP server around NewRouter; it fails when the router
+// can't apply sec.
+func NewServer(conf config.Config, version string, tokenMaker jwttoken.M, userStatus middleware.UserStatusReader, handlers Handlers, sec Security) (*Server, error) {
+	router, err := NewRouter(version, tokenMaker, userStatus, handlers, sec)
+	if err != nil {
+		return nil, err
+	}
 	return &Server{
 		httpServer: &http.Server{
 			Addr:              conf.ServerAddress,
-			Handler:           NewRouter(version, tokenMaker, userStatus, handlers),
+			Handler:           router,
 			ReadHeaderTimeout: 10 * time.Second,
 		},
-	}
+	}, nil
 }
 
 // Run serves until ctx is cancelled (SIGINT / SIGTERM in main), then shuts
