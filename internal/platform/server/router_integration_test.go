@@ -35,6 +35,9 @@ import (
 	listnotesqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/list/sqlc"
 	notesharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/shared/sqlc"
 	updatenote "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/update"
+	sessionlist "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/list"
+	sessionlistsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/list/sqlc"
+	sessionrevoke "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/revoke"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
@@ -80,13 +83,16 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 
 		Me: me.NewHandler(me.NewService(mesqlc.New(db))),
 
+		ListSessions:  sessionlist.NewHandler(sessionlist.NewService(sessionlistsqlc.New(db))),
+		RevokeSession: sessionrevoke.NewHandler(sessionrevoke.NewService(sessionrevoke.NewStore(db)), cookies),
+
 		CreateNote: createnote.NewHandler(createnote.NewService(noteSharedQuerier, createnotesqlc.New(db))),
 		ListNote:   listnote.NewHandler(listnote.NewService(listnotesqlc.New(db))),
 		DetailNote: detailnote.NewHandler(detailnote.NewService(noteSharedQuerier)),
 		UpdateNote: updatenote.NewHandler(updatenote.NewService(updatenote.NewStore(db))),
 		DeleteNote: deletenote.NewHandler(deletenote.NewService(deletenote.NewStore(db))),
 
-		AdminUser: adminuser.NewHandler(adminuser.NewService(adminusersqlc.New(db))),
+		AdminUser: adminuser.NewHandler(adminuser.NewService(adminusersqlc.New(db), adminuser.NewStore(db))),
 	}
 
 	r, err := NewRouter("test-version", tokenMaker, middlewaresqlc.New(db), handlers,
@@ -265,6 +271,86 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 				res = c.do(http.MethodPost, "/api/auth/refresh",
 					`{"data":{"type":"sessions","attributes":{"refresh_token":"`+laptopRefresh+`"}}}`, "")
 				require.Equal(t, http.StatusUnauthorized, res.Code, "the signed-out session can't be refreshed")
+			},
+		},
+		{
+			name: "devices: the list marks the current one, signing the other out ends it at once, signing the current out is a logout",
+			run: func(t *testing.T, c apiClient) {
+				testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "jane@example.com"})
+				laptop := c.login("jane@example.com")
+				phoneAccess, phoneRefresh := c.loginPair("jane@example.com")
+
+				res := c.do(http.MethodGet, "/api/me/sessions", "", laptop)
+				require.Equal(t, http.StatusOK, res.Code, "list: %v", res.Body)
+				sessions := res.Body["data"].([]any)
+				require.Len(t, sessions, 2)
+				var laptopID, phoneID string
+				for _, s := range sessions {
+					s := s.(map[string]any)
+					if s["attributes"].(map[string]any)["current"].(bool) {
+						laptopID = s["id"].(string)
+					} else {
+						phoneID = s["id"].(string)
+					}
+				}
+				require.NotEmpty(t, laptopID, "the caller's own session is marked current")
+				require.NotEmpty(t, phoneID)
+
+				res = c.do(http.MethodDelete, "/api/me/sessions/"+phoneID, "", laptop)
+				require.Equal(t, http.StatusNoContent, res.Code, "revoke: %v", res.Body)
+				require.Equal(t, http.StatusUnauthorized, c.do(http.MethodGet, "/api/me", "", phoneAccess).Code)
+				res = c.do(http.MethodPost, "/api/auth/refresh",
+					`{"data":{"type":"sessions","attributes":{"refresh_token":"`+phoneRefresh+`"}}}`, "")
+				require.Equal(t, http.StatusUnauthorized, res.Code, "the signed-out device can't refresh")
+				require.Equal(t, http.StatusNotFound, c.do(http.MethodDelete, "/api/me/sessions/"+phoneID, "", laptop).Code,
+					"a session already signed out reads as missing")
+
+				res = c.do(http.MethodDelete, "/api/me/sessions/"+laptopID, "", laptop)
+				require.Equal(t, http.StatusNoContent, res.Code)
+				var cleared []string
+				for _, line := range res.Header.Values("Set-Cookie") {
+					if strings.Contains(line, "Max-Age=0") {
+						cleared = append(cleared, strings.SplitN(line, "=", 2)[0])
+					}
+				}
+				require.ElementsMatch(t, []string{"app-access-token", "app-refresh-token"}, cleared)
+				require.Equal(t, http.StatusUnauthorized, c.do(http.MethodGet, "/api/me", "", laptop).Code)
+			},
+		},
+		{
+			name: "someone else's session reads as missing and stays live",
+			run: func(t *testing.T, c apiClient) {
+				testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "jane@example.com"})
+				testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "bob@example.com"})
+				jane := c.login("jane@example.com")
+				bob := c.login("bob@example.com")
+				bobSession := c.do(http.MethodGet, "/api/me/sessions", "", bob).Body["data"].([]any)[0].(map[string]any)["id"].(string)
+
+				res := c.do(http.MethodDelete, "/api/me/sessions/"+bobSession, "", jane)
+				require.Equal(t, http.StatusNotFound, res.Code)
+				require.Equal(t, "That session doesn't exist.", errorDetail(t, res))
+				require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/me", "", bob).Code)
+				require.Equal(t, http.StatusNotFound, c.do(http.MethodDelete, "/api/me/sessions/not-a-uuid", "", jane).Code)
+			},
+		},
+		{
+			name: "an admin deactivating a user ends every session of theirs; reactivating doesn't bring them back",
+			run: func(t *testing.T, c apiClient) {
+				userID := testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "jane@example.com"})
+				testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "admin@example.com", Role: "admin"})
+				_, janeRefresh := c.loginPair("jane@example.com")
+				admin := c.login("admin@example.com")
+				path := "/api/admin/users/" + strconv.FormatInt(userID, 10)
+				doc := func(active bool) string {
+					return `{"data":{"type":"users","id":"` + strconv.FormatInt(userID, 10) + `","attributes":{"is_active":` + strconv.FormatBool(active) + `}}}`
+				}
+
+				require.Equal(t, http.StatusOK, c.do(http.MethodPatch, path, doc(false), admin).Code)
+				require.Equal(t, http.StatusOK, c.do(http.MethodPatch, path, doc(true), admin).Code)
+
+				res := c.do(http.MethodPost, "/api/auth/refresh",
+					`{"data":{"type":"sessions","attributes":{"refresh_token":"`+janeRefresh+`"}}}`, "")
+				require.Equal(t, http.StatusUnauthorized, res.Code, "the old device stays signed out after reactivation")
 			},
 		},
 		{

@@ -3,6 +3,7 @@ paths:
   - "internal/features/auth/**"
   - "internal/features/me/**"
   - "internal/features/admin/**"
+  - "internal/features/session/**"
   - "internal/platform/middleware/access_token*"
   - "internal/platform/middleware/require_role*"
   - "internal/platform/middleware/rate_limit*"
@@ -71,6 +72,15 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   keep_family_id NULL = all)`; reasons are the `authshared.RevokeReason*` constants (the column's CHECK).
 - Logout revokes the presented token's session (`logout`) and clears the cookies; a missing / invalid /
   unknown token is still a 204. The session's access tokens stop working at once.
+- **Signed-in devices** (slices `session/list`, `session/revoke`, resource type `sessions`, shared in
+  `session/shared`): `GET /api/me/sessions` lists the caller's **live** sessions — not revoked and with a refresh
+  token still usable (not revoked, not expired, inside `session_expires_at`) — sorted `-last_used_at` by default
+  (`last_used_at` / `created_at`), `expires_at` = the untrusted cap or null, `current` = the request's `sid`.
+  `DELETE /api/me/sessions/:id` locks the caller's live session (`LockLiveSession`, `FOR UPDATE`) and
+  `RevokeSession(signed_out_remotely)` → 204; a non-UUID id, someone else's or a non-live session → 404 "That
+  session doesn't exist." (not-yours reads as not-found); the current `sid` also clears the cookies (a logout).
+- **Deactivating a user** (`PATCH /api/admin/users/:id`, `is_active: false`) revokes all their sessions
+  (`deactivated`) in the same transaction, so reactivating never brings an old device back.
 
 ### Rate limits and the client IP
 

@@ -17,6 +17,8 @@ import (
 	detailnote "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/detail"
 	listnote "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/list"
 	updatenote "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/update"
+	sessionlist "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/list"
+	sessionrevoke "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/revoke"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
@@ -34,6 +36,9 @@ type Handlers struct {
 	Logout   authlogout.H
 
 	Me me.H
+
+	ListSessions  sessionlist.H
+	RevokeSession sessionrevoke.H
 
 	CreateNote createnote.H
 	ListNote   listnote.H
@@ -167,6 +172,8 @@ func NewRouter(version string, tokenMaker jwttoken.M, accessStatus middleware.Ac
 	authed.Use(middleware.AccessTokenMiddleware(tokenMaker, accessStatus))
 	{
 		me.Route(authed, h.Me)
+		sessionlist.Route(authed, h.ListSessions)
+		sessionrevoke.Route(authed, h.RevokeSession)
 		createnote.Route(authed, h.CreateNote)
 		listnote.Route(authed, h.ListNote)
 		detailnote.Route(authed, h.DetailNote)

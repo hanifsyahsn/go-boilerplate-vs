@@ -40,7 +40,8 @@ Cross-topic map (touching the left → also read the right):
 - **Deleting a slice** → `slice-patterns.md`: drop only its `Used by:` entries, never a pattern.
 - **Middleware / router** (`internal/platform/middleware`, `server`) → `jsonapi.md` + `logging.md` (+ `auth.md`
   for `AccessTokenMiddleware` / `RequireRole`).
-- **Users, roles, tokens, cookies, `refresh_tokens`** → `auth.md` + `jsonapi.md` (*Request documents*).
+- **Users, roles, tokens, cookies, `refresh_tokens`, `auth_sessions`, `session/*`** → `auth.md` + `jsonapi.md`
+  (*Request documents*).
 - **A rate limit, a public endpoint, the client IP / `TRUSTED_PROXIES`** (`internal/platform/ratelimit`,
   `middleware/rate_limit.go`, `server.Security`) → `auth.md` (*Rate limits and the client IP*) + `jsonapi.md`
   (*Request flow*).
@@ -151,7 +152,7 @@ Windows".
   `dto`, `constant` (context keys, cookie names), `utility` (`SafeGo` / `SafeGoContext`, `Group` + `GoFunc` for
   background work main waits for at shutdown, …), `testhelper`.
 - `internal/features/<domain>/<action>` — the vertical slices: `auth/{register,login,refresh,logout}`, `me`,
-  `note/{create,list,detail,update,delete}`, `admin/user`. `<domain>/shared` holds what more than one slice of
+  `note/{create,list,detail,update,delete}`, `session/{list,revoke}` (signed-in devices), `admin/user`. `<domain>/shared` holds what more than one slice of
   that domain needs (`note/shared`: the `NoteResource`, the include policy, the ownership helpers
   `GetOwnedNote` / `LockOwnedNote`, and the shared sqlc querier; `auth/shared`: cookies, reading the refresh
   token off a request, response shapes, the session revoke reasons, and the session queries — `StartSession`,

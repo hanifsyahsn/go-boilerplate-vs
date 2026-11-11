@@ -1,6 +1,6 @@
 # 0006 — Signed-in devices and remote sign-out
 
-Status: part built (2026-11-11): sessions + immediate sign-out; the list / revoke endpoints not yet. Source: an implementation in a derivative.
+Status: built (2026-11-11). Source: an implementation in a derivative.
 
 ## Decision
 The caller can list the devices (sessions) they're signed in on and sign any of them out; signing out the
@@ -17,3 +17,12 @@ The natural continuation of the session model; needed by any service with its ow
   Please sign in again."). A token without `sid` is a 401.
 - Login starts the session with its first refresh token in one statement; refresh requires a live session and
   records its use; logout and reuse detection revoke the session (tokens + row, one statement each).
+
+## As built (part 2: devices)
+- `GET /api/me/sessions` (type `sessions`): the caller's live sessions — not revoked and with a usable refresh
+  token — with user agent, IP, trusted, created / last used, `expires_at` (the untrusted cap, null when trusted)
+  and `current`; `sort` by `last_used_at` / `created_at`, default `-last_used_at`.
+- `DELETE /api/me/sessions/:id`: locks the caller's live session and revokes it (`signed_out_remotely`) → 204;
+  not a UUID / someone else's / not live → 404 "That session doesn't exist."; the current one also clears the
+  cookies.
+- An admin deactivating a user revokes all their sessions (`deactivated`) in the same transaction.

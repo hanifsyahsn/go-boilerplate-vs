@@ -31,6 +31,9 @@ import (
 	listnotesqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/list/sqlc"
 	notesharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/shared/sqlc"
 	updatenotesvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/update"
+	sessionlistsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/list"
+	sessionlistsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/list/sqlc"
+	sessionrevokesvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/revoke"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/config"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
@@ -148,13 +151,16 @@ func main() {
 
 		Me: mesvc.NewHandler(mesvc.NewService(mesqlc.New(conn))),
 
+		ListSessions:  sessionlistsvc.NewHandler(sessionlistsvc.NewService(sessionlistsqlc.New(conn))),
+		RevokeSession: sessionrevokesvc.NewHandler(sessionrevokesvc.NewService(sessionrevokesvc.NewStore(conn)), cookies),
+
 		CreateNote: createnotesvc.NewHandler(createnotesvc.NewService(noteSharedQuerier, createnotesqlc.New(conn))),
 		ListNote:   listnotesvc.NewHandler(listnotesvc.NewService(listnotesqlc.New(conn))),
 		DetailNote: detailnotesvc.NewHandler(detailnotesvc.NewService(noteSharedQuerier)),
 		UpdateNote: updatenotesvc.NewHandler(updatenotesvc.NewService(updatenotesvc.NewStore(conn))),
 		DeleteNote: deletenotesvc.NewHandler(deletenotesvc.NewService(deletenotesvc.NewStore(conn))),
 
-		AdminUser: adminusersvc.NewHandler(adminusersvc.NewService(adminusersqlc.New(conn))),
+		AdminUser: adminusersvc.NewHandler(adminusersvc.NewService(adminusersqlc.New(conn), adminusersvc.NewStore(conn))),
 	}
 
 	gin.SetMode(server.GinMode(conf.Environment))

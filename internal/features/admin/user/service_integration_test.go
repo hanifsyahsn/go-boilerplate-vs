@@ -4,7 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user/sqlc"
+	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/testhelper"
 	"github.com/stretchr/testify/require"
 )
@@ -36,7 +38,7 @@ func TestService_List_I(t *testing.T) {
 			testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Name: "Jane Doe", Email: "jane@example.com"})
 			testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Name: "Old Bob", Email: "bob@example.com", IsActive: testhelper.BoolPtr(false)})
 
-			items, meta, err := NewService(sqlc.New(testDB)).List(context.Background(), tc.req)
+			items, meta, err := NewService(sqlc.New(testDB), NewStore(testDB)).List(context.Background(), tc.req)
 			require.NoError(t, err)
 
 			names := make([]string, 0, len(items))
@@ -59,9 +61,12 @@ func TestService_Update_I(t *testing.T) {
 		before   bool  // the target's is_active before
 		isActive *bool // the PATCH attribute
 		want     bool
+		// wantSessionsRevoked: the target's two sessions end (deactivated).
+		wantSessionsRevoked bool
 	}{
-		{name: "deactivate", before: true, isActive: testhelper.BoolPtr(false), want: false},
-		{name: "activate", before: false, isActive: testhelper.BoolPtr(true), want: true},
+		{name: "deactivate: every session of the user ends as deactivated, another user's kept", before: true,
+			isActive: testhelper.BoolPtr(false), want: false, wantSessionsRevoked: true},
+		{name: "activate: no session touched", before: false, isActive: testhelper.BoolPtr(true), want: true},
 		{name: "no attribute: unchanged", before: false, isActive: nil, want: false},
 	}
 
@@ -71,10 +76,25 @@ func TestService_Update_I(t *testing.T) {
 			admin := testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Role: "admin"})
 			target := testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{IsActive: testhelper.BoolPtr(tc.before)})
 
-			got, err := NewService(sqlc.New(testDB)).Update(context.Background(), target, UpdateRequest{IsActive: tc.isActive}, admin)
+			laptop := testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: uuid.New(), UserID: target})
+			phone := testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: uuid.New(), UserID: target})
+			adminToken := uuid.New()
+			adminSession := testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: adminToken, UserID: admin})
+
+			got, err := NewService(sqlc.New(testDB), NewStore(testDB)).Update(context.Background(), target, UpdateRequest{IsActive: tc.isActive}, admin)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got.IsActive)
 			require.Equal(t, tc.want, testhelper.GetUser(t, testDB, target).IsActive)
+
+			for _, family := range []uuid.UUID{laptop, phone} {
+				session := testhelper.GetSession(t, testDB, family)
+				require.Equal(t, tc.wantSessionsRevoked, session.RevokedAt.Valid)
+				if tc.wantSessionsRevoked {
+					require.Equal(t, authshared.RevokeReasonDeactivated, session.RevokeReason.String)
+				}
+			}
+			require.False(t, testhelper.GetSession(t, testDB, adminSession).RevokedAt.Valid, "another user's session is never touched")
+			require.False(t, testhelper.GetRefreshToken(t, testDB, adminToken).RevokedAt.Valid)
 		})
 	}
 }

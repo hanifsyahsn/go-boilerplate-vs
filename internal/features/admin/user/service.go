@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user/sqlc"
+	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
+	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/pagination"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/utility"
@@ -22,17 +24,20 @@ type S interface {
 	// List returns one page of the user directory, in req.Sort order.
 	List(ctx context.Context, req ListRequest) ([]UserResource, pagination.Meta, error)
 	// Update applies a PATCH to a user and returns it: is_active activates /
-	// deactivates (nil changes nothing). An admin can't deactivate
+	// deactivates (nil changes nothing). Deactivating also ends every session
+	// of the user (deactivated), in the same transaction, so reactivating
+	// later never brings an old device back. An admin can't deactivate
 	// themselves (409) — that would lock them out on their next request.
 	Update(ctx context.Context, userID int64, req UpdateRequest, actorID int64) (UserResource, error)
 }
 
 type service struct {
 	querier sqlc.Querier
+	store   StoreI
 }
 
-func NewService(querier sqlc.Querier) S {
-	return &service{querier: querier}
+func NewService(querier sqlc.Querier, store StoreI) S {
+	return &service{querier: querier, store: store}
 }
 
 func (s *service) List(ctx context.Context, req ListRequest) ([]UserResource, pagination.Meta, error) {
@@ -78,11 +83,28 @@ func (s *service) Update(ctx context.Context, userID int64, req UpdateRequest, a
 			fmt.Errorf("(%s): admin %d tried to deactivate themselves", feature, actorID))
 	}
 
-	r, err := s.querier.SetUserActive(ctx, sqlc.SetUserActiveParams{ID: userID, IsActive: *req.IsActive})
+	var out UserResource
+	err := s.store.RunInTx(ctx, func(q Querier) error {
+		r, err := q.SetUserActive(ctx, sqlc.SetUserActiveParams{ID: userID, IsActive: *req.IsActive})
+		if err != nil {
+			return userError(err, "SetUserActive", userID, "We couldn't update the user.")
+		}
+		if !*req.IsActive {
+			if _, err = q.RevokeUserSessions(ctx, authsharedsqlc.RevokeUserSessionsParams{
+				UserID: userID, Reason: authshared.RevokeReasonDeactivated,
+			}); err != nil {
+				return apperror.New(apperror.CodeInternal,
+					"We couldn't update the user. Please try again, and contact support if the problem continues.",
+					fmt.Errorf("RevokeUserSessions(%d) (%s): %w", userID, feature, err))
+			}
+		}
+		out = fromRow(sqlc.GetUserRow(r))
+		return nil
+	})
 	if err != nil {
-		return UserResource{}, userError(err, "SetUserActive", userID, "We couldn't update the user.")
+		return UserResource{}, err
 	}
-	return fromRow(sqlc.GetUserRow(r)), nil
+	return out, nil
 }
 
 // fromRow builds the response resource of one user. The list / update rows

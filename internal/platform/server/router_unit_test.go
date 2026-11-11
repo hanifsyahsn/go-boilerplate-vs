@@ -21,6 +21,8 @@ import (
 	detailnote "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/detail"
 	listnote "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/list"
 	updatenote "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/update"
+	sessionlist "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/list"
+	sessionrevoke "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/revoke"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
@@ -66,6 +68,12 @@ func TestNewRouter_U(t *testing.T) {
 		{name: "me needs a token", method: http.MethodGet, path: "/api/me", wantCode: http.StatusUnauthorized},
 		{name: "me with a token", method: http.MethodGet, path: "/api/me", role: "user",
 			expect: func(h *mocks) { h.me.EXPECT().Get(gomock.Any()).Do(ok) }, wantCode: http.StatusTeapot},
+		{name: "my sessions need a token", method: http.MethodGet, path: "/api/me/sessions", wantCode: http.StatusUnauthorized},
+		{name: "list my sessions", method: http.MethodGet, path: "/api/me/sessions", role: "user",
+			expect: func(h *mocks) { h.sessions.EXPECT().List(gomock.Any()).Do(ok) }, wantCode: http.StatusTeapot},
+		{name: "signing a session out needs a token", method: http.MethodDelete, path: "/api/me/sessions/x", wantCode: http.StatusUnauthorized},
+		{name: "sign a session out", method: http.MethodDelete, path: "/api/me/sessions/6a1f0c9e-3b52-4d8e-9a10-5c2e7f4b8d31", role: "user",
+			expect: func(h *mocks) { h.revoke.EXPECT().Revoke(gomock.Any()).Do(ok) }, wantCode: http.StatusTeapot},
 		{name: "create note", method: http.MethodPost, path: "/api/notes", role: "user",
 			expect: func(h *mocks) { h.create.EXPECT().Create(gomock.Any()).Do(ok) }, wantCode: http.StatusTeapot},
 		{name: "list notes", method: http.MethodGet, path: "/api/notes", role: "user",
@@ -353,6 +361,8 @@ type mocks struct {
 	refresh   *authrefresh.MockH
 	logout    *authlogout.MockH
 	me        *me.MockH
+	sessions  *sessionlist.MockH
+	revoke    *sessionrevoke.MockH
 	create    *createnote.MockH
 	list      *listnote.MockH
 	detail    *detailnote.MockH
@@ -368,6 +378,8 @@ func newMocks(ctrl *gomock.Controller) *mocks {
 		refresh:   authrefresh.NewMockH(ctrl),
 		logout:    authlogout.NewMockH(ctrl),
 		me:        me.NewMockH(ctrl),
+		sessions:  sessionlist.NewMockH(ctrl),
+		revoke:    sessionrevoke.NewMockH(ctrl),
 		create:    createnote.NewMockH(ctrl),
 		list:      listnote.NewMockH(ctrl),
 		detail:    detailnote.NewMockH(ctrl),
@@ -379,16 +391,18 @@ func newMocks(ctrl *gomock.Controller) *mocks {
 
 func (m *mocks) handlers() Handlers {
 	return Handlers{
-		Register:   m.register,
-		Login:      m.login,
-		Refresh:    m.refresh,
-		Logout:     m.logout,
-		Me:         m.me,
-		CreateNote: m.create,
-		ListNote:   m.list,
-		DetailNote: m.detail,
-		UpdateNote: m.update,
-		DeleteNote: m.delete,
-		AdminUser:  m.adminUser,
+		Register:      m.register,
+		Login:         m.login,
+		Refresh:       m.refresh,
+		Logout:        m.logout,
+		Me:            m.me,
+		ListSessions:  m.sessions,
+		RevokeSession: m.revoke,
+		CreateNote:    m.create,
+		ListNote:      m.list,
+		DetailNote:    m.detail,
+		UpdateNote:    m.update,
+		DeleteNote:    m.delete,
+		AdminUser:     m.adminUser,
 	}
 }

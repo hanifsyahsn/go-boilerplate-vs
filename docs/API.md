@@ -22,6 +22,8 @@ tokens), a personal **notes** CRUD, and a small admin user directory. The whole 
 | `POST` | `/api/auth/refresh` | refresh token | [Rotate the token pair](#post-apiauthrefresh) |
 | `POST` | `/api/auth/logout` | refresh token | [Log out](#post-apiauthlogout): revoke the session, clear the cookies |
 | `GET` | `/api/me` | user | [The caller's own account](#get-apime) |
+| `GET` | `/api/me/sessions` | user | [My signed-in devices](#get-apimesessions) |
+| `DELETE` | `/api/me/sessions/{id}` | user | [Sign a device out](#delete-apimesessionsid) |
 | `POST` | `/api/notes` | user | [Create a note](#1-create-note) |
 | `GET` | `/api/notes` | user | [List my notes](#2-list-notes) (paginated, searchable, sortable) |
 | `GET` | `/api/notes/{id}` | user | [Get one of my notes](#3-get-note) |
@@ -388,6 +390,60 @@ curl -X GET "$BASE/api/me" -H "Authorization: Bearer $TOKEN"
 ```
 
 **Errors:** `401` (no / bad token, inactive account), `404` `Your account was not found.`, `500`.
+
+---
+
+### `GET /api/me/sessions`
+
+The caller's signed-in devices: one `sessions` resource per **live** login (not signed out, and still able to
+refresh). The `id` is the session id to sign it out with.
+
+| Attribute | Type | Meaning |
+| --- | --- | --- |
+| `user_agent` | string | the browser / app of the last login or refresh |
+| `client_ip` | string | its IP at that time |
+| `trusted` | bool | logged in with `trust_device` |
+| `created_at` / `last_used_at` | RFC 3339 | the login / the last refresh |
+| `expires_at` | RFC 3339 or `null` | when an untrusted session ends; `null` = trusted, no cap |
+| `current` | bool | the session of this request's own access token |
+
+Query: `sort` = `last_used_at` / `created_at` (`-` for descending; default `-last_used_at`),
+`fields[sessions]`. No include, filter or pagination (`400`).
+
+```bash
+curl -s "$BASE/api/me/sessions" -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "jsonapi": { "version": "1.1" },
+  "data": [
+    {
+      "type": "sessions", "id": "6a1f0c9e-3b52-4d8e-9a10-5c2e7f4b8d31",
+      "attributes": {
+        "user_agent": "Mozilla/5.0 …", "client_ip": "203.0.113.7", "trusted": false,
+        "created_at": "2026-11-11T08:00:00Z", "last_used_at": "2026-11-11T09:30:00Z",
+        "expires_at": "2026-11-18T08:00:00Z", "current": true
+      }
+    }
+  ],
+  "links": { "self": "/api/me/sessions" }
+}
+```
+
+### `DELETE /api/me/sessions/{id}`
+
+Signs one of the caller's devices out: its refresh token stops working and its access token is a `401`
+*"Your session has ended. Please sign in again."* on its next call. **`204`**, no body. Signing out the
+**current** session is a logout: the auth cookies are cleared too.
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 404 | `not_found` | `That session doesn't exist.` — not a UUID, someone else's, or already signed out / expired |
+
+```bash
+curl -s -X DELETE "$BASE/api/me/sessions/6a1f0c9e-3b52-4d8e-9a10-5c2e7f4b8d31" -H "Authorization: Bearer $TOKEN"
+```
 
 ---
 
