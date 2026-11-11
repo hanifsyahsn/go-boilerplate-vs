@@ -42,6 +42,8 @@ type SeededUser struct {
 	PasswordHash string
 	Role         string
 	IsActive     bool
+	// EmailVerifiedAt is NULL until the email was verified (a link opened).
+	EmailVerifiedAt sql.NullTime
 }
 
 // GetUser reads a user row.
@@ -50,9 +52,9 @@ func GetUser(t *testing.T, db *sql.DB, id int64) SeededUser {
 
 	var u SeededUser
 	err := db.QueryRow(`
-		SELECT id, name, email, password_hash, role, is_active
+		SELECT id, name, email, password_hash, role, is_active, email_verified_at
 		FROM users WHERE id = $1
-	`, id).Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.Role, &u.IsActive)
+	`, id).Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.Role, &u.IsActive, &u.EmailVerifiedAt)
 	require.NoError(t, err, "get user %d", id)
 	return u
 }
@@ -107,4 +109,35 @@ func GetSession(t *testing.T, db *sql.DB, familyID uuid.UUID) SeededSession {
 		&s.RevokedAt, &s.RevokeReason)
 	require.NoError(t, err, "get session %s", familyID)
 	return s
+}
+
+// SeededAuthToken is one auth_tokens row, as read back by tests.
+type SeededAuthToken struct {
+	ID        int64
+	Purpose   string
+	UserID    int64
+	TokenHash string
+	ExpiresAt time.Time
+	UsedAt    sql.NullTime
+}
+
+// GetAuthTokens reads every auth_tokens row of a user, oldest first.
+func GetAuthTokens(t *testing.T, db *sql.DB, userID int64) []SeededAuthToken {
+	t.Helper()
+
+	rows, err := db.Query(`
+		SELECT id, purpose, user_id, token_hash, expires_at, used_at
+		FROM auth_tokens WHERE user_id = $1 ORDER BY id
+	`, userID)
+	require.NoError(t, err, "get auth tokens of %d", userID)
+	defer func() { _ = rows.Close() }()
+
+	var out []SeededAuthToken
+	for rows.Next() {
+		var a SeededAuthToken
+		require.NoError(t, rows.Scan(&a.ID, &a.Purpose, &a.UserID, &a.TokenHash, &a.ExpiresAt, &a.UsedAt))
+		out = append(out, a)
+	}
+	require.NoError(t, rows.Err())
+	return out
 }

@@ -13,6 +13,52 @@ import (
 	"github.com/google/uuid"
 )
 
+const consumeAuthToken = `-- name: ConsumeAuthToken :one
+UPDATE auth_tokens
+SET used_at = now()
+WHERE token_hash = $1
+  AND purpose = $2
+  AND used_at IS NULL
+  AND expires_at > now()
+RETURNING user_id
+`
+
+type ConsumeAuthTokenParams struct {
+	TokenHash string `json:"token_hash"`
+	Purpose   string `json:"purpose"`
+}
+
+// Atomic single use: two parallel requests with one token → one row, the other gets no rows.
+func (q *Queries) ConsumeAuthToken(ctx context.Context, arg ConsumeAuthTokenParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, consumeAuthToken, arg.TokenHash, arg.Purpose)
+	var user_id int64
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
+const insertAuthToken = `-- name: InsertAuthToken :exec
+INSERT INTO auth_tokens (purpose, user_id, token_hash, expires_at)
+VALUES ($1, $2, $3, $4)
+`
+
+type InsertAuthTokenParams struct {
+	Purpose   string    `json:"purpose"`
+	UserID    int64     `json:"user_id"`
+	TokenHash string    `json:"token_hash"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// Records an issued one-time token (its hash only).
+func (q *Queries) InsertAuthToken(ctx context.Context, arg InsertAuthTokenParams) error {
+	_, err := q.db.ExecContext(ctx, insertAuthToken,
+		arg.Purpose,
+		arg.UserID,
+		arg.TokenHash,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
 const insertRefreshToken = `-- name: InsertRefreshToken :exec
 INSERT INTO refresh_tokens (jti, user_id, family_id, expires_at, session_expires_at)
 VALUES ($1, $2, $3, $4, $5)
@@ -100,6 +146,26 @@ func (q *Queries) RevokeUserSessions(ctx context.Context, arg RevokeUserSessions
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const spendUnusedAuthTokens = `-- name: SpendUnusedAuthTokens :exec
+UPDATE auth_tokens
+SET used_at = now()
+WHERE user_id = $1
+  AND purpose = $2
+  AND used_at IS NULL
+`
+
+type SpendUnusedAuthTokensParams struct {
+	UserID  int64  `json:"user_id"`
+	Purpose string `json:"purpose"`
+}
+
+// Spends the user's unused tokens of a purpose before a new one is issued:
+// only the latest link works.
+func (q *Queries) SpendUnusedAuthTokens(ctx context.Context, arg SpendUnusedAuthTokensParams) error {
+	_, err := q.db.ExecContext(ctx, spendUnusedAuthTokens, arg.UserID, arg.Purpose)
+	return err
 }
 
 const startSession = `-- name: StartSession :exec

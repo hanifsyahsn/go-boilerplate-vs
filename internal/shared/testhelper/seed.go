@@ -1,7 +1,9 @@
 package testhelper
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"testing"
 	"time"
@@ -171,10 +173,41 @@ func SeedSession(t *testing.T, db *sql.DB, p SeedSessionParams) uuid.UUID {
 	return p.FamilyID
 }
 
+// SeedAuthTokenParams is one auth_tokens row; zero values get defaults.
+type SeedAuthTokenParams struct {
+	Purpose   string // "" => RESET_PASSWORD
+	UserID    int64  // required
+	Plain     string // required: the token the link carries (its hash is stored)
+	ExpiresAt time.Time
+	// ExpiresAt zero => in an hour. Used => already spent.
+	Used bool
+}
+
+// SeedAuthToken inserts an auth_tokens row for p.Plain and returns its id.
+func SeedAuthToken(t *testing.T, db *sql.DB, p SeedAuthTokenParams) int64 {
+	t.Helper()
+
+	if p.Purpose == "" {
+		p.Purpose = "RESET_PASSWORD"
+	}
+	if p.ExpiresAt.IsZero() {
+		p.ExpiresAt = time.Now().Add(time.Hour)
+	}
+	sum := sha256.Sum256([]byte(p.Plain))
+	var id int64
+	err := db.QueryRow(`
+		INSERT INTO auth_tokens (purpose, user_id, token_hash, expires_at, used_at)
+		VALUES ($1, $2, $3, $4, CASE WHEN $5::boolean THEN now() END)
+		RETURNING id
+	`, p.Purpose, p.UserID, hex.EncodeToString(sum[:]), p.ExpiresAt, p.Used).Scan(&id)
+	require.NoError(t, err, "seed auth token")
+	return id
+}
+
 // Truncate empties every table between test cases.
 func Truncate(t *testing.T, db *sql.DB) {
 	t.Helper()
-	_, err := db.Exec(`TRUNCATE TABLE users, notes, refresh_tokens, auth_sessions RESTART IDENTITY CASCADE`)
+	_, err := db.Exec(`TRUNCATE TABLE users, notes, refresh_tokens, auth_sessions, auth_tokens RESTART IDENTITY CASCADE`)
 	require.NoError(t, err)
 }
 

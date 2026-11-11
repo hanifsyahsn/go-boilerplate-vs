@@ -50,3 +50,27 @@ SET revoked_at    = now(),
 WHERE user_id = sqlc.arg(user_id)::bigint
   AND revoked_at IS NULL
   AND (sqlc.narg(keep_family_id)::uuid IS NULL OR family_id <> sqlc.narg(keep_family_id)::uuid);
+
+-- name: SpendUnusedAuthTokens :exec
+-- Spends the user's unused tokens of a purpose before a new one is issued:
+-- only the latest link works.
+UPDATE auth_tokens
+SET used_at = now()
+WHERE user_id = $1
+  AND purpose = $2
+  AND used_at IS NULL;
+
+-- name: InsertAuthToken :exec
+-- Records an issued one-time token (its hash only).
+INSERT INTO auth_tokens (purpose, user_id, token_hash, expires_at)
+VALUES ($1, $2, $3, $4);
+
+-- name: ConsumeAuthToken :one
+-- Atomic single use: two parallel requests with one token → one row, the other gets no rows.
+UPDATE auth_tokens
+SET used_at = now()
+WHERE token_hash = $1
+  AND purpose = $2
+  AND used_at IS NULL
+  AND expires_at > now()
+RETURNING user_id;

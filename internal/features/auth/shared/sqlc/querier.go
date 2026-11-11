@@ -9,6 +9,10 @@ import (
 )
 
 type Querier interface {
+	// Atomic single use: two parallel requests with one token → one row, the other gets no rows.
+	ConsumeAuthToken(ctx context.Context, arg ConsumeAuthTokenParams) (int64, error)
+	// Records an issued one-time token (its hash only).
+	InsertAuthToken(ctx context.Context, arg InsertAuthTokenParams) error
 	// Records a refresh token of an existing family (refresh continues it).
 	// session_expires_at is NULL for a trusted device (no cap).
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
@@ -20,6 +24,9 @@ type Querier interface {
 	// password change keeps the caller's own, a reset or a deactivation none.
 	// The row count is the sessions revoked.
 	RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error)
+	// Spends the user's unused tokens of a purpose before a new one is issued:
+	// only the latest link works.
+	SpendUnusedAuthTokens(ctx context.Context, arg SpendUnusedAuthTokensParams) error
 	// Starts a login: its auth_sessions row and the family's first refresh token,
 	// in one statement (both or neither). session_expires_at is NULL for a
 	// trusted device (no cap).

@@ -37,6 +37,35 @@ func (m *MockQuerier) EXPECT() *MockQuerierMockRecorder {
 	return m.recorder
 }
 
+// ConsumeAuthToken mocks base method.
+func (m *MockQuerier) ConsumeAuthToken(ctx context.Context, arg sqlc.ConsumeAuthTokenParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ConsumeAuthToken", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ConsumeAuthToken indicates an expected call of ConsumeAuthToken.
+func (mr *MockQuerierMockRecorder) ConsumeAuthToken(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumeAuthToken", reflect.TypeOf((*MockQuerier)(nil).ConsumeAuthToken), ctx, arg)
+}
+
+// InsertAuthToken mocks base method.
+func (m *MockQuerier) InsertAuthToken(ctx context.Context, arg sqlc.InsertAuthTokenParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertAuthToken", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InsertAuthToken indicates an expected call of InsertAuthToken.
+func (mr *MockQuerierMockRecorder) InsertAuthToken(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertAuthToken", reflect.TypeOf((*MockQuerier)(nil).InsertAuthToken), ctx, arg)
+}
+
 // InsertRefreshToken mocks base method.
 func (m *MockQuerier) InsertRefreshToken(ctx context.Context, arg sqlc.InsertRefreshTokenParams) error {
 	m.ctrl.T.Helper()
@@ -94,6 +123,20 @@ func (m *MockQuerier) RevokeUserSessions(ctx context.Context, arg sqlc.RevokeUse
 func (mr *MockQuerierMockRecorder) RevokeUserSessions(ctx, arg interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeUserSessions", reflect.TypeOf((*MockQuerier)(nil).RevokeUserSessions), ctx, arg)
+}
+
+// SpendUnusedAuthTokens mocks base method.
+func (m *MockQuerier) SpendUnusedAuthTokens(ctx context.Context, arg sqlc.SpendUnusedAuthTokensParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SpendUnusedAuthTokens", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SpendUnusedAuthTokens indicates an expected call of SpendUnusedAuthTokens.
+func (mr *MockQuerierMockRecorder) SpendUnusedAuthTokens(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SpendUnusedAuthTokens", reflect.TypeOf((*MockQuerier)(nil).SpendUnusedAuthTokens), ctx, arg)
 }
 
 // StartSession mocks base method.

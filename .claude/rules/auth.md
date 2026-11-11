@@ -13,6 +13,8 @@ paths:
   - ".semgrep/**"
   - "internal/platform/jwttoken/**"
   - "internal/shared/password/**"
+  - "internal/shared/onetimetoken/**"
+  - "internal/platform/mailer/**"
   - "internal/shared/enum/**"
   - "internal/platform/db/migration/000002_*"
   - "internal/platform/db/migration/000004_*"
@@ -81,6 +83,19 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   session doesn't exist." (not-yours reads as not-found); the current `sid` also clears the cookies (a logout).
 - **Deactivating a user** (`PATCH /api/admin/users/:id`, `is_active: false`) revokes all their sessions
   (`deactivated`) in the same transaction, so reactivating never brings an old device back.
+
+- **One-time email tokens** (decision 0007, migration 000007): table `auth_tokens` (`purpose` `VERIFY_EMAIL` 24 h
+  / `RESET_PASSWORD` 1 h, only the SHA-256 of the link's token is stored — `onetimetoken`), `users.email_verified_at`.
+  `authshared.IssueAuthToken` (in the caller's tx) spends the user's unused tokens of that purpose, then inserts
+  the new one — only the latest link works; `ConsumeAuthToken` is the atomic single use (`UPDATE … WHERE unused
+  AND unexpired RETURNING user_id`: two parallel requests with one token → one row). Emails go out through
+  `authshared.Emailer.Send` — off the request path in main's background group (`utility.GoFunc`), a failure logged
+  `send email failed` with `purpose` and `recipient_id`, **never the address or the link**. Texts and links
+  (`APP_BASE_URL + "/reset-password?token="`, `"/verify-email?token="`) are `authshared.ResetEmail` /
+  `PasswordChangedEmail` / `VerifyEmail`.
+- **`mailer`**: `NewSMTP` refuses to send without TLS (465 implicit, else STARTTLS required, certificate verified),
+  15 s per email, a header with CR / LF refused; `NewLog` (development, no `SMTP_HOST`) logs to + subject at info,
+  the body only at debug; `mailer.Fake` records messages for tests.
 
 ### Rate limits and the client IP
 

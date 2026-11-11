@@ -142,14 +142,16 @@ Windows".
   `Setup` / `Check` / `Fatal`, a handler adding `request_id`), `server` (`server.go` + `router.go` with the
   `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `CORS`, `OriginGuard`, `JSONAPIMediaType`,
   `RateLimitByIP`, `AccessTokenMiddleware`, `RequireRole`, its own sqlc for `GetAccessStatus` — user active + session live), `ratelimit`
-  (token-bucket `Limiter` interface + in-memory `NewMemory` — see *Rate limits and the client IP*), `jwttoken` (ES256), `db/tx` (generic
+  (token-bucket `Limiter` interface + in-memory `NewMemory` — see *Rate limits and the client IP*), `mailer`
+  (`Mailer` interface: `NewSMTP`, the development `NewLog`, `Fake` for tests), `jwttoken` (ES256), `db/tx` (generic
   transaction helper), `db/migration`, `constant`.
 - `internal/shared` — cross-cutting: `apperror` (typed error → HTTP status, with a JSON:API `Source`),
   `jsonapi` (documents, serializer, sparse fieldsets, links, error objects, `?include` policy, the query
   parser), `handlerutil` (`ParseQuery` / `BindResource` / `ParamID` / `WriteData` / `WriteMeta` /
   `WriteError`), `validation` (`notblank`, `rfc3339`, `maxbytes`, `RegisterGinValidators`), `pagination`, `password`
   (bcrypt), `enum` (`Role`: `user` / `admin`), `requestid` (`Header`, `Key`, `With` / `FromContext` / `Detach`),
-  `dto`, `constant` (context keys, cookie names), `utility` (`SafeGo` / `SafeGoContext`, `Group` + `GoFunc` for
+  `dto`, `constant` (context keys, cookie names), `onetimetoken` (email-link tokens: `New` → plain + SHA-256 hash),
+  `utility` (`SafeGo` / `SafeGoContext`, `Group` + `GoFunc` for
   background work main waits for at shutdown, …), `testhelper`.
 - `internal/features/<domain>/<action>` — the vertical slices: `auth/{register,login,refresh,logout}`, `me`,
   `note/{create,list,detail,update,delete}`, `session/{list,revoke}` (signed-in devices), `admin/user`. `<domain>/shared` holds what more than one slice of
@@ -205,7 +207,11 @@ optional `REFRESH_TOKEN_DURATION` (default `168h`), `UNTRUSTED_SESSION_DURATION`
 be values `logging.Check` accepts — and `TRUSTED_PROXIES` (comma-separated IPs / CIDRs, default none; each entry
 is checked, see *Rate limits and the client IP*) and `ALLOWED_ORIGINS` (comma-separated `scheme://host[:port]`,
 default none; checked in `Validate`, stored normalised — lowercase, no trailing `/`; one list for CORS and the
-origin guard, empty = both off with a startup warning). Durations are Go duration strings (`15m`).
+origin guard, empty = both off with a startup warning). `APP_BASE_URL` (the front end, `http(s)://…`, no trailing
+`/`; email links are built on it) is required; `SMTP_HOST`, `SMTP_FROM` (an address) are required except with
+`ENVIRONMENT=development` (an empty `SMTP_HOST` there logs emails instead), `SMTP_PORT` defaults to `587`
+(465 = implicit TLS, any other port must offer STARTTLS), `SMTP_USERNAME` / `SMTP_PASSWORD` optional.
+Durations are Go duration strings (`15m`).
 See `.env.example`.
 
 ## Testing conventions

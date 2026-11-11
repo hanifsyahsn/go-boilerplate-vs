@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/mail"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -58,7 +59,23 @@ type Config struct {
 	// Optional, comma separated; each entry is scheme://host[:port], stored
 	// normalised (lowercase, no trailing /). Empty turns both off.
 	AllowedOrigins []string `mapstructure:"ALLOWED_ORIGINS"`
+	// SMTPHost / SMTPPort / SMTPUsername / SMTPPassword / SMTPFrom are the
+	// outgoing mail server (password reset, email verification). Port 465 is
+	// implicit TLS, any other requires STARTTLS. SMTP_HOST and SMTP_FROM (an
+	// address) are required except in development, where an empty SMTP_HOST
+	// logs emails instead of sending them. SMTP_PORT defaults to 587.
+	SMTPHost     string `mapstructure:"SMTP_HOST"`
+	SMTPPort     int    `mapstructure:"SMTP_PORT"`
+	SMTPUsername string `mapstructure:"SMTP_USERNAME"`
+	SMTPPassword string `mapstructure:"SMTP_PASSWORD"`
+	SMTPFrom     string `mapstructure:"SMTP_FROM"`
+	// AppBaseURL is the front end's base URL (http(s)://host[/path], no
+	// trailing /); the links in emails are built on it. Required.
+	AppBaseURL string `mapstructure:"APP_BASE_URL"`
 }
+
+// DefaultSMTPPort is SMTP_PORT when unset: submission with STARTTLS.
+const DefaultSMTPPort = 587
 
 // DefaultRefreshTokenDuration is REFRESH_TOKEN_DURATION when unset: 7 days.
 const DefaultRefreshTokenDuration = 7 * 24 * time.Hour
@@ -120,6 +137,11 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, err
 	}
 
+	smtpPort, err := getIntEnv(v, "SMTP_PORT", DefaultSMTPPort)
+	if err != nil {
+		return Config{}, err
+	}
+
 	config := Config{
 		Environment:              v.GetString("ENVIRONMENT"),
 		ServerAddress:            v.GetString("SERVER_ADDRESS"),
@@ -138,6 +160,12 @@ func LoadConfig(path string) (Config, error) {
 		LogLevel:                 getStringEnv(v, "LOG_LEVEL", DefaultLogLevel),
 		TrustedProxies:           getListEnv(v, "TRUSTED_PROXIES"),
 		AllowedOrigins:           getListEnv(v, "ALLOWED_ORIGINS"),
+		SMTPHost:                 v.GetString("SMTP_HOST"),
+		SMTPPort:                 smtpPort,
+		SMTPUsername:             v.GetString("SMTP_USERNAME"),
+		SMTPPassword:             v.GetString("SMTP_PASSWORD"),
+		SMTPFrom:                 v.GetString("SMTP_FROM"),
+		AppBaseURL:               v.GetString("APP_BASE_URL"),
 	}
 
 	if err = config.Validate(); err != nil {
@@ -183,6 +211,21 @@ func getDurationEnv(v *viper.Viper, key string) (time.Duration, error) {
 	return d, nil
 }
 
+// getIntEnv reads an integer env var, returning defaultVal when unset.
+func getIntEnv(v *viper.Viper, key string, defaultVal int) (int, error) {
+	val := v.GetString(key)
+	if val == "" {
+		return defaultVal, nil
+	}
+
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return 0, fmt.Errorf("config: invalid value for env %s: %q: %w", key, val, err)
+	}
+
+	return n, nil
+}
+
 // getBoolEnv reads a boolean env var, returning defaultVal when unset (a
 // bool's zero value, false, isn't always the wanted default).
 func getBoolEnv(v *viper.Viper, key string, defaultVal bool) (bool, error) {
@@ -219,6 +262,9 @@ func (c Config) Validate() error {
 		{"CLIENT_ID", c.ClientID == ""},
 		{"EC_PRIVATE_KEY_PATH", c.ECPrivateKeyPath == ""},
 		{"EC_PUBLIC_KEY_PATH", c.ECPublicKeyPath == ""},
+		{"APP_BASE_URL", c.AppBaseURL == ""},
+		{"SMTP_HOST", c.SMTPHost == "" && c.Environment != EnvironmentDevelopment},
+		{"SMTP_FROM", c.SMTPFrom == "" && c.Environment != EnvironmentDevelopment},
 	}
 
 	var errs []error
@@ -234,6 +280,17 @@ func (c Config) Validate() error {
 		if !validProxy(proxy) {
 			errs = append(errs, fmt.Errorf("TRUSTED_PROXIES: %q is not an IP or a CIDR", proxy))
 		}
+	}
+	if c.AppBaseURL != "" && !validBaseURL(c.AppBaseURL) {
+		errs = append(errs, fmt.Errorf("config: APP_BASE_URL %q is not an http(s) URL without a trailing / (https://app.example.com)", c.AppBaseURL))
+	}
+	if c.SMTPFrom != "" {
+		if _, err := mail.ParseAddress(c.SMTPFrom); err != nil {
+			errs = append(errs, fmt.Errorf("config: SMTP_FROM %q is not an email address: %w", c.SMTPFrom, err))
+		}
+	}
+	if c.SMTPPort < 1 || c.SMTPPort > 65535 {
+		errs = append(errs, fmt.Errorf("config: SMTP_PORT %d is not a port", c.SMTPPort))
 	}
 	for _, origin := range c.AllowedOrigins {
 		if _, err := NormalizeOrigin(origin); err != nil {
@@ -260,6 +317,21 @@ func NormalizeOrigin(s string) (string, error) {
 		return "", notOrigin
 	}
 	return scheme + "://" + strings.ToLower(u.Host), nil
+}
+
+// EnvironmentDevelopment is the ENVIRONMENT of a developer's machine: the
+// SMTP settings are optional there (emails are logged).
+const EnvironmentDevelopment = "development"
+
+// validBaseURL reports whether s is an absolute http(s) URL with a host, no
+// query, fragment or user info, and no trailing / (links are s + "/path").
+func validBaseURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != "" && u.User == nil &&
+		u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && !strings.HasSuffix(s, "/")
 }
 
 // validProxy reports whether s is an IP or a CIDR, the forms gin's

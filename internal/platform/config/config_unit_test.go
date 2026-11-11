@@ -20,6 +20,9 @@ var validEnv = map[string]string{
 	"CLIENT_ID":              "client",
 	"EC_PRIVATE_KEY_PATH":    "private.pem",
 	"EC_PUBLIC_KEY_PATH":     "public.pem",
+	"APP_BASE_URL":           "https://app.example.com",
+	"SMTP_HOST":              "smtp.example.com",
+	"SMTP_FROM":              "App <no-reply@example.com>",
 }
 
 func TestLoadConfig_Env_U(t *testing.T) {
@@ -42,6 +45,48 @@ func TestLoadConfig_Env_U(t *testing.T) {
 				require.Equal(t, "info", c.LogLevel)
 				require.Empty(t, c.TrustedProxies, "no proxy trusted by default")
 				require.Empty(t, c.AllowedOrigins, "no origin allowed by default")
+				require.Equal(t, 587, c.SMTPPort, "SMTP submission port by default")
+				require.Equal(t, "https://app.example.com", c.AppBaseURL)
+			},
+		},
+		{
+			name: "SMTP settings read",
+			override: map[string]string{"SMTP_PORT": "465", "SMTP_USERNAME": "mailer", "SMTP_PASSWORD": "secret",
+				"SMTP_FROM": "no-reply@example.com"},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Equal(t, "smtp.example.com", c.SMTPHost)
+				require.Equal(t, 465, c.SMTPPort)
+				require.Equal(t, "mailer", c.SMTPUsername)
+				require.Equal(t, "secret", c.SMTPPassword)
+				require.Equal(t, "no-reply@example.com", c.SMTPFrom)
+			},
+		},
+		{
+			name:     "in development the SMTP host and sender may be empty (emails are logged)",
+			override: map[string]string{"ENVIRONMENT": "development", "SMTP_HOST": "", "SMTP_FROM": ""},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Empty(t, c.SMTPHost)
+			},
+		},
+		{name: "outside development the SMTP host is required", override: map[string]string{"SMTP_HOST": ""}, wantErr: "SMTP_HOST is required"},
+		{name: "outside development the sender is required", override: map[string]string{"SMTP_FROM": ""}, wantErr: "SMTP_FROM is required"},
+		{name: "a sender that isn't an address", override: map[string]string{"SMTP_FROM": "nobody"}, wantErr: `SMTP_FROM "nobody" is not an email address`},
+		{name: "an SMTP port that isn't a number", override: map[string]string{"SMTP_PORT": "smtp"}, wantErr: "SMTP_PORT"},
+		{name: "an SMTP port out of range", override: map[string]string{"SMTP_PORT": "70000"}, wantErr: "SMTP_PORT 70000 is not a port"},
+		{name: "the app base URL is required", override: map[string]string{"APP_BASE_URL": ""}, wantErr: "APP_BASE_URL is required"},
+		{name: "an app base URL with a trailing slash", override: map[string]string{"APP_BASE_URL": "https://app.example.com/"},
+			wantErr: `APP_BASE_URL "https://app.example.com/" is not an http(s) URL`},
+		{name: "an app base URL that isn't http(s)", override: map[string]string{"APP_BASE_URL": "ftp://app.example.com"},
+			wantErr: "APP_BASE_URL"},
+		{name: "an app base URL with a query", override: map[string]string{"APP_BASE_URL": "https://app.example.com?x=1"},
+			wantErr: "APP_BASE_URL"},
+		{name: "an app base URL that doesn't parse", override: map[string]string{"APP_BASE_URL": "https://exa mple.com"},
+			wantErr: "APP_BASE_URL"},
+		{
+			name:     "an app base URL with a path",
+			override: map[string]string{"APP_BASE_URL": "https://example.com/app"},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Equal(t, "https://example.com/app", c.AppBaseURL)
 			},
 		},
 		{
@@ -140,6 +185,9 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			t.Setenv("LOG_LEVEL", "")
 			t.Setenv("TRUSTED_PROXIES", "")
 			t.Setenv("ALLOWED_ORIGINS", "")
+			t.Setenv("SMTP_PORT", "")
+			t.Setenv("SMTP_USERNAME", "")
+			t.Setenv("SMTP_PASSWORD", "")
 			for k, v := range tc.override {
 				t.Setenv(k, v)
 			}
