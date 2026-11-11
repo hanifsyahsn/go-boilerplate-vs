@@ -155,7 +155,7 @@ Windows".
   background work main waits for at shutdown, …), `testhelper`.
 - `internal/features/<domain>/<action>` — the vertical slices:
   `auth/{register,login,refresh,logout,passwordresetrequest,passwordreset,passwordchange,emailverification,
-  emailverificationrequest}`, `me`, `activitylog` (the recorder, no endpoint),
+  emailverificationrequest}`, `me`, `activitylog` (the recorder, no endpoint), `cleanup` (the worker, no endpoint),
   `note/{create,list,detail,update,delete}`, `session/{list,revoke}` (signed-in devices), `admin/user`. `<domain>/shared` holds what more than one slice of
   that domain needs (`note/shared`: the `NoteResource`, the include policy, the ownership helpers
   `GetOwnedNote` / `LockOwnedNote`, and the shared sqlc querier; `auth/shared`: cookies, reading the refresh
@@ -213,7 +213,7 @@ origin guard, empty = both off with a startup warning). `APP_BASE_URL` (the fron
 `/`; email links are built on it) is required; `SMTP_HOST`, `SMTP_FROM` (an address) are required except with
 `ENVIRONMENT=development` (an empty `SMTP_HOST` there logs emails instead), `SMTP_PORT` defaults to `587`
 (465 = implicit TLS, any other port must offer STARTTLS), `SMTP_USERNAME` / `SMTP_PASSWORD` optional.
-`ACTIVITY_LOG_RETENTION` (optional, default `17520h` = 2 years, `0` = keep forever).
+`ACTIVITY_LOG_RETENTION` (optional, default `17520h` = 2 years, `0` = keep forever; the cleanup worker applies it).
 Durations are Go duration strings (`15m`).
 See `.env.example`.
 
@@ -262,5 +262,9 @@ See `.env.example`.
   Behind a reverse proxy, `TRUSTED_PROXIES` must list it, or every client shares the proxy's IP.
 - `.semgrep/` is `make sec`'s project ruleset; `semgrep --config .semgrep/` errors if the folder is missing, so
   keep at least one rule there.
-- `refresh_tokens` grows by one row per refresh and nothing prunes it yet; add a periodic
-  `DELETE FROM refresh_tokens WHERE expires_at < now()` job when it matters.
+- **Expired rows are pruned by `cleanup.Worker`** (decision 0005, in main's background group): a minute after
+  start, then every 24 h, on every replica (idempotent deletes, 10,000 rows per batch): refresh tokens past
+  their expiry or session cap (a revoked but unexpired one is **kept** — reuse detection needs it), sessions
+  with no token left, expired one-time tokens, activity rows past `ACTIVITY_LOG_RETENTION`. One table's error is
+  logged (`cleanup failed`, `table`) and the others still run; a run ends with `cleanup done` and the counts. A
+  new table that grows → one more step there (one log field).

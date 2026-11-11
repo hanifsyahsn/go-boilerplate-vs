@@ -3,6 +3,7 @@ paths:
   - "cmd/api/**"
   - "internal/platform/logging/**"
   - "internal/features/activitylog/**"
+  - "internal/features/cleanup/**"
   - "internal/platform/middleware/**"
   - "internal/platform/server/**"
   - "internal/shared/requestid/**"

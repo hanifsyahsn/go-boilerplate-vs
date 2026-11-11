@@ -1171,4 +1171,3 @@ again later logs the session out.
 ### Current limitations
 
 - No way to change a user's role over the API.
-- `refresh_tokens` grows by one row per refresh; nothing prunes it yet.

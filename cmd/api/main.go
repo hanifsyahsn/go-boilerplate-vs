@@ -30,6 +30,8 @@ import (
 	authregistersvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register"
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/cleanup"
+	cleanupsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/cleanup/sqlc"
 	mesvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/me"
 	mesqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/me/sqlc"
 	createnotesvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/note/create"
@@ -131,6 +133,9 @@ func main() {
 	// the recorder, flushed at shutdown (decision 0008).
 	activity := activitylog.NewRecorder(activitylogsqlc.New(conn))
 	bg.Go(bgCtx, activity.Run)
+	// Expired tokens, dead sessions, old activity rows: a minute after start,
+	// then daily, on every replica (the deletes are idempotent).
+	bg.Go(bgCtx, cleanup.NewWorker(cleanupsqlc.New(conn), conf.ActivityLogRetention).Run)
 
 	if err = validation.RegisterGinValidators(); err != nil {
 		logging.Fatal("register validators failed", "err", err)

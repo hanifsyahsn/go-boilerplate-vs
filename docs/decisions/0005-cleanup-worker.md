@@ -1,6 +1,6 @@
 # 0005 — Cleanup worker
 
-Status: part built (2026-11-11): the background group and shutdown order; the worker itself not yet. Source: implementations in derivatives.
+Status: built (2026-11-11). Source: implementations in derivatives.
 
 ## Decision
 A background worker (no endpoint) that once a day deletes rows of no further use: expired / revoked refresh
@@ -16,3 +16,9 @@ Closes the *Gotcha* "`refresh_tokens` grows by one row per refresh and nothing p
 - `main`: `bgCtx, stopBg := context.WithCancel(context.WithoutCancel(ctx))`; after `srv.Run` returned (requests
   drained) → `stopBg()` → `bg.Wait()` → the deferred DB close. A `srv.Run` error is reported only after that, so
   it never skips the flush.
+
+## As built (part 2: the worker)
+- `cleanup.Worker` in main's background group: a minute after start, then every 24 h, on every replica. In
+  batches of 10,000 until a short one: refresh tokens past expiry or session cap (never a revoked-but-unexpired
+  one), sessions with no token left, expired one-time tokens, activity rows past `ACTIVITY_LOG_RETENTION` (0 =
+  keep). One table's error doesn't stop the others; a done ctx stops between batches.
