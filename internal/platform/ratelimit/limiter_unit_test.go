@@ -76,6 +76,49 @@ func TestMemory_U(t *testing.T) {
 			},
 		},
 		{
+			name: "Return gives one token back, not the whole burst",
+			run: func(t *testing.T, m *Memory, _ *time.Time) {
+				take(t, m, "a")
+				take(t, m, "a")
+				require.NoError(t, m.Return(context.Background(), "a"))
+				require.Equal(t, allowed, take(t, m, "a"))
+				require.Equal(t, Decision{RetryAfter: 30 * time.Second}, take(t, m, "a"))
+			},
+		},
+		{
+			name: "Return adds to what refilled meanwhile",
+			run: func(t *testing.T, m *Memory, now *time.Time) {
+				take(t, m, "a")
+				take(t, m, "a")
+				*now = now.Add(20 * time.Second) // 2/3 of a token back
+				require.NoError(t, m.Return(context.Background(), "a"))
+				require.Equal(t, allowed, take(t, m, "a"))
+				require.Equal(t, Decision{RetryAfter: 10 * time.Second}, take(t, m, "a"))
+			},
+		},
+		{
+			name: "Return never goes past the burst, and a bucket it fills is dropped",
+			run: func(t *testing.T, m *Memory, _ *time.Time) {
+				take(t, m, "a")
+				require.NoError(t, m.Return(context.Background(), "a"))
+				require.NoError(t, m.Return(context.Background(), "a"))
+				require.Empty(t, m.buckets)
+				require.Equal(t, allowed, take(t, m, "a"))
+				require.Equal(t, allowed, take(t, m, "a"))
+				require.False(t, take(t, m, "a").Allowed)
+			},
+		},
+		{
+			name: "Return on a key with no bucket is a no-op",
+			run: func(t *testing.T, m *Memory, _ *time.Time) {
+				require.NoError(t, m.Return(context.Background(), "z"))
+				require.Empty(t, m.buckets)
+				require.Equal(t, allowed, take(t, m, "z"))
+				require.Equal(t, allowed, take(t, m, "z"))
+				require.False(t, take(t, m, "z").Allowed)
+			},
+		},
+		{
 			name: "Reset refills the key's bucket",
 			run: func(t *testing.T, m *Memory, _ *time.Time) {
 				take(t, m, "a")

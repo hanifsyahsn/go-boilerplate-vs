@@ -35,16 +35,16 @@ func (m *MockS) EXPECT() *MockSMockRecorder {
 }
 
 // Login mocks base method.
-func (m *MockS) Login(ctx context.Context, req Request) (Result, error) {
+func (m *MockS) Login(ctx context.Context, req Request, client Client) (Result, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Login", ctx, req)
+	ret := m.ctrl.Call(m, "Login", ctx, req, client)
 	ret0, _ := ret[0].(Result)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Login indicates an expected call of Login.
-func (mr *MockSMockRecorder) Login(ctx, req interface{}) *gomock.Call {
+func (mr *MockSMockRecorder) Login(ctx, req, client interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockS)(nil).Login), ctx, req)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockS)(nil).Login), ctx, req, client)
 }

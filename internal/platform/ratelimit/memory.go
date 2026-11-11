@@ -83,6 +83,22 @@ func (m *Memory) Reset(_ context.Context, key string) error {
 	return nil
 }
 
+func (m *Memory) Return(_ context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	b, ok := m.buckets[key]
+	if !ok {
+		return nil
+	}
+	m.refill(b, m.now())
+	b.tokens = math.Min(float64(m.rate.Burst), b.tokens+1)
+	if b.tokens >= float64(m.rate.Burst) {
+		delete(m.buckets, key) // full is the same as no bucket
+	}
+	return nil
+}
+
 // refill brings b's tokens up to now; caller holds mu.
 func (m *Memory) refill(b *bucket, now time.Time) {
 	if elapsed := now.Sub(b.at); elapsed > 0 {

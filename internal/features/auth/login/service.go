@@ -36,15 +36,37 @@ type S interface {
 	// login, i.e. per device). An untrusted device's family is capped at
 	// untrustedSessionDuration from now; a trusted one slides with no cap.
 	//
-	// Failed logins are capped per email (the failures limiter, a token
-	// bucket): every attempt takes a token *first*, atomically, so parallel
-	// guesses can't all pass a check before any is counted; the right password
-	// refills the bucket, so in effect only failures count. Once it's empty
-	// every attempt for that email is a 429 without touching the DB — the
-	// right password included, until a token comes back. A limiter that
-	// errors or refuses the key is a 500 / 429 (fail closed); only a failed
-	// refill after a success is just logged.
-	Login(ctx context.Context, req Request) (Result, error)
+	// Failed logins are capped twice (token buckets, Limiters): per email,
+	// and per client IP across every email (credential stuffing tries each
+	// email once, so the per-email cap alone never fires). Every attempt
+	// takes a token from both *first*, atomically, so parallel guesses can't
+	// all pass a check before any is counted — the IP first, so a caller the
+	// IP cap already stopped can't drain a victim's email budget, and the IP
+	// token is given back when the email refuses (no password was tried).
+	// The right password refills the email bucket and gives the IP token
+	// back (never refills the IP bucket: one real account would wipe an
+	// attacker's count), so in effect only failures count. An empty bucket
+	// is a 429 without touching the DB — the right password included, until
+	// a token comes back. A limiter that errors or refuses the key is a
+	// 500 / 429 (fail closed); only a failed give-back is just logged.
+	Login(ctx context.Context, req Request, client Client) (Result, error)
+}
+
+// Limiters are the login's failure budgets.
+type Limiters struct {
+	// Email counts wrong credentials per email (failureKey).
+	Email ratelimit.Limiter
+	// IP counts wrong credentials per client IP, across emails (ipFailureKey).
+	IP ratelimit.Limiter
+}
+
+// Client is who is logging in, from the request (not the document).
+type Client struct {
+	// IP is c.ClientIP() (TRUSTED_PROXIES decides whether a proxy's
+	// X-Forwarded-For counts).
+	IP string
+	// UserAgent is the request's User-Agent (kept for the session list).
+	UserAgent string
 }
 
 type service struct {
@@ -55,8 +77,7 @@ type service struct {
 	refreshTokenDuration time.Duration
 	// untrustedSessionDuration caps a login without trust_device.
 	untrustedSessionDuration time.Duration
-	// failures counts wrong credentials per email (failureKey).
-	failures ratelimit.Limiter
+	limits                   Limiters
 	// checkPassword is password.CheckOrWaste; a seam for the test that pins
 	// the unknown-email path still spends a bcrypt comparison.
 	checkPassword func(hash, plain string) bool
@@ -69,7 +90,7 @@ func NewService(
 	authSharedQuerier authsharedsqlc.Querier,
 	tokenMaker jwttoken.M,
 	accessTokenDuration, refreshTokenDuration, untrustedSessionDuration time.Duration,
-	failures ratelimit.Limiter,
+	limits Limiters,
 ) S {
 	return &service{
 		querier:              querier,
@@ -79,7 +100,7 @@ func NewService(
 		refreshTokenDuration: refreshTokenDuration,
 
 		untrustedSessionDuration: untrustedSessionDuration,
-		failures:                 failures,
+		limits:                   limits,
 		checkPassword:            password.CheckOrWaste,
 		newFamilyID:              uuid.New,
 		now:                      time.Now,
@@ -93,15 +114,34 @@ func failureKey(email string) string {
 	return "login:" + strings.ToLower(strings.TrimSpace(email))
 }
 
-func (s *service) Login(ctx context.Context, req Request) (Result, error) {
-	key := failureKey(req.Email)
+// ipFailureKey is the IP limiter's key: an IPv6 client is counted per /64.
+func ipFailureKey(ip string) string {
+	return "loginip:" + ratelimit.IPKey(ip)
+}
+
+func (s *service) Login(ctx context.Context, req Request, client Client) (Result, error) {
+	emailKey, ipKey := failureKey(req.Email), ipFailureKey(client.IP)
 	// Take before anything else (not peek now, count later): the bcrypt
 	// comparison takes ~100ms, and a check-then-count would let N parallel
 	// requests all pass the check before the first one is counted.
-	d, err := s.failures.Take(ctx, key)
+	d, err := s.limits.IP.Take(ctx, ipKey)
 	if err != nil {
 		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
-			fmt.Errorf("failures.Take() (%s): %w", feature, err))
+			fmt.Errorf("limits.IP.Take() (%s): %w", feature, err))
+	}
+	if !d.Allowed {
+		return Result{}, apperror.New(apperror.CodeTooManyRequests, tooManyFailuresMessage,
+			fmt.Errorf("(%s): login failures exceeded for an IP", feature))
+	}
+
+	d, err = s.limits.Email.Take(ctx, emailKey)
+	if err != nil || !d.Allowed {
+		// No password is tried, so this attempt doesn't count against the IP.
+		s.giveBack(ctx, "ip", s.limits.IP.Return(ctx, ipKey))
+	}
+	if err != nil {
+		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
+			fmt.Errorf("limits.Email.Take() (%s): %w", feature, err))
 	}
 	if !d.Allowed {
 		return Result{}, apperror.New(apperror.CodeTooManyRequests, tooManyFailuresMessage,
@@ -128,11 +168,11 @@ func (s *service) Login(ctx context.Context, req Request) (Result, error) {
 	}
 
 	// The credentials are right: the email's failures start over (this
-	// attempt's token included). A failed refill only leaves the count as it
-	// was, so it doesn't fail the login.
-	if err := s.failures.Reset(ctx, key); err != nil {
-		slog.WarnContext(ctx, "login: reset failure count failed", "feature", feature, "err", err)
-	}
+	// attempt's token included), and the IP gets this attempt's token back —
+	// only that one, the IP's other failures stay counted. A failed give-back
+	// only leaves a count as it was, so it doesn't fail the login.
+	s.giveBack(ctx, "email", s.limits.Email.Reset(ctx, emailKey))
+	s.giveBack(ctx, "ip", s.limits.IP.Return(ctx, ipKey))
 
 	// Checked after the password, so only the account holder learns it's
 	// deactivated.
@@ -175,4 +215,12 @@ func (s *service) Login(ctx context.Context, req Request) (Result, error) {
 		User:   authshared.NewUserResource(user.ID, user.Name, user.Email, user.Role),
 		Tokens: tokens,
 	}, nil
+}
+
+// giveBack logs a failed Reset / Return of a failure budget; it never fails
+// the login.
+func (s *service) giveBack(ctx context.Context, limiter string, err error) {
+	if err != nil {
+		slog.WarnContext(ctx, "login: give back failure count failed", "feature", feature, "limiter", limiter, "err", err)
+	}
 }

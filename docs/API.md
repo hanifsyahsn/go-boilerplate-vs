@@ -155,6 +155,7 @@ it comes back evenly over the period):
 | --- | --- | --- |
 | 300 requests / 15 min **per client IP** (IPv6: per /64) | register + login together (refresh and logout are never limited) | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
 | 5 **failed** logins / 15 min **per email** (then one more every 3 min) | login: an unknown email and a wrong password both count; a successful login resets it | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login for that email, the right password too, until a try comes back |
+| 100 **failed** logins / 6 h **per client IP**, across every email (IPv6: per /64; then one more every 3.6 min) | login: an unknown email and a wrong password both count; a successful login doesn't count (but doesn't clear the IP's earlier failures); a login refused for its email doesn't count either | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login from that IP, the right password too, until a try comes back |
 
 The client IP is the connection's address; `X-Forwarded-For` / `X-Real-IP` count only from a proxy listed in
 `TRUSTED_PROXIES`. On a 429, show the message and don't retry automatically.
@@ -259,7 +260,7 @@ Set-Cookie: app-refresh-token=eyJhbGciOi…; Path=/api/auth; Max-Age=604799; Htt
 | 401 | `unauthorized` | `The email or password is incorrect.` — the **same** message for an unknown email and a wrong password, so an account's existence never leaks |
 | 401 | `unauthorized` | `Your account is no longer active.` — only **after** the password matched |
 | 422 | `unprocessable_entity` | a field failed validation |
-| 429 | `too_many_requests` | the email used up its failed logins, or the IP its register + login budget (see *Rate limits* above) |
+| 429 | `too_many_requests` | the email or the IP used up its failed logins, or the IP its register + login budget (see *Rate limits* above) |
 | 500 | `internal_error` | token signing / DB failure |
 
 ### `POST /api/auth/refresh`
@@ -526,7 +527,7 @@ The links keep the request's other parameters (filters, sort, fields) — follow
 | `conflict` | 409 | Email already registered; wrong resource `type`; body `id` ≠ URL id; an admin deactivating themselves |
 | `unsupported_media_type` | 415 | See [Content negotiation](#content-negotiation) |
 | `unprocessable_entity` | 422 | A field failed validation / has the wrong JSON type |
-| `too_many_requests` | 429 | Register / login rate limit (per IP, or failed logins per email) |
+| `too_many_requests` | 429 | Register / login rate limit (per IP, or failed logins per email / per IP) |
 | `internal_error` | 500 | Unexpected server error (`Something went wrong, please try again.`) — also a panic |
 
 ---

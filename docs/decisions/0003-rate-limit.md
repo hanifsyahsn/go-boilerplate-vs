@@ -1,7 +1,8 @@
 # 0003 — Rate limit
 
 Status: accepted (2026-11-10); part built 2026-11-11 — the `Limiter` interface + in-memory token bucket (point 1's
-default, point 2). Redis + fallback (points 1, 4, 5) and the general per-IP layer (point 3) not built yet.
+default, point 2), failed logins per IP (point 6). Redis + fallback (points 1, 4, 5) and the general per-IP layer
+(point 3) not built yet.
 
 ## Decision
 1. One `Limiter` interface, two implementations: **in-memory** (default) and **Redis** (used when `REDIS_URL` is set).
@@ -13,6 +14,11 @@ default, point 2). Redis + fallback (points 1, 4, 5) and the general per-IP laye
 5. The Redis implementation is an atomic Lua token bucket with a TTL long enough for a bucket to refill, ported
    from a derivative that already runs it and reshaped to the boilerplate's conventions (slog, JSON:API 429 +
    `Retry-After`).
+6. **Failed logins per client IP, across emails** (added 2026-11-11): 100 / 6 h. Credential stuffing tries each
+   leaked email once, so the per-email cap never fires. Taken before the email's token; given back with a new
+   `Limiter.Return` (one token, never past Burst) when the email refuses or the password is right — never a
+   `Reset`, which would let one real account wipe an attacker's count. No IP allowlist: only failures count, so a
+   shared IP full of people who type their password right never reaches it.
 
 ## Porting rules (agreed 2026-11-11)
 The derivative's Redis limiter is **not** ported as it is:

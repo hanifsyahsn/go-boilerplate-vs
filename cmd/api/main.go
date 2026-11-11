@@ -53,6 +53,11 @@ var (
 	// loginFailureRate caps failed logins per email: 5 at once, then one
 	// more every 3 minutes.
 	loginFailureRate = ratelimit.Rate{Burst: 5, Per: 15 * time.Minute}
+	// loginIPFailureRate caps failed logins per client IP across every email
+	// (credential stuffing tries each email once): 100 at once, then one more
+	// every 3.6 minutes. Only failures count, so a NAT full of people who
+	// type their password right never reaches it.
+	loginIPFailureRate = ratelimit.Rate{Burst: 100, Per: 6 * time.Hour}
 )
 
 func main() {
@@ -111,7 +116,10 @@ func main() {
 		Login: authloginsvc.NewHandler(
 			authloginsvc.NewService(authloginsqlc.New(conn), authSharedQuerier, tokenMaker,
 				conf.AccessTokenDuration, conf.RefreshTokenDuration, conf.UntrustedSessionDuration,
-				ratelimit.NewMemory(loginFailureRate)),
+				authloginsvc.Limiters{
+					Email: ratelimit.NewMemory(loginFailureRate),
+					IP:    ratelimit.NewMemory(loginIPFailureRate),
+				}),
 			cookies,
 		),
 		Refresh: authrefreshsvc.NewHandler(

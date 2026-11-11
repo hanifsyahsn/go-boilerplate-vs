@@ -65,7 +65,10 @@ func TestService_Login_I(t *testing.T) {
 			userID := testhelper.SeedUser(t, testDB, tc.seed)
 
 			got, err := NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), maker, time.Minute, time.Hour, untrustedTTL,
-				ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: time.Minute})).Login(context.Background(), tc.req)
+				Limiters{
+					Email: ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: time.Minute}),
+					IP:    ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: time.Minute}),
+				}).Login(context.Background(), tc.req, Client{IP: "203.0.113.7"})
 			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)

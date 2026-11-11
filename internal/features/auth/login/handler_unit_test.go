@@ -38,10 +38,11 @@ func TestHandler_Login_U(t *testing.T) {
 		wantCookies bool
 	}{
 		{
-			name: "logged in: cookies set, the account as data, tokens in meta",
+			name: "logged in: cookies set, the account as data, tokens in meta; the service gets the client's IP and user agent",
 			body: doc(`{"email":"jane@example.com","password":"Passw0rd!"}`),
 			stub: func(s *MockS) {
-				s.EXPECT().Login(gomock.Any(), Request{Email: "jane@example.com", Password: "Passw0rd!"}).Return(ok, nil)
+				s.EXPECT().Login(gomock.Any(), Request{Email: "jane@example.com", Password: "Passw0rd!"},
+					Client{IP: "192.0.2.1", UserAgent: "test-agent/1.0"}).Return(ok, nil)
 			},
 			wantCode:    http.StatusOK,
 			wantInBody:  []string{`"data":{"type":"users","id":"1"`, `"access_token":"acc"`, `"refresh_token":"ref"`},
@@ -66,7 +67,7 @@ func TestHandler_Login_U(t *testing.T) {
 			name: "a 72-byte password reaches the service",
 			body: doc(`{"email":"jane@example.com","password":"` + strings.Repeat("é", 36) + `"}`),
 			stub: func(s *MockS) {
-				s.EXPECT().Login(gomock.Any(), Request{Email: "jane@example.com", Password: strings.Repeat("é", 36)}).Return(ok, nil)
+				s.EXPECT().Login(gomock.Any(), Request{Email: "jane@example.com", Password: strings.Repeat("é", 36)}, gomock.Any()).Return(ok, nil)
 			},
 			wantCode:    http.StatusOK,
 			wantCookies: true,
@@ -87,16 +88,18 @@ func TestHandler_Login_U(t *testing.T) {
 			name: "wrong credentials: 401, no cookies",
 			body: doc(`{"email":"jane@example.com","password":"wrong"}`),
 			stub: func(s *MockS) {
-				s.EXPECT().Login(gomock.Any(), gomock.Any()).
+				s.EXPECT().Login(gomock.Any(), gomock.Any(), gomock.Any()).
 					Return(Result{}, apperror.New(apperror.CodeUnauthorized, invalidCredentialsMessage, nil))
 			},
 			wantCode:   http.StatusUnauthorized,
 			wantInBody: []string{invalidCredentialsMessage},
 		},
 		{
-			name:     "service generic error",
-			body:     doc(`{"email":"jane@example.com","password":"x"}`),
-			stub:     func(s *MockS) { s.EXPECT().Login(gomock.Any(), gomock.Any()).Return(Result{}, errors.New("boom")) },
+			name: "service generic error",
+			body: doc(`{"email":"jane@example.com","password":"x"}`),
+			stub: func(s *MockS) {
+				s.EXPECT().Login(gomock.Any(), gomock.Any(), gomock.Any()).Return(Result{}, errors.New("boom"))
+			},
 			wantCode: http.StatusInternalServerError,
 		},
 	}
@@ -110,7 +113,8 @@ func TestHandler_Login_U(t *testing.T) {
 			r := gin.New()
 			Route(r.Group("/api"), NewHandler(svc, authshared.CookieConfig{}))
 
-			req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(tc.body))
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(tc.body)) // RemoteAddr 192.0.2.1
+			req.Header.Set("User-Agent", "test-agent/1.0")
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 

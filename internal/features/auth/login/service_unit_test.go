@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -25,6 +26,17 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/password"
 	"github.com/stretchr/testify/require"
 )
+
+// testClient is the caller of every login that isn't about the IP limit.
+var testClient = Client{IP: "203.0.113.7", UserAgent: "test"}
+
+// wideLimits never refuse in these tests (5 per email, 1000 per IP).
+func wideLimits() Limiters {
+	return Limiters{
+		Email: ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: time.Minute}),
+		IP:    ratelimit.NewMemory(ratelimit.Rate{Burst: 1000, Per: time.Minute}),
+	}
+}
 
 func TestService_Login_U(t *testing.T) {
 	hash, err := password.Hash("Passw0rd!")
@@ -131,11 +143,11 @@ func TestService_Login_U(t *testing.T) {
 			m := jwttoken.NewMockM(ctrl)
 			tc.stub(q, sq, m)
 
-			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: time.Minute}))
+			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, wideLimits())
 			svc.(*service).newFamilyID = func() uuid.UUID { return familyID }
 			svc.(*service).now = func() time.Time { return now }
 
-			got, err := svc.Login(context.Background(), tc.req)
+			got, err := svc.Login(context.Background(), tc.req, testClient)
 			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
@@ -208,7 +220,8 @@ func TestService_Login_FailureLimit_U(t *testing.T) {
 			q := sqlc.NewMockQuerier(ctrl)
 			sq := authsharedsqlc.NewMockQuerier(ctrl)
 			m := jwttoken.NewMockM(ctrl)
-			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, ratelimit.NewMemory(ratelimit.Rate{Burst: 2, Per: time.Minute}))
+			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour,
+				Limiters{Email: ratelimit.NewMemory(ratelimit.Rate{Burst: 2, Per: time.Minute}), IP: wideLimits().IP})
 
 			for i, a := range tc.attempts {
 				if a.wantCode != apperror.CodeTooManyRequests {
@@ -223,7 +236,7 @@ func TestService_Login_FailureLimit_U(t *testing.T) {
 					sq.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
 				}
 
-				_, err := svc.Login(context.Background(), Request{Email: a.email, Password: a.password})
+				_, err := svc.Login(context.Background(), Request{Email: a.email, Password: a.password}, testClient)
 				if a.wantCode.IsZero() {
 					require.NoError(t, err, "attempt %d", i)
 					continue
@@ -264,7 +277,7 @@ func TestService_Login_TimingEqualized_U(t *testing.T) {
 			q := sqlc.NewMockQuerier(ctrl)
 			q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(tc.row, tc.readErr)
 			svc := NewService(q, authsharedsqlc.NewMockQuerier(ctrl), jwttoken.NewMockM(ctrl),
-				15*time.Minute, 24*time.Hour, 12*time.Hour, ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: time.Minute}))
+				15*time.Minute, 24*time.Hour, 12*time.Hour, wideLimits())
 
 			var calls [][]string
 			svc.(*service).checkPassword = func(hash, plain string) bool {
@@ -272,7 +285,7 @@ func TestService_Login_TimingEqualized_U(t *testing.T) {
 				return false
 			}
 
-			_, err := svc.Login(context.Background(), Request{Email: "jane@example.com", Password: "guess"})
+			_, err := svc.Login(context.Background(), Request{Email: "jane@example.com", Password: "guess"}, testClient)
 			var appErr *apperror.AppError
 			require.ErrorAs(t, err, &appErr)
 			require.Equal(t, apperror.CodeUnauthorized, appErr.Code)
@@ -283,11 +296,11 @@ func TestService_Login_TimingEqualized_U(t *testing.T) {
 }
 
 // stubLimiter answers Take with takeErr, or with a refusal when refuse is set,
-// and records the calls.
+// fails Reset / Return with giveBackErr, and records the calls.
 type stubLimiter struct {
-	takeErr, resetErr error
-	refuse            bool
-	calls             []string
+	takeErr, giveBackErr error
+	refuse               bool
+	calls                []string
 }
 
 func (l *stubLimiter) Take(_ context.Context, key string) (ratelimit.Decision, error) {
@@ -300,47 +313,76 @@ func (l *stubLimiter) Take(_ context.Context, key string) (ratelimit.Decision, e
 
 func (l *stubLimiter) Reset(_ context.Context, key string) error {
 	l.calls = append(l.calls, "Reset "+key)
-	return l.resetErr
+	return l.giveBackErr
 }
 
-// TestService_Login_LimiterOutcomes_U pins what the failures limiter's answers
-// do: a token is taken before the DB read; an error is a 500 and a refusal (an
-// empty bucket, or a full bucket map refusing a new key) a 429, both before
-// the DB read — never an uncounted guess; a failed refill after the right
-// password still logs in, logged.
+func (l *stubLimiter) Return(_ context.Context, key string) error {
+	l.calls = append(l.calls, "Return "+key)
+	return l.giveBackErr
+}
+
+// TestService_Login_LimiterOutcomes_U pins what the two limiters' answers do:
+// the IP's token is taken first, then the email's, both before the DB read;
+// an error is a 500 and a refusal (an empty bucket, or a full bucket map
+// refusing a new key) a 429, both before the DB read — never an uncounted
+// guess; a refusal by the IP leaves the email's budget alone, and one by the
+// email gives the IP's token back (no password was tried); the right password
+// refills the email's bucket and returns one IP token; a failed give-back
+// still logs in, logged.
 func TestService_Login_LimiterOutcomes_U(t *testing.T) {
 	hash, err := password.Hash("Passw0rd!")
 	require.NoError(t, err)
 	active := sqlc.GetUserForLoginRow{ID: 1, Name: "Jane", Email: "jane@example.com", PasswordHash: hash, Role: "user", IsActive: true}
 	storeDown := errors.New("store down")
-	const key = "login:jane@example.com"
+	const emailKey = "login:jane@example.com"
+	const ipKey = "loginip:203.0.113.7"
 
 	testCases := []struct {
-		name      string
-		limiter   *stubLimiter
-		password  string
-		readsUser bool
-		wantCode  apperror.Code // zero = success
-		wantErr   error
-		wantCalls []string
-		wantLog   string
+		name          string
+		email, ip     *stubLimiter
+		password      string
+		readsUser     bool
+		wantCode      apperror.Code // zero = success
+		wantErr       error
+		wantEmail     []string
+		wantIP        []string
+		wantLog       string
+		wantLimiterAt string // the "limiter" attribute of the logged give-back failure
 	}{
-		{name: "a limiter that fails is a 500 before the DB read",
-			limiter: &stubLimiter{takeErr: storeDown}, password: "wrong",
-			wantCode: apperror.CodeInternal, wantErr: storeDown, wantCalls: []string{"Take " + key}},
-		{name: "a limiter that refuses the key is a 429 before the DB read, the right password too",
-			limiter: &stubLimiter{refuse: true}, password: "Passw0rd!",
-			wantCode: apperror.CodeTooManyRequests, wantCalls: []string{"Take " + key}},
-		{name: "a wrong password keeps the token it took",
-			limiter: &stubLimiter{}, password: "wrong", readsUser: true,
-			wantCode: apperror.CodeUnauthorized, wantCalls: []string{"Take " + key}},
-		{name: "the right password gives the token back by refilling the bucket",
-			limiter: &stubLimiter{}, password: "Passw0rd!", readsUser: true,
-			wantCalls: []string{"Take " + key, "Reset " + key}},
-		{name: "the right password still logs in when the bucket can't be refilled, and it's logged",
-			limiter: &stubLimiter{resetErr: storeDown}, password: "Passw0rd!", readsUser: true,
-			wantCalls: []string{"Take " + key, "Reset " + key},
-			wantLog:   `"msg":"login: reset failure count failed"`},
+		{name: "an IP limiter that fails is a 500 before the email is counted or the DB read",
+			email: &stubLimiter{}, ip: &stubLimiter{takeErr: storeDown}, password: "wrong",
+			wantCode: apperror.CodeInternal, wantErr: storeDown, wantIP: []string{"Take " + ipKey}},
+		{name: "an IP limiter that refuses is a 429 that leaves the email's budget alone, the right password too",
+			email: &stubLimiter{}, ip: &stubLimiter{refuse: true}, password: "Passw0rd!",
+			wantCode: apperror.CodeTooManyRequests, wantIP: []string{"Take " + ipKey}},
+		{name: "an email limiter that fails is a 500 before the DB read, and the IP gets its token back",
+			email: &stubLimiter{takeErr: storeDown}, ip: &stubLimiter{}, password: "wrong",
+			wantCode: apperror.CodeInternal, wantErr: storeDown,
+			wantEmail: []string{"Take " + emailKey}, wantIP: []string{"Take " + ipKey, "Return " + ipKey}},
+		{name: "an email limiter that refuses is a 429 before the DB read, the right password too, and the IP gets its token back",
+			email: &stubLimiter{refuse: true}, ip: &stubLimiter{}, password: "Passw0rd!",
+			wantCode:  apperror.CodeTooManyRequests,
+			wantEmail: []string{"Take " + emailKey}, wantIP: []string{"Take " + ipKey, "Return " + ipKey}},
+		{name: "a wrong password keeps both tokens",
+			email: &stubLimiter{}, ip: &stubLimiter{}, password: "wrong", readsUser: true,
+			wantCode:  apperror.CodeUnauthorized,
+			wantEmail: []string{"Take " + emailKey}, wantIP: []string{"Take " + ipKey}},
+		{name: "the right password refills the email's bucket and returns only this attempt's IP token",
+			email: &stubLimiter{}, ip: &stubLimiter{}, password: "Passw0rd!", readsUser: true,
+			wantEmail: []string{"Take " + emailKey, "Reset " + emailKey}, wantIP: []string{"Take " + ipKey, "Return " + ipKey}},
+		{name: "the right password still logs in when the email's bucket can't be refilled, and it's logged",
+			email: &stubLimiter{giveBackErr: storeDown}, ip: &stubLimiter{}, password: "Passw0rd!", readsUser: true,
+			wantEmail: []string{"Take " + emailKey, "Reset " + emailKey}, wantIP: []string{"Take " + ipKey, "Return " + ipKey},
+			wantLog: `"msg":"login: give back failure count failed"`, wantLimiterAt: `"limiter":"email"`},
+		{name: "the right password still logs in when the IP token can't be returned, and it's logged",
+			email: &stubLimiter{}, ip: &stubLimiter{giveBackErr: storeDown}, password: "Passw0rd!", readsUser: true,
+			wantEmail: []string{"Take " + emailKey, "Reset " + emailKey}, wantIP: []string{"Take " + ipKey, "Return " + ipKey},
+			wantLog: `"msg":"login: give back failure count failed"`, wantLimiterAt: `"limiter":"ip"`},
+		{name: "an email refusal whose IP give-back fails is still a 429, logged",
+			email: &stubLimiter{refuse: true}, ip: &stubLimiter{giveBackErr: storeDown}, password: "wrong",
+			wantCode:  apperror.CodeTooManyRequests,
+			wantEmail: []string{"Take " + emailKey}, wantIP: []string{"Take " + ipKey, "Return " + ipKey},
+			wantLog: `"msg":"login: give back failure count failed"`, wantLimiterAt: `"limiter":"ip"`},
 	}
 
 	for _, tc := range testCases {
@@ -363,18 +405,27 @@ func TestService_Login_LimiterOutcomes_U(t *testing.T) {
 				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil)
 				sq.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
 			}
-			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, tc.limiter)
+			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, Limiters{Email: tc.email, IP: tc.ip})
 
-			_, err = svc.Login(context.Background(), Request{Email: "jane@example.com", Password: tc.password})
-			require.Equal(t, tc.wantCalls, tc.limiter.calls)
+			_, err = svc.Login(context.Background(), Request{Email: "jane@example.com", Password: tc.password}, testClient)
+			require.Equal(t, tc.wantEmail, tc.email.calls, "email limiter calls")
+			require.Equal(t, tc.wantIP, tc.ip.calls, "IP limiter calls")
+			if tc.wantLog != "" {
+				require.Contains(t, buf.String(), tc.wantLog)
+				require.Contains(t, buf.String(), tc.wantLimiterAt)
+			} else {
+				require.NotContains(t, buf.String(), "give back failure count failed")
+			}
 			if tc.wantCode.IsZero() {
 				require.NoError(t, err)
-				require.Contains(t, buf.String(), tc.wantLog)
 				return
 			}
 			var appErr *apperror.AppError
 			require.ErrorAs(t, err, &appErr)
 			require.Equal(t, tc.wantCode, appErr.Code)
+			if tc.wantCode == apperror.CodeTooManyRequests {
+				require.Equal(t, tooManyFailuresMessage, appErr.Message)
+			}
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
 			}
@@ -382,21 +433,143 @@ func TestService_Login_LimiterOutcomes_U(t *testing.T) {
 	}
 }
 
-// TestService_Login_ParallelGuesses_U pins that parallel wrong guesses for one
-// email can't outrun the count: while every guess that got through is still
-// in its (slow) bcrypt comparison, the rest are already 429s, so exactly the
-// burst reach the comparison.
+// TestService_Login_IPFailureLimit_U pins the per-IP cap on failed logins
+// across emails (credential stuffing tries each email once), against an IP
+// limiter of 3 failures per window.
+func TestService_Login_IPFailureLimit_U(t *testing.T) {
+	hash, err := password.Hash("Passw0rd!")
+	require.NoError(t, err)
+	jane := sqlc.GetUserForLoginRow{ID: 1, Name: "Jane", Email: "jane@example.com", PasswordHash: hash, Role: "user", IsActive: true}
+
+	const attacker, office = "198.51.100.9", "192.0.2.50"
+	// attempt is one login; a 429 attempt must not reach the DB.
+	type attempt struct {
+		ip, email, password string
+		user                *sqlc.GetUserForLoginRow
+		wantCode            apperror.Code // zero = success
+	}
+	wrong := func(ip, email string) attempt {
+		return attempt{ip: ip, email: email, password: "wrong", user: &jane, wantCode: apperror.CodeUnauthorized}
+	}
+	unknown := func(ip, email string) attempt {
+		return attempt{ip: ip, email: email, password: "x", wantCode: apperror.CodeUnauthorized}
+	}
+	right := func(ip string) attempt {
+		return attempt{ip: ip, email: "jane@example.com", password: "Passw0rd!", user: &jane}
+	}
+	inactive := jane
+	inactive.IsActive = false
+	inactiveRight := func(ip string) attempt {
+		return attempt{ip: ip, email: "jane@example.com", password: "Passw0rd!", user: &inactive, wantCode: apperror.CodeUnauthorized}
+	}
+	blocked := func(ip, email string) attempt {
+		return attempt{ip: ip, email: email, password: "Passw0rd!", wantCode: apperror.CodeTooManyRequests}
+	}
+
+	testCases := []struct {
+		name       string
+		emailBurst int
+		attempts   []attempt
+	}{
+		{name: "failures for different emails from one IP add up; past the cap every login from it is a 429, the right password too",
+			emailBurst: 5,
+			attempts: []attempt{unknown(attacker, "a@example.com"), unknown(attacker, "b@example.com"),
+				wrong(attacker, "jane@example.com"), blocked(attacker, "jane@example.com"), blocked(attacker, "c@example.com")}},
+		{name: "a right password gives its own IP token back, so successes never fill the IP's budget",
+			emailBurst: 5,
+			attempts: []attempt{right(office), right(office), right(office), right(office), right(office),
+				wrong(office, "jane@example.com"), wrong(office, "jane@example.com"), unknown(office, "a@example.com"),
+				blocked(office, "jane@example.com")}},
+		{name: "a right password doesn't wipe the IP's failures (one real account can't reset an attacker's count)",
+			emailBurst: 5,
+			attempts: []attempt{unknown(attacker, "a@example.com"), unknown(attacker, "b@example.com"), right(attacker),
+				unknown(attacker, "c@example.com"), blocked(attacker, "d@example.com")}},
+		{name: "a deactivated account with the right password gives its IP token back too (it isn't a guess)",
+			emailBurst: 5,
+			attempts: []attempt{inactiveRight(office), inactiveRight(office), inactiveRight(office), inactiveRight(office),
+				unknown(office, "a@example.com"), unknown(office, "b@example.com"), unknown(office, "c@example.com"),
+				blocked(office, "d@example.com")}},
+		{name: "another IP keeps its own count",
+			emailBurst: 5,
+			attempts: []attempt{unknown(attacker, "a@example.com"), unknown(attacker, "b@example.com"),
+				unknown(attacker, "c@example.com"), blocked(attacker, "d@example.com"), right(office)}},
+		{name: "hammering an email that is already locked doesn't spend the IP's budget",
+			emailBurst: 1,
+			attempts: []attempt{wrong(office, "jane@example.com"), blocked(office, "jane@example.com"),
+				blocked(office, "jane@example.com"), blocked(office, "jane@example.com"), blocked(office, "jane@example.com"),
+				unknown(office, "a@example.com"), unknown(office, "b@example.com"), blocked(office, "c@example.com")}},
+		{name: "an IP past its cap doesn't spend the email's budget: the owner logs in from elsewhere",
+			emailBurst: 1,
+			attempts: []attempt{unknown(attacker, "a@example.com"), unknown(attacker, "b@example.com"),
+				unknown(attacker, "c@example.com"), blocked(attacker, "jane@example.com"), blocked(attacker, "jane@example.com"),
+				right(office)}},
+		{name: "an IPv6 client is counted per /64, not per address",
+			emailBurst: 5,
+			attempts: []attempt{unknown("2001:db8:1:1::1", "a@example.com"), unknown("2001:db8:1:1::2", "b@example.com"),
+				unknown("2001:db8:1:1:ffff::3", "c@example.com"), blocked("2001:db8:1:1::4", "d@example.com")}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			q := sqlc.NewMockQuerier(ctrl)
+			sq := authsharedsqlc.NewMockQuerier(ctrl)
+			m := jwttoken.NewMockM(ctrl)
+			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, Limiters{
+				Email: ratelimit.NewMemory(ratelimit.Rate{Burst: tc.emailBurst, Per: time.Hour}),
+				IP:    ratelimit.NewMemory(ratelimit.Rate{Burst: 3, Per: time.Hour}),
+			})
+
+			for i, a := range tc.attempts {
+				if a.wantCode != apperror.CodeTooManyRequests {
+					if a.user != nil {
+						q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(*a.user, nil)
+					} else {
+						q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(sqlc.GetUserForLoginRow{}, sql.ErrNoRows)
+					}
+				}
+				if a.wantCode.IsZero() {
+					m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil)
+					sq.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
+				}
+
+				_, err := svc.Login(context.Background(), Request{Email: a.email, Password: a.password}, Client{IP: a.ip})
+				if a.wantCode.IsZero() {
+					require.NoError(t, err, "attempt %d", i)
+					continue
+				}
+				var appErr *apperror.AppError
+				require.ErrorAs(t, err, &appErr, "attempt %d", i)
+				require.Equal(t, a.wantCode, appErr.Code, "attempt %d", i)
+				if a.wantCode == apperror.CodeTooManyRequests {
+					require.Equal(t, tooManyFailuresMessage, appErr.Message, "attempt %d", i)
+				}
+			}
+		})
+	}
+}
+
+// TestService_Login_ParallelGuesses_U pins that parallel wrong guesses can't
+// outrun either count — for one email, or for many emails from one IP: while
+// every guess that got through is still in its (slow) bcrypt comparison, the
+// rest are already 429s, so exactly the burst reach the comparison.
 func TestService_Login_ParallelGuesses_U(t *testing.T) {
 	active := sqlc.GetUserForLoginRow{ID: 1, Email: "jane@example.com", PasswordHash: "$2a$10$stored", IsActive: true}
 
 	testCases := []struct {
 		name         string
-		burst        int
+		emailBurst   int
+		ipBurst      int
+		manyEmails   bool // each guess for its own email, all from one IP
 		parallel     int
 		wantCompared int32
 	}{
-		{name: "20 parallel guesses against 2 tries: 2 reach bcrypt, 18 are 429s", burst: 2, parallel: 20, wantCompared: 2},
-		{name: "3 parallel guesses against 5 tries: all 3 reach bcrypt", burst: 5, parallel: 3, wantCompared: 3},
+		{name: "20 parallel guesses for one email against 2 tries: 2 reach bcrypt, 18 are 429s",
+			emailBurst: 2, ipBurst: 1000, parallel: 20, wantCompared: 2},
+		{name: "3 parallel guesses for one email against 5 tries: all 3 reach bcrypt",
+			emailBurst: 5, ipBurst: 1000, parallel: 3, wantCompared: 3},
+		{name: "20 parallel guesses for 20 emails from one IP against 2 tries: 2 reach bcrypt, 18 are 429s",
+			emailBurst: 5, ipBurst: 2, manyEmails: true, parallel: 20, wantCompared: 2},
 	}
 
 	for _, tc := range testCases {
@@ -405,8 +578,10 @@ func TestService_Login_ParallelGuesses_U(t *testing.T) {
 			q := sqlc.NewMockQuerier(ctrl)
 			q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil).AnyTimes()
 			svc := NewService(q, authsharedsqlc.NewMockQuerier(ctrl), jwttoken.NewMockM(ctrl),
-				15*time.Minute, 24*time.Hour, 12*time.Hour,
-				ratelimit.NewMemory(ratelimit.Rate{Burst: tc.burst, Per: time.Hour}))
+				15*time.Minute, 24*time.Hour, 12*time.Hour, Limiters{
+					Email: ratelimit.NewMemory(ratelimit.Rate{Burst: tc.emailBurst, Per: time.Hour}),
+					IP:    ratelimit.NewMemory(ratelimit.Rate{Burst: tc.ipBurst, Per: time.Hour}),
+				})
 
 			// Every comparison blocks until release: the guesses that got
 			// through are all "in bcrypt" while the others decide.
@@ -419,9 +594,13 @@ func TestService_Login_ParallelGuesses_U(t *testing.T) {
 			}
 
 			var wg sync.WaitGroup
-			for range tc.parallel {
+			for i := range tc.parallel {
+				email := "jane@example.com"
+				if tc.manyEmails {
+					email = fmt.Sprintf("user%d@example.com", i)
+				}
 				wg.Go(func() {
-					_, err := svc.Login(context.Background(), Request{Email: "jane@example.com", Password: "guess"})
+					_, err := svc.Login(context.Background(), Request{Email: email, Password: "guess"}, testClient)
 					var appErr *apperror.AppError
 					if errors.As(err, &appErr) {
 						switch appErr.Code {

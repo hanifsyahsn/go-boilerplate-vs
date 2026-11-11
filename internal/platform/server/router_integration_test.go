@@ -65,7 +65,10 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 		Register: authregister.NewHandler(authregister.NewService(authregistersqlc.New(db))),
 		Login: authlogin.NewHandler(
 			authlogin.NewService(authloginsqlc.New(db), authSharedQuerier, tokenMaker, accessTTL, refreshTTL, untrustedTTL,
-				ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute})),
+				authlogin.Limiters{
+					Email: ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}),
+					IP:    ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}),
+				}),
 			cookies,
 		),
 		Refresh: authrefresh.NewHandler(

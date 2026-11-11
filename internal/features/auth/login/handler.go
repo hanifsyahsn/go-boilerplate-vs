@@ -35,7 +35,7 @@ func (h *handler) Login(c *gin.Context) {
 		return
 	}
 
-	res, err := h.service.Login(c, req)
+	res, err := h.service.Login(c, req, Client{IP: c.ClientIP(), UserAgent: c.Request.UserAgent()})
 	if handlerutil.WriteError(c, err, "Login Handler") {
 		return
 	}

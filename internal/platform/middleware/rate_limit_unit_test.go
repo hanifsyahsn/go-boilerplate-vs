@@ -23,6 +23,8 @@ func (brokenLimiter) Take(context.Context, string) (ratelimit.Decision, error) {
 
 func (brokenLimiter) Reset(context.Context, string) error { return errors.New("store down") }
 
+func (brokenLimiter) Return(context.Context, string) error { return errors.New("store down") }
+
 func TestRateLimitByIP_U(t *testing.T) {
 	const tooMany = `{"jsonapi":{"version":"1.1"},"errors":[{"status":"429","code":"too_many_requests",
 		"title":"Too Many Requests","detail":"Too many attempts. Please wait a few minutes and try again."}]}`

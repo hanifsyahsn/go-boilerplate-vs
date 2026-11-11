@@ -68,10 +68,10 @@ Added 2026-11-09 as the boilerplate's base security.
   else every client shares the proxy's IP. Each entry is validated in `Config.Validate()` (IP or CIDR) and again
   by gin; `NewRouter` / `NewServer` return the error and `main` stops.
 - **`internal/platform/ratelimit.Limiter`** (decision 0003): a **token bucket** per key behind an interface —
-  `Take` (take a token if there is one, **atomically**) and `Reset` (refill); each takes a ctx and can return an
-  error (a shared store that's down); `Take` answers a `Decision{Allowed, RetryAfter}`. **No peek-then-take**:
-  a check now and a count later is a race (N parallel requests all pass the check) — take first, give back
-  with `Reset`. A
+  `Take` (take a token if there is one, **atomically**), `Reset` (refill) and `Return` (give **one** token
+  back, never past Burst); each takes a ctx and can return an error (a shared store that's down); `Take` answers
+  a `Decision{Allowed, RetryAfter}`. **No peek-then-take**: a check now and a count later is a race (N parallel
+  requests all pass the check) — take first, give back with `Reset` / `Return`. A
   `Rate{Burst, Per}` is Burst tokens refilled evenly over Per: `{5, 15m}` = five at once, then one every 3 min.
   `ratelimit.NewMemory(rate)` is the in-process one (never errors; one instance only, see *Gotchas* in
   CLAUDE.md). It keeps only buckets still refilling (a full one is dropped; swept once per `Per`, and while the
@@ -94,6 +94,17 @@ Added 2026-11-09 as the boilerplate's base security.
   (3 min). A limiter error is a 500 and a refused key (empty bucket, or a full bucket map) a 429 — fail closed,
   never an uncounted guess; a failed `Reset` after the right password is only logged. The login 429 carries no `Retry-After` yet. Known trade-off: anyone can keep an email locked out
   by spending a token every 3 min.
+- **Per IP, failed logins across emails** (`login` service, `Limiters.IP`, 100 / 6 h — `loginIPFailureRate`): key
+  `loginip:` + `ratelimit.IPKey(c.ClientIP())` (the handler passes `login.Client{IP, UserAgent}`). Credential
+  stuffing tries each leaked email once, so the per-email cap never fires; this one does. The IP's token is
+  taken **first**, then the email's, both before the DB read: a caller the IP cap already stopped can't drain a
+  victim's email budget, and when the **email** refuses (or errors) the IP gets its token back with `Return` — no
+  password was tried, so hammering a locked email from a shared IP doesn't lock the IP. The right password
+  `Return`s the IP's token — **never `Reset`**: one real account would otherwise wipe an attacker's count. Same
+  429 message as the per-email cap; a limiter error is a 500; a failed give-back is logged (warn
+  `login: give back failure count failed`, `limiter` = `email` / `ip`). No IP allowlist (an office NAT only
+  reaches it with 100 wrong passwords). Tests: `TestService_Login_IPFailureLimit_U`,
+  `TestService_Login_LimiterOutcomes_U`, `TestService_Login_ParallelGuesses_U` (20 emails from one IP).
 - **A new public endpoint** (no access token) goes into the `limited` group in `router.go` unless, like
   refresh, it runs automatically per tab. **One that sends email** (verify link, password reset) also needs a
   per-recipient limit in its service (e.g. 3 / h), or it can be used to spam any address through our SMTP.

@@ -42,6 +42,11 @@ type Limiter interface {
 	Take(ctx context.Context, key string) (Decision, error)
 	// Reset refills key's bucket (a successful login clears its failures).
 	Reset(ctx context.Context, key string) error
+	// Return gives one token back to key's bucket, never past Burst: the
+	// request that took it turned out not to count (a login with the right
+	// password, on a budget other logins share). Unlike Reset it leaves the
+	// rest of the count alone. A key with no bucket (full) is a no-op.
+	Return(ctx context.Context, key string) error
 }
 
 // IPKey is the key of a client IP: the address itself for IPv4, its /64
