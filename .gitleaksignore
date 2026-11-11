@@ -1,0 +1,3 @@
+# gitleaks findings checked by hand and kept (one exact fingerprint per line, never a pattern).
+# A test fixture password in the change-password end-to-end test, not a secret.
+506d397259621a475ebc8610a11f37b48de3e1b7:internal/platform/server/router_integration_test.go:generic-api-key:434

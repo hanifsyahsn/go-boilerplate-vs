@@ -12,14 +12,14 @@ import (
 )
 
 // APIKeyHeader carries a machine caller's key.
-const APIKeyHeader = "X-API-Key"
+const APIKeyHeader = "X-API-Key" // #nosec G101 -- a header name, not a credential
 
 // APIClientKey is the gin key holding the name of the API client a request
 // authenticated as (AccessLog adds it to its record).
 const APIClientKey = "api_client"
 
 // APIKeyRequiredMessage is the 401 detail of a missing or wrong key.
-const APIKeyRequiredMessage = "A valid API key is required."
+const APIKeyRequiredMessage = "A valid API key is required." // #nosec G101 -- a user-facing message, not a credential
 
 type apiKey struct {
 	name string

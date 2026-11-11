@@ -243,8 +243,9 @@ See `.env.example`.
   put `SEC_PASSWORD` in `.env` / `.env.example`.
 - **Security scan (`make sec`) stays green.** A finding is fixed, or — when it's a false positive — silenced on
   its own line with the reason: `// #nosec G101 -- a cookie name, not a credential`,
-  `// nosemgrep: <rule-id>` on the line before. Never a blanket exclude. Current ones: the cookie names and the
-  login message (G101), the configurable `Secure` cookie (G124 + semgrep), pagination's bounded int32 offset
+  `// nosemgrep: <rule-id>` on the line before; a gitleaks finding in history → its exact fingerprint in
+  `.gitleaksignore` with the reason. Never a blanket exclude. Current ones: the cookie names, the login, API-key and
+  invalid-token messages and the `X-API-Key` header name (G101), a test fixture password (`.gitleaksignore`), the configurable `Secure` cookie (G124 + semgrep), pagination's bounded int32 offset
   (G115).
 - **Lint (`make lint`) stays green**, same rule: fix, or silence on its own line with the reason —
   `//nolint:<linter> // why` (golangci-lint; `nolintlint` rejects one without a linter name or a reason),

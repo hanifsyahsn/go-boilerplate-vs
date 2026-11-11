@@ -107,4 +107,4 @@ var CodeInvalidToken = apperror.NewCode("invalid_token", http.StatusUnprocessabl
 
 // InvalidTokenMessage is CodeInvalidToken's detail; it points at
 // /data/attributes/token.
-const InvalidTokenMessage = "This link is invalid or has expired. Ask for a new one."
+const InvalidTokenMessage = "This link is invalid or has expired. Ask for a new one." // #nosec G101 -- a user-facing message, not a credential
