@@ -136,6 +136,13 @@ Added 2026-11-09 as the boilerplate's base security.
   a `Decision{Allowed, RetryAfter}`. **No peek-then-take**: a check now and a count later is a race (N parallel
   requests all pass the check) — take first, give back with `Reset` / `Return`. A
   `Rate{Burst, Per}` is Burst tokens refilled evenly over Per: `{5, 15m}` = five at once, then one every 3 min.
+  `ratelimit.NewRedis(client, rate, name)` (with `REDIS_URL`) is the shared one: the same bucket as one Lua script
+  per operation (`take.lua`, `return.lua`, a `DEL` for Reset), timed by Redis' `TIME`, keys `rl:<name>:<key>`
+  expiring after Per + 1 s, every call bounded by `RedisTimeout` (150 ms). Main wraps it: auth limits in
+  `ratelimit.WithFallback(redis, memory, name)` (Redis error → the memory one decides; Reset / Return hit both),
+  the general per-IP limit in `ratelimit.FailOpen(redis, name)` (error → allowed); both warn `rate limit: store
+  unavailable` (`limiter`, `mode`) at most once per 30 s. One behaviour table runs against both implementations
+  (`runLimiterContract`: `TestMemory_Contract_U`, `TestRedis_Contract_I`), plus `TestRedis_Take_Parallel_I`.
   `ratelimit.NewMemory(rate)` is the in-process one (never errors; one instance only, see *Gotchas* in
   CLAUDE.md). It keeps only buckets still refilling (a full one is dropped; swept once per `Per`, and while the
   map is full once per token interval — not on every request, which a flood could use to burn CPU) and at most `DefaultMaxKeys` (100,000) of them: when all are still refilling, a **new** key is

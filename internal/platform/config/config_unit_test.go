@@ -30,6 +30,7 @@ func TestLoadConfig_Env_U(t *testing.T) {
 		name      string
 		override  map[string]string
 		wantErr   string
+		wantNot   string // must not appear in the error
 		wantCheck func(t *testing.T, c Config)
 	}{
 		{
@@ -76,6 +77,18 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			wantErr: "config: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID go together"},
 		{name: "a telegram chat without a token", override: map[string]string{"TELEGRAM_CHAT_ID": "-100"},
 			wantErr: "config: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID go together"},
+		{
+			name:     "a Redis URL read",
+			override: map[string]string{"REDIS_URL": "rediss://:s3cret@redis.example.com:6380/0"},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Equal(t, "rediss://:s3cret@redis.example.com:6380/0", c.RedisURL)
+			},
+		},
+		{name: "a Redis URL with another scheme is refused", override: map[string]string{"REDIS_URL": "http://redis.example.com"},
+			wantErr: "config: invalid REDIS_URL: redis: invalid URL scheme: http"},
+		{name: "a Redis URL that doesn't parse is refused without echoing it (it can hold a password)",
+			override: map[string]string{"REDIS_URL": "redis://:pa%zzss@host"}, wantErr: "config: invalid REDIS_URL",
+			wantNot: "pa%zzss"},
 		{name: "a negative activity log retention", override: map[string]string{"ACTIVITY_LOG_RETENTION": "-1h"}, wantErr: "ACTIVITY_LOG_RETENTION -1h0m0s is negative"},
 		{name: "an activity log retention that isn't a duration", override: map[string]string{"ACTIVITY_LOG_RETENTION": "forever"}, wantErr: "ACTIVITY_LOG_RETENTION"},
 		{
@@ -218,6 +231,7 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			t.Setenv("ACTIVITY_LOG_RETENTION", "")
 			t.Setenv("TELEGRAM_BOT_TOKEN", "")
 			t.Setenv("TELEGRAM_CHAT_ID", "")
+			t.Setenv("REDIS_URL", "")
 			t.Setenv("SMTP_USERNAME", "")
 			t.Setenv("SMTP_PASSWORD", "")
 			for k, v := range tc.override {
@@ -227,6 +241,9 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			c, err := LoadConfig(t.TempDir())
 			if tc.wantErr != "" {
 				require.ErrorContains(t, err, tc.wantErr)
+				if tc.wantNot != "" {
+					require.NotContains(t, err.Error(), tc.wantNot)
+				}
 				return
 			}
 			require.NoError(t, err)

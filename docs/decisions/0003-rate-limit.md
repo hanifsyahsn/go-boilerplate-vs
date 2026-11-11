@@ -1,8 +1,7 @@
 # 0003 — Rate limit
 
-Status: accepted (2026-11-10); part built 2026-11-11 — the `Limiter` interface + in-memory token bucket (point 1's
-default, point 2), failed logins per IP (point 6), the general per-IP layer (point 3). Redis + fallback (points 1,
-4, 5) not built yet.
+Status: built (2026-11-11) — the `Limiter` interface, in-memory and Redis token buckets, the fallbacks, failed
+logins per IP, the general per-IP layer.
 
 ## Decision
 1. One `Limiter` interface, two implementations: **in-memory** (default) and **Redis** (used when `REDIS_URL` is set).
@@ -42,3 +41,10 @@ The derivative's Redis limiter is **not** ported as it is:
 ## Why
 Today the boilerplate guards auth only, in memory, so every limit multiplies by the replica count. Derivatives
 already run token buckets (one of them on Redis); small services shouldn't have to run Redis.
+
+## As built (Redis + fallback)
+- `ratelimit.NewRedis(client, rate, name)`: one Lua script per operation, Redis' own clock, keys `rl:<name>:<key>`
+  expiring after Per + 1 s, 150 ms per call. `REDIS_URL` (optional) turns it on for every limit.
+- `WithFallback(redis, memory, name)` for the auth limits (never fail open), `FailOpen(redis, name)` for the
+  general per-IP limit; the "store unavailable" warning at most once per 30 s per limiter.
+- The same behaviour table runs against both implementations; 50 parallel takes on a burst of 10 allow exactly 10.

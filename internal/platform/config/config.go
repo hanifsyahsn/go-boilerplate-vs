@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
 )
 
@@ -81,6 +82,11 @@ type Config struct {
 	// turns alerts off. The token is a secret: never logged.
 	TelegramBotToken string `mapstructure:"TELEGRAM_BOT_TOKEN"`
 	TelegramChatID   string `mapstructure:"TELEGRAM_CHAT_ID"`
+	// RedisURL (redis:// or rediss://, Redis ≥ 7) moves the rate limits to
+	// Redis so every replica counts together. Optional: empty keeps them in
+	// memory (one instance). A secret when it carries a password: never
+	// logged.
+	RedisURL string `mapstructure:"REDIS_URL"`
 }
 
 // DefaultActivityLogRetention is ACTIVITY_LOG_RETENTION when unset: 2 years.
@@ -189,6 +195,7 @@ func LoadConfig(path string) (Config, error) {
 		ActivityLogRetention:     activityLogRetention,
 		TelegramBotToken:         v.GetString("TELEGRAM_BOT_TOKEN"),
 		TelegramChatID:           v.GetString("TELEGRAM_CHAT_ID"),
+		RedisURL:                 v.GetString("REDIS_URL"),
 	}
 
 	if err = config.Validate(); err != nil {
@@ -312,6 +319,11 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("config: SMTP_FROM %q is not an email address: %w", c.SMTPFrom, err))
 		}
 	}
+	if c.RedisURL != "" {
+		if _, err := redis.ParseURL(c.RedisURL); err != nil {
+			errs = append(errs, fmt.Errorf("config: invalid REDIS_URL: %s", redactURLError(err)))
+		}
+	}
 	if (c.TelegramBotToken == "") != (c.TelegramChatID == "") {
 		errs = append(errs, errors.New("config: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID go together"))
 	}
@@ -346,6 +358,16 @@ func NormalizeOrigin(s string) (string, error) {
 		return "", notOrigin
 	}
 	return scheme + "://" + strings.ToLower(u.Host), nil
+}
+
+// redactURLError is err's text without the URL a *url.Error quotes (a
+// REDIS_URL can carry a password); other errors are kept as they are.
+func redactURLError(err error) string {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err.Error()
+	}
+	return err.Error()
 }
 
 // EnvironmentDevelopment is the ENVIRONMENT of a developer's machine: the

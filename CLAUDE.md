@@ -216,6 +216,8 @@ origin guard, empty = both off with a startup warning). `APP_BASE_URL` (the fron
 (465 = implicit TLS, any other port must offer STARTTLS), `SMTP_USERNAME` / `SMTP_PASSWORD` optional.
 `ACTIVITY_LOG_RETENTION` (optional, default `17520h` = 2 years, `0` = keep forever; the cleanup worker applies it).
 `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (optional, both or neither: ops alerts, see logging.md *Ops alerts*).
+`REDIS_URL` (optional, `redis://` / `rediss://`, checked with `redis.ParseURL` without echoing it: the rate limits
+in Redis, see *Gotchas*).
 Durations are Go duration strings (`15m`).
 See `.env.example`.
 
@@ -259,8 +261,10 @@ See `.env.example`.
   must be readable by that uid.
 - **gin runs in release mode except when `ENVIRONMENT=development`** (`server.GinMode`, set in `main`): no route
   dump or gin debug output on a deployed server.
-- **Rate limits are in memory** (`internal/platform/ratelimit`): they hold for one instance. Running several
-  replicas multiplies every limit by the replica count — move the counters to a shared store (Redis) first.
+- **Rate limits are in memory unless `REDIS_URL` is set** (`internal/platform/ratelimit`): in memory they hold for
+  one instance, so running several replicas multiplies every limit by the replica count — set `REDIS_URL`
+  (Redis ≥ 7) first. With Redis down, the auth limits fall back to memory and the general per-IP limit fails open
+  (one warning per limiter per 30 s); an unreachable Redis at start is only a warning.
   Behind a reverse proxy, `TRUSTED_PROXIES` must list it, or every client shares the proxy's IP.
 - `.semgrep/` is `make sec`'s project ruleset; `semgrep --config .semgrep/` errors if the folder is missing, so
   keep at least one rule there.

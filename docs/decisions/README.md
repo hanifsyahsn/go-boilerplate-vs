@@ -10,7 +10,7 @@ Statuses: **built** = implemented in the boilerplate · **accepted** = agreed, n
 |---|---|---|
 | [0001](0001-decision-log-and-propagation.md) | Decision log + propagation to derivatives | built |
 | [0002](0002-baseline.md) | Baseline: what every derivative follows from the boilerplate today | built |
-| [0003](0003-rate-limit.md) | Rate limit: `Limiter` interface, token bucket, optional Redis | part built (in-memory: general per-IP, auth per-IP, failed logins per email and per IP) |
+| [0003](0003-rate-limit.md) | Rate limit: `Limiter` interface, token bucket, optional Redis | built |
 | [0004](0004-csrf-origin-guard.md) | CSRF `OriginGuard` | built |
 | [0005](0005-cleanup-worker.md) | Worker that deletes expired rows | built |
 | [0006](0006-sessions-devices.md) | Signed-in devices list + remote sign-out | built |

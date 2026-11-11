@@ -57,6 +57,7 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/utility"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/validation"
+	"github.com/redis/go-redis/v9"
 
 	_ "github.com/lib/pq"
 )
@@ -172,6 +173,12 @@ func main() {
 
 	cookies := authshared.CookieConfig{Secure: conf.CookieSecure, Domain: conf.CookieDomain}
 
+	// Rate limits: in memory, or in Redis when REDIS_URL is set so every
+	// replica counts together (decision 0003). Auth limits fall back to
+	// memory when Redis is down (never fail open); the general per-IP limit
+	// lets requests through instead.
+	limits, rdb := newLimiters(ctx, conf.RedisURL)
+
 	// Emails go out off the request path, in the background group main
 	// waits for at shutdown. No SMTP_HOST (development only) logs them.
 	var mail mailer.Mailer = mailer.NewLog()
@@ -194,10 +201,7 @@ func main() {
 		Login: authloginsvc.NewHandler(
 			authloginsvc.NewService(authloginsqlc.New(conn), authSharedQuerier, tokenMaker,
 				conf.AccessTokenDuration, conf.RefreshTokenDuration, conf.UntrustedSessionDuration,
-				authloginsvc.Limiters{
-					Email: ratelimit.NewMemory(loginFailureRate),
-					IP:    ratelimit.NewMemory(loginIPFailureRate),
-				}),
+				authloginsvc.Limiters{Email: limits.loginEmail, IP: limits.loginIP}),
 			cookies,
 		),
 		Refresh: authrefreshsvc.NewHandler(
@@ -207,13 +211,13 @@ func main() {
 		),
 		PasswordResetRequest: authpasswordresetrequestsvc.NewHandler(authpasswordresetrequestsvc.NewService(
 			authpasswordresetrequestsqlc.New(conn), authpasswordresetrequestsvc.NewStore(conn),
-			ratelimit.NewMemory(resetRecipientRate), emailer)),
+			limits.resetRecipient, emailer)),
 		EmailVerification: authemailverificationsvc.NewHandler(authemailverificationsvc.NewService(authemailverificationsvc.NewStore(conn))),
 		EmailVerificationRequest: authemailverificationrequestsvc.NewHandler(authemailverificationrequestsvc.NewService(
 			authemailverificationrequestsqlc.New(conn), authemailverificationrequestsvc.NewStore(conn),
-			ratelimit.NewMemory(verifyResendRate), emailer)),
+			limits.verifyResend, emailer)),
 		PasswordChange: authpasswordchangesvc.NewHandler(authpasswordchangesvc.NewService(authpasswordchangesqlc.New(conn),
-			authpasswordchangesvc.NewStore(conn), ratelimit.NewMemory(passwordChangeRate), emailer)),
+			authpasswordchangesvc.NewStore(conn), limits.passwordChange, emailer)),
 		PasswordReset: authpasswordresetsvc.NewHandler(authpasswordresetsvc.NewService(authpasswordresetsvc.NewStore(conn), emailer)),
 		Logout:        authlogoutsvc.NewHandler(authlogoutsvc.NewService(authlogoutsqlc.New(conn), authSharedQuerier, tokenMaker), cookies),
 
@@ -234,8 +238,8 @@ func main() {
 	gin.SetMode(server.GinMode(conf.Environment))
 	srv, err := server.NewServer(conf, Version, tokenMaker, middlewaresqlc.New(conn), handlers, server.Security{
 		TrustedProxies: conf.TrustedProxies,
-		AuthIPLimit:    ratelimit.NewMemory(authIPRate),
-		PublicIPLimit:  ratelimit.NewMemory(publicIPRate),
+		AuthIPLimit:    limits.authIP,
+		PublicIPLimit:  limits.publicIP,
 		AllowedOrigins: conf.AllowedOrigins,
 
 		ActivityRecorder: activity,
@@ -249,7 +253,56 @@ func main() {
 	// (deferred above) closes.
 	stopBg()
 	bg.Wait()
+	if rdb != nil {
+		_ = rdb.Close() // after every request and background job is done with it
+	}
 	if runErr != nil {
 		logging.Fatal("server run failed", "err", runErr)
 	}
+}
+
+// limiters are every rate limit of the API.
+type limiters struct {
+	authIP, publicIP               ratelimit.Limiter
+	loginEmail, loginIP            ratelimit.Limiter
+	resetRecipient, passwordChange ratelimit.Limiter
+	verifyResend                   ratelimit.Limiter
+}
+
+// newLimiters builds the limits in memory, or in Redis when redisURL is set
+// (the client is returned to be closed at shutdown). An unreachable Redis at
+// start is only a warning: the fallbacks cover it until it comes back.
+func newLimiters(ctx context.Context, redisURL string) (limiters, *redis.Client) {
+	if redisURL == "" {
+		return limiters{
+			authIP: ratelimit.NewMemory(authIPRate), publicIP: ratelimit.NewMemory(publicIPRate),
+			loginEmail: ratelimit.NewMemory(loginFailureRate), loginIP: ratelimit.NewMemory(loginIPFailureRate),
+			resetRecipient: ratelimit.NewMemory(resetRecipientRate), passwordChange: ratelimit.NewMemory(passwordChangeRate),
+			verifyResend: ratelimit.NewMemory(verifyResendRate),
+		}, nil
+	}
+
+	opts, err := redis.ParseURL(redisURL) // checked by config.Validate
+	if err != nil {
+		logging.Fatal("parse REDIS_URL failed")
+	}
+	rdb := redis.NewClient(opts)
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err = rdb.Ping(pingCtx).Err(); err != nil {
+		slog.WarnContext(ctx, "redis unreachable at start, limits use their fallback", "err", err)
+	}
+
+	auth := func(rate ratelimit.Rate, name string) ratelimit.Limiter {
+		return ratelimit.WithFallback(ratelimit.NewRedis(rdb, rate, name), ratelimit.NewMemory(rate), name)
+	}
+	return limiters{
+		authIP:         auth(authIPRate, "auth"),
+		publicIP:       ratelimit.FailOpen(ratelimit.NewRedis(rdb, publicIPRate, "public"), "public"),
+		loginEmail:     auth(loginFailureRate, "login"),
+		loginIP:        auth(loginIPFailureRate, "loginip"),
+		resetRecipient: auth(resetRecipientRate, "reset"),
+		passwordChange: auth(passwordChangeRate, "pwchange"),
+		verifyResend:   auth(verifyResendRate, "verify"),
+	}, rdb
 }
