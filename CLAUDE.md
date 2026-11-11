@@ -187,8 +187,10 @@ Rules:
 1. Migration (`make migrate_create NAME=...`) if the schema changes.
 2. `query/queries.sql` + a block in `sqlc.yaml` (copy one) → `make sqlc` → `mockgen` the `sqlc/querier.go`.
 3. `dto.go`, `service.go`, `handler.go`, `route.go` (+ `store.go` for a transaction) → `mockgen` them.
-4. Add the handler to `server.Handlers`, one `Route` call in `NewRouter` (public / authed / admin group), wire
-   it in `cmd/api/main.go`, and a case in `server/router_unit_test.go`.
+4. Add the handler to `server.Handlers`, one `Route` call in `NewRouter`, wire it in `cmd/api/main.go`, and a
+   case in `server/router_unit_test.go`. The group: `authed` / `admin` for a signed-in caller; a public route goes
+   into `guarded` (the general per-IP limit), or `limited` when it touches credentials or sends email — only one
+   that runs automatically per tab (like refresh) goes straight into `public` (see `auth.md`).
 5. Tests: handler unit (MockS), service unit (MockQuerier / MockStoreI), service integration (real Postgres).
 
 ### Config

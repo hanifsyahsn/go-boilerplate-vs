@@ -98,7 +98,10 @@ func TestNewRouter_U(t *testing.T) {
 				users.EXPECT().GetUserIsActive(gomock.Any(), int64(1)).Return(true, nil)
 			}
 
-			r, err := NewRouter("test-version", maker, users, h.handlers(), Security{AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 100, Per: time.Minute})})
+			r, err := NewRouter("test-version", maker, users, h.handlers(), Security{
+				AuthIPLimit:   ratelimit.NewMemory(ratelimit.Rate{Burst: 100, Per: time.Minute}),
+				PublicIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 100, Per: time.Minute}),
+			})
 			require.NoError(t, err)
 
 			req := httptest.NewRequest(tc.method, tc.path, nil)
@@ -125,8 +128,10 @@ func TestNewRouter_U(t *testing.T) {
 }
 
 // TestNewRouter_Security_U pins the base protection: register and login share
-// one per-IP budget, refresh and logout have none, and the client IP comes
-// from X-Forwarded-For only when the connection is a trusted proxy.
+// one per-IP auth budget and also spend from the general per-IP budget,
+// refresh and logout have none, authenticated routes aren't IP-limited, and
+// the client IP comes from X-Forwarded-For only when the connection is a
+// trusted proxy.
 func TestNewRouter_Security_U(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -144,7 +149,10 @@ func TestNewRouter_Security_U(t *testing.T) {
 	testCases := []struct {
 		name    string
 		trusted []string
-		calls   []call // against a 2-per-window auth limit
+		// publicBurst is the general per-IP limit (0 = 100, out of the way);
+		// the auth limit is 2 per window unless authBurst is set.
+		publicBurst, authBurst int
+		calls                  []call
 	}{
 		{name: "login past the per-IP limit is a 429", calls: []call{
 			login("10.0.0.1", "", http.StatusTeapot), login("10.0.0.1", "", http.StatusTeapot),
@@ -159,6 +167,30 @@ func TestNewRouter_Security_U(t *testing.T) {
 			{method: http.MethodPost, path: "/api/auth/register", remote: "10.0.0.1", wantCode: http.StatusTeapot},
 			{method: http.MethodPost, path: "/api/auth/register", remote: "10.0.0.1", wantCode: http.StatusTeapot},
 			login("10.0.0.1", "", http.StatusTooManyRequests),
+		}},
+		{name: "register and login also spend from the general per-IP budget", publicBurst: 2, authBurst: 100, calls: []call{
+			{method: http.MethodPost, path: "/api/auth/register", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			login("10.0.0.1", "", http.StatusTeapot),
+			login("10.0.0.1", "", http.StatusTooManyRequests),
+		}},
+		{name: "the general budget is per IP", publicBurst: 1, authBurst: 100, calls: []call{
+			login("10.0.0.1", "", http.StatusTeapot), login("10.0.0.1", "", http.StatusTooManyRequests),
+			login("10.0.0.2", "", http.StatusTeapot),
+		}},
+		{name: "refresh is not limited by the general per-IP budget either", publicBurst: 1, calls: []call{
+			{method: http.MethodPost, path: "/api/auth/refresh", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/refresh", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/refresh", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+		}},
+		{name: "logout is not limited by the general per-IP budget either", publicBurst: 1, calls: []call{
+			{method: http.MethodPost, path: "/api/auth/logout", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/logout", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/logout", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+		}},
+		{name: "an authenticated route is not IP-limited (401 without a token, never 429)", publicBurst: 1, authBurst: 1, calls: []call{
+			{method: http.MethodGet, path: "/api/me", remote: "10.0.0.1", wantCode: http.StatusUnauthorized},
+			{method: http.MethodGet, path: "/api/me", remote: "10.0.0.1", wantCode: http.StatusUnauthorized},
+			{method: http.MethodGet, path: "/api/me", remote: "10.0.0.1", wantCode: http.StatusUnauthorized},
 		}},
 		{name: "refresh is never IP-limited (every open tab calls it)", calls: []call{
 			{method: http.MethodPost, path: "/api/auth/refresh", remote: "10.0.0.1", wantCode: http.StatusTeapot},
@@ -194,8 +226,19 @@ func TestNewRouter_Security_U(t *testing.T) {
 			h.refresh.EXPECT().Refresh(gomock.Any()).Do(ok).AnyTimes()
 			h.logout.EXPECT().Logout(gomock.Any()).Do(ok).AnyTimes()
 
+			publicBurst, authBurst := tc.publicBurst, tc.authBurst
+			if publicBurst == 0 {
+				publicBurst = 100
+			}
+			if authBurst == 0 {
+				authBurst = 2
+			}
 			r, err := NewRouter("test-version", jwttoken.NewMockM(ctrl), middlewaresqlc.NewMockQuerier(ctrl), h.handlers(),
-				Security{TrustedProxies: tc.trusted, AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 2, Per: time.Minute})})
+				Security{
+					TrustedProxies: tc.trusted,
+					AuthIPLimit:    ratelimit.NewMemory(ratelimit.Rate{Burst: authBurst, Per: time.Minute}),
+					PublicIPLimit:  ratelimit.NewMemory(ratelimit.Rate{Burst: publicBurst, Per: time.Minute}),
+				})
 			require.NoError(t, err)
 
 			for i, c := range tc.calls {
@@ -221,7 +264,10 @@ func TestNewRouter_SecurityErrors_U(t *testing.T) {
 		{name: "no auth IP limit: refused, the auth routes must never run unlimited",
 			sec: Security{}, wantErr: "AuthIPLimit is required"},
 		{name: "a trusted proxy gin can't parse is refused",
-			sec: Security{TrustedProxies: []string{"not-an-ip"}, AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute})}, wantErr: "trusted proxies"},
+			sec: Security{TrustedProxies: []string{"not-an-ip"}, AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute}),
+				PublicIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute})}, wantErr: "trusted proxies"},
+		{name: "no general IP limit: refused, the public routes must never run unlimited",
+			sec: Security{AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute})}, wantErr: "PublicIPLimit is required"},
 	}
 
 	for _, tc := range testCases {

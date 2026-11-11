@@ -153,7 +153,8 @@ it comes back evenly over the period):
 
 | Limit | Applies to | Past it |
 | --- | --- | --- |
-| 300 requests / 15 min **per client IP** (IPv6: per /64) | register + login together (refresh and logout are never limited) | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
+| 300 requests / 1 min **per client IP** (IPv6: per /64) | every public route except refresh and logout (a flood guard; refresh and logout are never IP-limited, every open tab calls them) | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
+| 300 requests / 15 min **per client IP** (IPv6: per /64) | register + login together, on top of the one above | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
 | 5 **failed** logins / 15 min **per email** (then one more every 3 min) | login: an unknown email and a wrong password both count; a successful login resets it | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login for that email, the right password too, until a try comes back |
 | 100 **failed** logins / 6 h **per client IP**, across every email (IPv6: per /64; then one more every 3.6 min) | login: an unknown email and a wrong password both count; a successful login doesn't count (but doesn't clear the IP's earlier failures); a login refused for its email doesn't count either | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login from that IP, the right password too, until a try comes back |
 

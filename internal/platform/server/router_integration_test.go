@@ -89,7 +89,10 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	}
 
 	r, err := NewRouter("test-version", tokenMaker, middlewaresqlc.New(db), handlers,
-		Security{AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute})})
+		Security{
+			AuthIPLimit:   ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}),
+			PublicIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}),
+		})
 	require.NoError(t, err)
 	return r
 }

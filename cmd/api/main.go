@@ -50,6 +50,10 @@ var (
 	// authIPRate caps register + login together per client IP. Generous on
 	// purpose: an office behind one NAT shares an IP.
 	authIPRate = ratelimit.Rate{Burst: 300, Per: 15 * time.Minute}
+	// publicIPRate caps every public route but refresh / logout per client
+	// IP: a flood guard only, generous because an office NAT or a mobile
+	// carrier puts many users behind one IP.
+	publicIPRate = ratelimit.Rate{Burst: 300, Per: time.Minute}
 	// loginFailureRate caps failed logins per email: 5 at once, then one
 	// more every 3 minutes.
 	loginFailureRate = ratelimit.Rate{Burst: 5, Per: 15 * time.Minute}
@@ -144,6 +148,7 @@ func main() {
 	srv, err := server.NewServer(conf, Version, tokenMaker, middlewaresqlc.New(conn), handlers, server.Security{
 		TrustedProxies: conf.TrustedProxies,
 		AuthIPLimit:    ratelimit.NewMemory(authIPRate),
+		PublicIPLimit:  ratelimit.NewMemory(publicIPRate),
 	})
 	if err != nil {
 		logging.Fatal("build server failed", "err", err)

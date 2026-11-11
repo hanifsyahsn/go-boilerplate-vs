@@ -85,6 +85,12 @@ Added 2026-11-09 as the boilerplate's base security.
   rounded up — `middleware.RetryAfterSeconds`), detail `middleware.TooManyRequestsMessage`, the handler never
   runs. A limiter error is a 500 (the limiter owns surviving its store — decision 0003). **Refresh and logout are not IP-limited**: they run
   off the refresh cookie on every open tab.
+- **General per IP** (`middleware.RateLimitByIP(limiter, "public")`, `Security.PublicIPLimit`, **required** —
+  `NewRouter` refuses nil): every public route **except refresh and logout** (router group `guarded`; `limited`
+  is its child, so register / login spend from both), 300 / 1 min per IP (`publicIPRate`). A flood guard only:
+  many users share one IP (office NAT, mobile carrier CGNAT), so it's generous — the per-email / per-IP failure
+  limits are what stop guessing. Refresh / logout stay out (every open tab calls them; a forged token fails the
+  signature check before the DB). Authenticated routes aren't IP-limited. Same 429 + `Retry-After` as the auth one.
 - **Per email, failed logins** (`login` service, its own limiter, 5 / 15 min — `loginFailureRate`): key
   `login:` + trimmed, lowercased email (as `GetUserForLogin` matches it). Every attempt `Take`s a token
   **before the DB read** (so parallel guesses can't outrun the count — `TestService_Login_ParallelGuesses_U`);
@@ -105,8 +111,9 @@ Added 2026-11-09 as the boilerplate's base security.
   `login: give back failure count failed`, `limiter` = `email` / `ip`). No IP allowlist (an office NAT only
   reaches it with 100 wrong passwords). Tests: `TestService_Login_IPFailureLimit_U`,
   `TestService_Login_LimiterOutcomes_U`, `TestService_Login_ParallelGuesses_U` (20 emails from one IP).
-- **A new public endpoint** (no access token) goes into the `limited` group in `router.go` unless, like
-  refresh, it runs automatically per tab. **One that sends email** (verify link, password reset) also needs a
+- **A new public endpoint** (no access token) goes into the `guarded` group in `router.go` (the general per-IP
+  limit), or its `limited` child when it touches credentials or sends email; only one that runs automatically per
+  tab, like refresh, goes straight into `public`. **One that sends email** (verify link, password reset) also needs a
   per-recipient limit in its service (e.g. 3 / h), or it can be used to spam any address through our SMTP.
 - Tests: `ratelimit/limiter_unit_test.go` (`TestMemory_U`, `TestMemory_Take_Parallel_U`, `TestIPKey_U`), `middleware/rate_limit_unit_test.go`,
   `server/router_unit_test.go` (`TestNewRouter_Security_U` — which

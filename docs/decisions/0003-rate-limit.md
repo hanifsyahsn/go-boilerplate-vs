@@ -1,15 +1,17 @@
 # 0003 — Rate limit
 
 Status: accepted (2026-11-10); part built 2026-11-11 — the `Limiter` interface + in-memory token bucket (point 1's
-default, point 2), failed logins per IP (point 6). Redis + fallback (points 1, 4, 5) and the general per-IP layer
-(point 3) not built yet.
+default, point 2), failed logins per IP (point 6), the general per-IP layer (point 3). Redis + fallback (points 1,
+4, 5) not built yet.
 
 ## Decision
 1. One `Limiter` interface, two implementations: **in-memory** (default) and **Redis** (used when `REDIS_URL` is set).
 2. **Token bucket** everywhere (replaces the boilerplate's fixed window). "5 failed logins / 15 min per email"
    stays: a token is taken only on a failure.
 3. Two layers: a general **per-IP limit on every public endpoint**, plus the strict auth limits (register, login,
-   later password reset).
+   later password reset). Refined 2026-11-11: refresh and logout stay out of it (every open tab calls them, many
+   users share one IP behind NAT / CGNAT, and a forged token fails the signature check before the DB); 300 / 1 min
+   per IP, a flood guard only; no IP allowlist.
 4. Redis down: ordinary endpoints **fail open** (warning logged); auth endpoints **fall back to the in-memory limiter**.
 5. The Redis implementation is an atomic Lua token bucket with a TTL long enough for a bucket to refill, ported
    from a derivative that already runs it and reshaped to the boilerplate's conventions (slog, JSON:API 429 +

@@ -26,8 +26,9 @@ auth.md (`AccessTokenMiddleware`, the auth documents). What applies everywhere i
    writes one `request` record (method, path, status, latency_ms, client_ip, bytes; `user_id` comes from the
    handler once auth has put the caller on the request context): warn with `cancelled=true` when the client went away (request context cancelled), else error
    for a 5xx, info for the rest.
-1. `middleware.JSONAPIMediaType` (every `/api` route) checks content negotiation first (406 / 415). Register and
-   login then pass `middleware.RateLimitByIP` (429 past the per-IP budget).
+1. `middleware.JSONAPIMediaType` (every `/api` route) checks content negotiation first (406 / 415). Every public
+   route but refresh / logout then passes `middleware.RateLimitByIP` (the general per-IP budget), and register /
+   login a second one (the auth budget) — 429 past either.
 2. `AccessTokenMiddleware` reads the access token from the `app-access-token` cookie, else
    `Authorization: Bearer`, verifies it (ES256, `iss`, `aud` = `CLIENT_ID`, `exp`, `typ = access`), then
    re-reads `users.is_active` on **every** request (inactive / deleted → 401, DB error → 500). It sets

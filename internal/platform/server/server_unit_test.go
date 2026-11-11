@@ -20,7 +20,8 @@ func TestNewServer_U(t *testing.T) {
 		wantErr string
 	}{
 		{name: "a valid security setup: the server listens on SERVER_ADDRESS",
-			sec: Security{TrustedProxies: []string{"10.0.0.1"}, AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute})}},
+			sec: Security{TrustedProxies: []string{"10.0.0.1"}, AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute}),
+				PublicIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute})}},
 		{name: "a security setup the router refuses: no server, the error passed on (main stops)",
 			sec: Security{}, wantErr: "AuthIPLimit is required"},
 	}

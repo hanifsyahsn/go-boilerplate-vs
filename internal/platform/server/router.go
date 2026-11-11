@@ -52,10 +52,17 @@ type Security struct {
 	TrustedProxies []string
 	// AuthIPLimit caps register / login per client IP. Required.
 	AuthIPLimit ratelimit.Limiter
+	// PublicIPLimit caps every public route per client IP, a flood guard
+	// generous enough for an office NAT; refresh and logout are left out
+	// (they run on every open tab). Required.
+	PublicIPLimit ratelimit.Limiter
 }
 
-// authIPLimitName keys the auth routes' counters in AuthIPLimit.
-const authIPLimitName = "auth"
+// The limiters' key prefixes: one bucket per name and client IP.
+const (
+	authIPLimitName   = "auth"
+	publicIPLimitName = "public"
+)
 
 // EnvironmentDevelopment is the ENVIRONMENT value that keeps gin in debug mode.
 const EnvironmentDevelopment = "development"
@@ -73,8 +80,10 @@ func GinMode(environment string) string {
 // NewRouter mounts three groups under /api, all behind JSON:API content
 // negotiation (middleware.JSONAPIMediaType):
 //
-//	public   no auth (register / login / refresh / logout); register and
-//	         login also behind the per-IP limit (Security.AuthIPLimit)
+//	public   no auth: refresh / logout with no IP limit (every open tab
+//	         calls them); every other public route behind the general per-IP
+//	         limit (Security.PublicIPLimit), and register / login also behind
+//	         the auth one (Security.AuthIPLimit)
 //	authed   AccessTokenMiddleware (any active user)
 //	/admin   AccessTokenMiddleware + RequireRole(admin)
 //
@@ -87,10 +96,13 @@ func GinMode(environment string) string {
 // with JSON:API errors too.
 //
 // It fails on a Security it can't apply: a TrustedProxies entry gin rejects,
-// or no AuthIPLimit.
+// or no AuthIPLimit / PublicIPLimit.
 func NewRouter(version string, tokenMaker jwttoken.M, userStatus middleware.UserStatusReader, h Handlers, sec Security) (*gin.Engine, error) {
 	if sec.AuthIPLimit == nil {
 		return nil, errors.New("server.NewRouter(): Security.AuthIPLimit is required")
+	}
+	if sec.PublicIPLimit == nil {
+		return nil, errors.New("server.NewRouter(): Security.PublicIPLimit is required")
 	}
 
 	r := gin.New()
@@ -124,14 +136,20 @@ func NewRouter(version string, tokenMaker jwttoken.M, userStatus middleware.User
 	api := r.Group("/api", middleware.JSONAPIMediaType())
 
 	// Refresh and logout work off the refresh cookie and run on every open
-	// tab, so they aren't IP-limited (an office shares one IP); register and
-	// login are, on top of login's own per-email failure limit.
+	// tab, so they aren't IP-limited (an office or a mobile carrier puts many
+	// users behind one IP, and a forged token fails the signature check before
+	// the DB). Every other public route is behind the general per-IP limit,
+	// a flood guard; register and login also behind the auth one, on top of
+	// login's own failure limits. A new public route goes into guarded (or
+	// limited when it touches credentials or sends email).
 	public := api.Group("")
 	{
 		authrefresh.Route(public, h.Refresh)
 		authlogout.Route(public, h.Logout)
 	}
-	limited := public.Group("")
+	guarded := public.Group("")
+	guarded.Use(middleware.RateLimitByIP(sec.PublicIPLimit, publicIPLimitName))
+	limited := guarded.Group("")
 	limited.Use(middleware.RateLimitByIP(sec.AuthIPLimit, authIPLimitName))
 	{
 		authregister.Route(limited, h.Register)
