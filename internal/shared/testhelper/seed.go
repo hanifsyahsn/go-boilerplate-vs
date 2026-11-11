@@ -207,7 +207,7 @@ func SeedAuthToken(t *testing.T, db *sql.DB, p SeedAuthTokenParams) int64 {
 // Truncate empties every table between test cases.
 func Truncate(t *testing.T, db *sql.DB) {
 	t.Helper()
-	_, err := db.Exec(`TRUNCATE TABLE users, notes, refresh_tokens, auth_sessions, auth_tokens RESTART IDENTITY CASCADE`)
+	_, err := db.Exec(`TRUNCATE TABLE users, notes, refresh_tokens, auth_sessions, auth_tokens, api_activity_logs RESTART IDENTITY CASCADE`)
 	require.NoError(t, err)
 }
 

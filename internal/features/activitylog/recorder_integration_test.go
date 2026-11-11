@@ -1,0 +1,109 @@
+package activitylog
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/activitylog/sqlc"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/testhelper"
+	"github.com/stretchr/testify/require"
+)
+
+// TestRecorder_ShutdownFlush_I: rows recorded right before shutdown are all
+// in the table once Run returned (the shutdown flush of decision 0008).
+func TestRecorder_ShutdownFlush_I(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	testCases := []struct {
+		name string
+		rows int
+	}{
+		{name: "500 rows recorded, then cancel: Run returns and all 500 are in the table", rows: 500},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer testhelper.Truncate(t, testDB)
+			r := NewRecorder(sqlc.New(testDB))
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() { r.Run(ctx); close(done) }()
+
+			for i := range tc.rows {
+				r.Record(middleware.Activity{OccurredAt: time.Now(), Method: "GET", Route: "/api/notes/:id", Path: "/api/notes/1", Status: 200, Latency: time.Duration(i)})
+			}
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(30 * time.Second):
+				t.Fatal("Run didn't return after cancel")
+			}
+
+			var n int
+			require.NoError(t, testDB.QueryRow(`SELECT count(*) FROM api_activity_logs`).Scan(&n))
+			require.Equal(t, tc.rows, n)
+		})
+	}
+}
+
+// TestRecorder_Columns_I: one row lands with every column, NULL for an
+// anonymous caller.
+func TestRecorder_Columns_I(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	sid := uuid.New()
+	at := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+
+	testCases := []struct {
+		name      string
+		a         middleware.Activity
+		wantUser  any
+		wantSesID any
+	}{
+		{name: "a signed-in request keeps user and session",
+			a: middleware.Activity{OccurredAt: at, RequestID: "req-1", UserID: 7, SessionID: sid, Method: "PATCH", Route: "/api/notes/:id",
+				Path: "/api/notes/1", Status: 200, Latency: 1500 * time.Millisecond, ResponseBytes: 321, ClientIP: "203.0.113.7", UserAgent: "UA"},
+			wantUser: int64(7), wantSesID: sid.String()},
+		{name: "an anonymous request stores NULL user and session",
+			a:        middleware.Activity{OccurredAt: at, Method: "POST", Path: "/api/auth/login", Status: 401},
+			wantUser: nil, wantSesID: nil},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer testhelper.Truncate(t, testDB)
+			r := NewRecorder(sqlc.New(testDB))
+			r.write(context.Background(), []middleware.Activity{tc.a})
+
+			var (
+				occurredAt                             time.Time
+				requestID, method, route, path, ip, ua string
+				userID, sessionID                      any
+				status, latencyMs, responseBytes       int
+			)
+			require.NoError(t, testDB.QueryRow(`
+				SELECT occurred_at, request_id, user_id, session_id::text, method, route, path, status, latency_ms,
+				       response_bytes, client_ip, user_agent
+				FROM api_activity_logs`).Scan(&occurredAt, &requestID, &userID, &sessionID, &method, &route, &path, &status,
+				&latencyMs, &responseBytes, &ip, &ua))
+			require.True(t, occurredAt.Equal(tc.a.OccurredAt))
+			require.Equal(t, tc.a.RequestID, requestID)
+			require.Equal(t, tc.wantUser, userID)
+			require.Equal(t, tc.wantSesID, sessionID)
+			require.Equal(t, tc.a.Method, method)
+			require.Equal(t, tc.a.Route, route)
+			require.Equal(t, tc.a.Path, path)
+			require.Equal(t, tc.a.Status, status)
+			require.Equal(t, int(tc.a.Latency.Milliseconds()), latencyMs)
+			require.Equal(t, tc.a.ResponseBytes, responseBytes)
+			require.Equal(t, tc.a.ClientIP, ip)
+			require.Equal(t, tc.a.UserAgent, ua)
+		})
+	}
+}

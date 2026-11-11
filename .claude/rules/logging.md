@@ -2,6 +2,7 @@
 paths:
   - "cmd/api/**"
   - "internal/platform/logging/**"
+  - "internal/features/activitylog/**"
   - "internal/platform/middleware/**"
   - "internal/platform/server/**"
   - "internal/shared/requestid/**"
@@ -45,3 +46,21 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (*Request
   request. Anything async (an emailer, …) takes a ctx for the same reason.
 - Tests that assert on logs swap the default: `prev := slog.Default(); slog.SetDefault(l); defer
   slog.SetDefault(prev)` with `l, _ := logging.New(&buf, logging.FormatJSON, "debug")`.
+
+### Activity log
+
+- **API activity log** (decision 0008, migration 000008, table `api_activity_logs`, package
+  `internal/features/activitylog`): one row per request — when, `request_id`, user and session (NULL = not
+  signed in; no FK on purpose), method, the matched **route** pattern (`c.FullPath()`, empty for 404 / 405),
+  path **without** the query string, status, latency, response size, client IP, User-Agent. **No body or query
+  string** (they can hold passwords and tokens). `middleware.ActivityLog` runs on the engine right after
+  `AccessLog`, outside recovery (404 / 405 / panics recorded too), skips `/healthz`, cuts values to the column
+  sizes in runes.
+- `activitylog.Recorder`: `Record` never blocks (a 4096 queue; full → dropped, counted, logged as `activity log:
+  queue full, rows dropped` at the next write); `Run` (in main's background group) writes batches of 200 or every
+  2 s in **one** `INSERT … SELECT unnest(…)` per batch; a failed write → `activity log: write failed` with `rows`,
+  dropped (no retry). On shutdown it drains what is queued and writes it on `context.WithoutCancel` + 5 s —
+  main cancels it only after the server drained its requests (*Logging* above). Rows older than
+  `ACTIVITY_LOG_RETENTION` (default `17520h`, `0` = forever) are deleted by the cleanup worker (decision 0005).
+- Tests: `TestActivityLog_U`, `TestRecorder_U` / `_QueueFull_U` / `_Drain_U`, `TestRecorder_ShutdownFlush_I`
+  (500 rows, cancel, all 500 in the table), `-race` in Docker.

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/activitylog"
+	activitylogsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/activitylog/sqlc"
 	adminuser "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user"
 	adminusersqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user/sqlc"
 	authemailverification "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/emailverification"
@@ -58,7 +60,7 @@ import (
 // newIntegrationRouter wires every slice exactly like cmd/api/main.go, but on
 // the test container's database, a throwaway ES256 key and a fake mailer that
 // sends inline (the returned one, for the email flows).
-func newIntegrationRouter(t *testing.T, db *sql.DB) (*gin.Engine, *mailer.Fake) {
+func newIntegrationRouter(t *testing.T, db *sql.DB) (*gin.Engine, *mailer.Fake, *activitylog.Recorder) {
 	t.Helper()
 
 	require.NoError(t, validation.RegisterGinValidators())
@@ -75,6 +77,7 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) (*gin.Engine, *mailer.Fake) 
 	authSharedQuerier := authsharedsqlc.New(db)
 	noteSharedQuerier := notesharedsqlc.New(db)
 	mail := &mailer.Fake{}
+	activity := activitylog.NewRecorder(activitylogsqlc.New(db))
 	emailer := authshared.Emailer{Mailer: mail, AppBaseURL: "https://app.example.com",
 		Go: func(ctx context.Context, fn func(context.Context)) { fn(ctx) }}
 
@@ -122,9 +125,11 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) (*gin.Engine, *mailer.Fake) 
 		Security{
 			AuthIPLimit:   ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}),
 			PublicIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}),
+
+			ActivityRecorder: activity,
 		})
 	require.NoError(t, err)
-	return r, mail
+	return r, mail, activity
 }
 
 // apiClient sends JSON:API requests to the router in-process.
@@ -201,7 +206,7 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	router, mail := newIntegrationRouter(t, testDB)
+	router, mail, activity := newIntegrationRouter(t, testDB)
 
 	testCases := []struct {
 		name string
@@ -479,6 +484,49 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 					`{"data":{"type":"email-verification-requests"}}`, access)
 				require.Equal(t, http.StatusConflict, res.Code)
 				require.Equal(t, "Your email is already verified.", errorDetail(t, res))
+			},
+		},
+		{
+			name: "every /api request lands in the activity log once the recorder flushes, with the caller and the route",
+			run: func(t *testing.T, c apiClient) {
+				// The recorder is shared by every case: write what earlier cases
+				// queued, then start from an empty table.
+				drained, cancelDrain := context.WithCancel(context.Background())
+				cancelDrain()
+				activity.Run(drained)
+				_, err := testDB.Exec(`TRUNCATE TABLE api_activity_logs`)
+				require.NoError(t, err)
+
+				userID := testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "jane@example.com"})
+				token := c.login("jane@example.com")
+				require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/me", "", token).Code)
+				require.Equal(t, http.StatusNotFound, c.do(http.MethodGet, "/api/nope?secret=1", "", "").Code)
+
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				activity.Run(ctx) // drains and writes what was recorded, then returns
+
+				rows, err := testDB.Query(`SELECT method, route, path, status, user_id, session_id IS NOT NULL FROM api_activity_logs ORDER BY id`)
+				require.NoError(t, err)
+				defer func() { _ = rows.Close() }()
+				type row struct {
+					method, route, path string
+					status              int
+					userID              sql.NullInt64
+					hasSession          bool
+				}
+				var got []row
+				for rows.Next() {
+					var r row
+					require.NoError(t, rows.Scan(&r.method, &r.route, &r.path, &r.status, &r.userID, &r.hasSession))
+					got = append(got, r)
+				}
+				require.NoError(t, rows.Err())
+				require.Equal(t, []row{
+					{method: "POST", route: "/api/auth/login", path: "/api/auth/login", status: 200},
+					{method: "GET", route: "/api/me", path: "/api/me", status: 200, userID: sql.NullInt64{Int64: userID, Valid: true}, hasSession: true},
+					{method: "GET", route: "", path: "/api/nope", status: 404},
+				}, got)
 			},
 		},
 		{

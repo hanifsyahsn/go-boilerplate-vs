@@ -72,7 +72,14 @@ type Config struct {
 	// AppBaseURL is the front end's base URL (http(s)://host[/path], no
 	// trailing /); the links in emails are built on it. Required.
 	AppBaseURL string `mapstructure:"APP_BASE_URL"`
+	// ActivityLogRetention is how long api_activity_logs rows are kept (the
+	// cleanup worker deletes older ones). Optional, defaults to
+	// DefaultActivityLogRetention; 0 keeps them forever.
+	ActivityLogRetention time.Duration `mapstructure:"ACTIVITY_LOG_RETENTION"`
 }
+
+// DefaultActivityLogRetention is ACTIVITY_LOG_RETENTION when unset: 2 years.
+const DefaultActivityLogRetention = 17520 * time.Hour
 
 // DefaultSMTPPort is SMTP_PORT when unset: submission with STARTTLS.
 const DefaultSMTPPort = 587
@@ -142,6 +149,14 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, err
 	}
 
+	// Unset is the default; an explicit 0 keeps the log forever.
+	activityLogRetention := DefaultActivityLogRetention
+	if v.GetString("ACTIVITY_LOG_RETENTION") != "" {
+		if activityLogRetention, err = getDurationEnv(v, "ACTIVITY_LOG_RETENTION"); err != nil {
+			return Config{}, err
+		}
+	}
+
 	config := Config{
 		Environment:              v.GetString("ENVIRONMENT"),
 		ServerAddress:            v.GetString("SERVER_ADDRESS"),
@@ -166,6 +181,7 @@ func LoadConfig(path string) (Config, error) {
 		SMTPPassword:             v.GetString("SMTP_PASSWORD"),
 		SMTPFrom:                 v.GetString("SMTP_FROM"),
 		AppBaseURL:               v.GetString("APP_BASE_URL"),
+		ActivityLogRetention:     activityLogRetention,
 	}
 
 	if err = config.Validate(); err != nil {
@@ -288,6 +304,9 @@ func (c Config) Validate() error {
 		if _, err := mail.ParseAddress(c.SMTPFrom); err != nil {
 			errs = append(errs, fmt.Errorf("config: SMTP_FROM %q is not an email address: %w", c.SMTPFrom, err))
 		}
+	}
+	if c.ActivityLogRetention < 0 {
+		errs = append(errs, fmt.Errorf("config: ACTIVITY_LOG_RETENTION %s is negative (0 keeps the log forever)", c.ActivityLogRetention))
 	}
 	if c.SMTPPort < 1 || c.SMTPPort > 65535 {
 		errs = append(errs, fmt.Errorf("config: SMTP_PORT %d is not a port", c.SMTPPort))

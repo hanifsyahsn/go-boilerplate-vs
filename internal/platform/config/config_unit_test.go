@@ -47,8 +47,25 @@ func TestLoadConfig_Env_U(t *testing.T) {
 				require.Empty(t, c.AllowedOrigins, "no origin allowed by default")
 				require.Equal(t, 587, c.SMTPPort, "SMTP submission port by default")
 				require.Equal(t, "https://app.example.com", c.AppBaseURL)
+				require.Equal(t, 17520*time.Hour, c.ActivityLogRetention, "the activity log is kept 2 years by default")
 			},
 		},
+		{
+			name:     "an activity log retention read",
+			override: map[string]string{"ACTIVITY_LOG_RETENTION": "720h"},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Equal(t, 720*time.Hour, c.ActivityLogRetention)
+			},
+		},
+		{
+			name:     "an activity log retention of 0 keeps the log forever",
+			override: map[string]string{"ACTIVITY_LOG_RETENTION": "0"},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Zero(t, c.ActivityLogRetention)
+			},
+		},
+		{name: "a negative activity log retention", override: map[string]string{"ACTIVITY_LOG_RETENTION": "-1h"}, wantErr: "ACTIVITY_LOG_RETENTION -1h0m0s is negative"},
+		{name: "an activity log retention that isn't a duration", override: map[string]string{"ACTIVITY_LOG_RETENTION": "forever"}, wantErr: "ACTIVITY_LOG_RETENTION"},
 		{
 			name: "SMTP settings read",
 			override: map[string]string{"SMTP_PORT": "465", "SMTP_USERNAME": "mailer", "SMTP_PASSWORD": "secret",
@@ -186,6 +203,7 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			t.Setenv("TRUSTED_PROXIES", "")
 			t.Setenv("ALLOWED_ORIGINS", "")
 			t.Setenv("SMTP_PORT", "")
+			t.Setenv("ACTIVITY_LOG_RETENTION", "")
 			t.Setenv("SMTP_USERNAME", "")
 			t.Setenv("SMTP_PASSWORD", "")
 			for k, v := range tc.override {

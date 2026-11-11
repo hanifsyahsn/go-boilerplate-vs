@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/activitylog"
+	activitylogsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/activitylog/sqlc"
 	adminusersvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user"
 	adminusersqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user/sqlc"
 	authemailverificationsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/emailverification"
@@ -124,7 +126,11 @@ func main() {
 	bgCtx, stopBg := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopBg()
 	var bg utility.Group
-	_ = bgCtx // the first worker (decisions 0005, 0007, 0008, 0011) starts with bg.Go(bgCtx, ...)
+
+	// The API activity log: queued by the middleware, written in batches by
+	// the recorder, flushed at shutdown (decision 0008).
+	activity := activitylog.NewRecorder(activitylogsqlc.New(conn))
+	bg.Go(bgCtx, activity.Run)
 
 	if err = validation.RegisterGinValidators(); err != nil {
 		logging.Fatal("register validators failed", "err", err)
@@ -207,6 +213,8 @@ func main() {
 		AuthIPLimit:    ratelimit.NewMemory(authIPRate),
 		PublicIPLimit:  ratelimit.NewMemory(publicIPRate),
 		AllowedOrigins: conf.AllowedOrigins,
+
+		ActivityRecorder: activity,
 	})
 	if err != nil {
 		logging.Fatal("build server failed", "err", err)

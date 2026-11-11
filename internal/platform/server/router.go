@@ -75,6 +75,9 @@ type Security struct {
 	// AllowedOrigins (ALLOWED_ORIGINS, normalised) are the browser origins
 	// CORS answers and the origin guard lets write. Empty turns both off.
 	AllowedOrigins []string
+	// ActivityRecorder takes one record per request (the API activity log,
+	// decision 0008). nil records nothing (router tests); main always sets it.
+	ActivityRecorder middleware.ActivityRecorder
 }
 
 // The limiters' key prefixes: one bucket per name and client IP.
@@ -108,7 +111,7 @@ func GinMode(environment string) string {
 //	/admin   AccessTokenMiddleware + RequireRole(admin)
 //
 // Every route (404 / 405 / panic included) runs RequestID → AccessLog →
-// recovery → CORS first, so every response carries X-Request-ID and gets one
+// ActivityLog (when Security.ActivityRecorder is set) → recovery → CORS first, so every response carries X-Request-ID and gets one
 // access log record, and a browser preflight (an OPTIONS no route declares)
 // is answered by CORS instead of a 405.
 //
@@ -136,7 +139,12 @@ func NewRouter(version string, tokenMaker jwttoken.M, accessStatus middleware.Ac
 	if err := r.SetTrustedProxies(trusted); err != nil {
 		return nil, fmt.Errorf("server.NewRouter(): trusted proxies: %w", err)
 	}
-	r.Use(middleware.RequestID(), middleware.AccessLog(), gin.CustomRecovery(func(c *gin.Context, recovered any) {
+	r.Use(middleware.RequestID(), middleware.AccessLog())
+	if sec.ActivityRecorder != nil {
+		// Outside recovery, so a panic is recorded as the 500 it became.
+		r.Use(middleware.ActivityLog(sec.ActivityRecorder))
+	}
+	r.Use(gin.CustomRecovery(func(c *gin.Context, recovered any) {
 		jsonapi.WriteError(c.Writer, apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
 			fmt.Errorf("panic: %v", recovered))
 		c.Abort()

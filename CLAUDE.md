@@ -46,7 +46,7 @@ Cross-topic map (touching the left → also read the right):
   `middleware/rate_limit.go`, `server.Security`) → `auth.md` (*Rate limits and the client IP*) + `jsonapi.md`
   (*Request flow*).
 - **An error shape / status code** → `jsonapi.md` (*Errors*, *Request flow* step 4) + `logging.md`.
-- **A goroutine / background worker** → `logging.md`.
+- **A goroutine / background worker, the activity log** → `logging.md`.
 - **A migration** → *Gotchas* here + the rule of the table's feature (`users` / `refresh_tokens` → `auth.md`)
   + `slice-patterns.md` §1 for an owned, soft-deleted table.
 
@@ -140,7 +140,7 @@ Windows".
   SIGINT/SIGTERM) → `stopBg()` → `bg.Wait()` → the DB pool closes (see *Logging*).
 - `internal/platform` — infrastructure: `config` (viper, `.env` optional), `logging` (`log/slog` setup: `New` /
   `Setup` / `Check` / `Fatal`, a handler adding `request_id`), `server` (`server.go` + `router.go` with the
-  `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `CORS`, `OriginGuard`, `JSONAPIMediaType`,
+  `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `ActivityLog`, `CORS`, `OriginGuard`, `JSONAPIMediaType`,
   `RateLimitByIP`, `AccessTokenMiddleware`, `RequireRole`, its own sqlc for `GetAccessStatus` — user active + session live), `ratelimit`
   (token-bucket `Limiter` interface + in-memory `NewMemory` — see *Rate limits and the client IP*), `mailer`
   (`Mailer` interface: `NewSMTP`, the development `NewLog`, `Fake` for tests), `jwttoken` (ES256), `db/tx` (generic
@@ -155,7 +155,7 @@ Windows".
   background work main waits for at shutdown, …), `testhelper`.
 - `internal/features/<domain>/<action>` — the vertical slices:
   `auth/{register,login,refresh,logout,passwordresetrequest,passwordreset,passwordchange,emailverification,
-  emailverificationrequest}`, `me`,
+  emailverificationrequest}`, `me`, `activitylog` (the recorder, no endpoint),
   `note/{create,list,detail,update,delete}`, `session/{list,revoke}` (signed-in devices), `admin/user`. `<domain>/shared` holds what more than one slice of
   that domain needs (`note/shared`: the `NoteResource`, the include policy, the ownership helpers
   `GetOwnedNote` / `LockOwnedNote`, and the shared sqlc querier; `auth/shared`: cookies, reading the refresh
@@ -213,6 +213,7 @@ origin guard, empty = both off with a startup warning). `APP_BASE_URL` (the fron
 `/`; email links are built on it) is required; `SMTP_HOST`, `SMTP_FROM` (an address) are required except with
 `ENVIRONMENT=development` (an empty `SMTP_HOST` there logs emails instead), `SMTP_PORT` defaults to `587`
 (465 = implicit TLS, any other port must offer STARTTLS), `SMTP_USERNAME` / `SMTP_PASSWORD` optional.
+`ACTIVITY_LOG_RETENTION` (optional, default `17520h` = 2 years, `0` = keep forever).
 Durations are Go duration strings (`15m`).
 See `.env.example`.
 

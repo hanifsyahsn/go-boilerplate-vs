@@ -19,7 +19,8 @@ auth.md (`AccessTokenMiddleware`, the auth documents). What applies everywhere i
 
 ### Request flow
 
-0. Every route (404 / 405 / panic included) runs `RequestID` → `AccessLog` → recovery → `CORS`; the engine trusts only
+0. Every route (404 / 405 / panic included) runs `RequestID` → `AccessLog` → `ActivityLog` (see logging.md) →
+   recovery → `CORS`; the engine trusts only
    `TRUSTED_PROXIES` for the client IP (see auth.md *Rate limits and the client IP*). `RequestID` keeps an
    incoming `X-Request-ID` matching `^[A-Za-z0-9._:-]{1,128}$`, else makes a UUID, and sets it on the response
    header (before the handlers), in the gin context (`requestid.Key`) and in the request context. `AccessLog`
