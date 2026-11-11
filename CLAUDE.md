@@ -140,7 +140,7 @@ Windows".
 - `internal/platform` — infrastructure: `config` (viper, `.env` optional), `logging` (`log/slog` setup: `New` /
   `Setup` / `Check` / `Fatal`, a handler adding `request_id`), `server` (`server.go` + `router.go` with the
   `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `CORS`, `OriginGuard`, `JSONAPIMediaType`,
-  `RateLimitByIP`, `AccessTokenMiddleware`, `RequireRole`, its own sqlc for `GetUserIsActive`), `ratelimit`
+  `RateLimitByIP`, `AccessTokenMiddleware`, `RequireRole`, its own sqlc for `GetAccessStatus` — user active + session live), `ratelimit`
   (token-bucket `Limiter` interface + in-memory `NewMemory` — see *Rate limits and the client IP*), `jwttoken` (ES256), `db/tx` (generic
   transaction helper), `db/migration`, `constant`.
 - `internal/shared` — cross-cutting: `apperror` (typed error → HTTP status, with a JSON:API `Source`),
@@ -154,7 +154,8 @@ Windows".
   `note/{create,list,detail,update,delete}`, `admin/user`. `<domain>/shared` holds what more than one slice of
   that domain needs (`note/shared`: the `NoteResource`, the include policy, the ownership helpers
   `GetOwnedNote` / `LockOwnedNote`, and the shared sqlc querier; `auth/shared`: cookies, reading the refresh
-  token off a request, response shapes, and the `refresh_tokens` insert / family-revoke queries).
+  token off a request, response shapes, the session revoke reasons, and the session queries — `StartSession`,
+  `InsertRefreshToken`, `RevokeSession`, `RevokeUserSessions`).
 
 ### Slice structure
 

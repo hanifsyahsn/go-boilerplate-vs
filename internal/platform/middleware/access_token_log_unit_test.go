@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
@@ -49,8 +50,8 @@ func TestAccessTokenMiddleware_LogContext_U(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			maker := jwttoken.NewMockM(ctrl)
 			users := middlewaresqlc.NewMockQuerier(ctrl)
-			maker.EXPECT().VerifyAccessToken("good").Return(jwt.MapClaims{"sub": float64(7)}, nil)
-			users.EXPECT().GetUserIsActive(gomock.Any(), int64(7)).Return(false, tc.dbErr)
+			maker.EXPECT().VerifyAccessToken("good").Return(jwt.MapClaims{"sub": float64(7), "sid": uuid.New().String()}, nil)
+			users.EXPECT().GetAccessStatus(gomock.Any(), gomock.Any()).Return(middlewaresqlc.GetAccessStatusRow{}, tc.dbErr)
 
 			gin.SetMode(gin.TestMode)
 			r := gin.New()

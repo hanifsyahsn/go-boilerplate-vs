@@ -1,6 +1,7 @@
-// Package logout ends a login: it revokes the refresh-token family server
-// side and clears the auth cookies. The access token is a stateless JWT and
-// stays valid until it expires (keep ACCESS_TOKEN_DURATION short).
+// Package logout ends a login: it revokes the session (its auth_sessions row
+// and its refresh-token family) server side and clears the auth cookies. The
+// session's access tokens stop working at once (AccessTokenMiddleware checks
+// the session on every request).
 package logout
 
 import (

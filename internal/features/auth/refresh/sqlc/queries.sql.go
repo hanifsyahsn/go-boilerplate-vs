@@ -42,10 +42,17 @@ func (q *Queries) GetUserForRefresh(ctx context.Context, id int64) (GetUserForRe
 }
 
 const lockRefreshToken = `-- name: LockRefreshToken :one
-SELECT jti, user_id, family_id, revoked_at, replaced_by, session_expires_at
-FROM refresh_tokens
-WHERE jti = $1
-FOR UPDATE
+SELECT rt.jti,
+       rt.user_id,
+       rt.family_id,
+       rt.revoked_at,
+       rt.replaced_by,
+       rt.session_expires_at,
+       (s.family_id IS NOT NULL AND s.revoked_at IS NULL)::boolean AS session_live
+FROM refresh_tokens rt
+         LEFT JOIN auth_sessions s ON s.family_id = rt.family_id
+WHERE rt.jti = $1
+FOR UPDATE OF rt
 `
 
 type LockRefreshTokenRow struct {
@@ -55,10 +62,12 @@ type LockRefreshTokenRow struct {
 	RevokedAt        sql.NullTime  `json:"revoked_at"`
 	ReplacedBy       uuid.NullUUID `json:"replaced_by"`
 	SessionExpiresAt sql.NullTime  `json:"session_expires_at"`
+	SessionLive      bool          `json:"session_live"`
 }
 
 // The presented token's row, locked so two concurrent refreshes of the same
-// token can't both rotate it.
+// token can't both rotate it, with its session's state (session_live false =
+// signed out, or a family without a session).
 func (q *Queries) LockRefreshToken(ctx context.Context, jti uuid.UUID) (LockRefreshTokenRow, error) {
 	row := q.db.QueryRowContext(ctx, lockRefreshToken, jti)
 	var i LockRefreshTokenRow
@@ -69,6 +78,7 @@ func (q *Queries) LockRefreshToken(ctx context.Context, jti uuid.UUID) (LockRefr
 		&i.RevokedAt,
 		&i.ReplacedBy,
 		&i.SessionExpiresAt,
+		&i.SessionLive,
 	)
 	return i, err
 }
@@ -88,5 +98,25 @@ type RotateRefreshTokenParams struct {
 // Revokes the presented token and points it at its successor.
 func (q *Queries) RotateRefreshToken(ctx context.Context, arg RotateRefreshTokenParams) error {
 	_, err := q.db.ExecContext(ctx, rotateRefreshToken, arg.ReplacedBy, arg.Jti)
+	return err
+}
+
+const touchSession = `-- name: TouchSession :exec
+UPDATE auth_sessions
+SET last_used_at = now(),
+    user_agent   = $1::varchar,
+    client_ip    = $2::varchar
+WHERE family_id = $3::uuid
+`
+
+type TouchSessionParams struct {
+	UserAgent string    `json:"user_agent"`
+	ClientIp  string    `json:"client_ip"`
+	FamilyID  uuid.UUID `json:"family_id"`
+}
+
+// Records the session's latest use: when, from which browser and IP.
+func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
+	_, err := q.db.ExecContext(ctx, touchSession, arg.UserAgent, arg.ClientIp, arg.FamilyID)
 	return err
 }

@@ -102,7 +102,7 @@ func GinMode(environment string) string {
 //
 // It fails on a Security it can't apply: a TrustedProxies entry gin rejects,
 // or no AuthIPLimit / PublicIPLimit.
-func NewRouter(version string, tokenMaker jwttoken.M, userStatus middleware.UserStatusReader, h Handlers, sec Security) (*gin.Engine, error) {
+func NewRouter(version string, tokenMaker jwttoken.M, accessStatus middleware.AccessStatusReader, h Handlers, sec Security) (*gin.Engine, error) {
 	if sec.AuthIPLimit == nil {
 		return nil, errors.New("server.NewRouter(): Security.AuthIPLimit is required")
 	}
@@ -164,7 +164,7 @@ func NewRouter(version string, tokenMaker jwttoken.M, userStatus middleware.User
 	}
 
 	authed := api.Group("")
-	authed.Use(middleware.AccessTokenMiddleware(tokenMaker, userStatus))
+	authed.Use(middleware.AccessTokenMiddleware(tokenMaker, accessStatus))
 	{
 		me.Route(authed, h.Me)
 		createnote.Route(authed, h.CreateNote)
@@ -176,7 +176,7 @@ func NewRouter(version string, tokenMaker jwttoken.M, userStatus middleware.User
 
 	admin := api.Group("/admin")
 	admin.Use(
-		middleware.AccessTokenMiddleware(tokenMaker, userStatus),
+		middleware.AccessTokenMiddleware(tokenMaker, accessStatus),
 		middleware.RequireRole(enum.RoleAdmin),
 	)
 	{

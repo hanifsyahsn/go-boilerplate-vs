@@ -68,7 +68,7 @@ func TestService_Login_I(t *testing.T) {
 				Limiters{
 					Email: ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: time.Minute}),
 					IP:    ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: time.Minute}),
-				}).Login(context.Background(), tc.req, Client{IP: "203.0.113.7"})
+				}).Login(context.Background(), tc.req, Client{IP: "203.0.113.7", UserAgent: "Mozilla/5.0 (test)"})
 			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
@@ -88,6 +88,15 @@ func TestService_Login_I(t *testing.T) {
 			stored := testhelper.GetRefreshToken(t, testDB, got.Tokens.RefreshTokenID)
 			require.Equal(t, userID, stored.UserID)
 			require.False(t, stored.RevokedAt.Valid)
+
+			// The login's session: the family, carried by the access token as sid.
+			require.Equal(t, stored.FamilyID.String(), claims[platformconstant.SessionIDKey])
+			session := testhelper.GetSession(t, testDB, stored.FamilyID)
+			require.Equal(t, userID, session.UserID)
+			require.Equal(t, tc.req.TrustDevice, session.Trusted)
+			require.Equal(t, "Mozilla/5.0 (test)", session.UserAgent)
+			require.Equal(t, "203.0.113.7", session.ClientIP)
+			require.False(t, session.RevokedAt.Valid)
 			if tc.req.TrustDevice {
 				require.False(t, stored.SessionExpiresAt.Valid)
 				require.WithinDuration(t, time.Now().Add(time.Hour), got.Tokens.RefreshTokenExpiresAt, 5*time.Second)

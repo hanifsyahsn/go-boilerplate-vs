@@ -9,7 +9,6 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
-	uuid "github.com/google/uuid"
 )
 
 // MockQuerier is a mock of Querier interface.
@@ -49,16 +48,46 @@ func (mr *MockQuerierMockRecorder) InsertRefreshToken(ctx, arg interface{}) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertRefreshToken", reflect.TypeOf((*MockQuerier)(nil).InsertRefreshToken), ctx, arg)
 }
 
-// RevokeRefreshTokenFamily mocks base method.
-func (m *MockQuerier) RevokeRefreshTokenFamily(ctx context.Context, jti uuid.UUID) error {
+// RevokeSession mocks base method.
+func (m *MockQuerier) RevokeSession(ctx context.Context, arg RevokeSessionParams) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RevokeRefreshTokenFamily", ctx, jti)
+	ret := m.ctrl.Call(m, "RevokeSession", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RevokeSession indicates an expected call of RevokeSession.
+func (mr *MockQuerierMockRecorder) RevokeSession(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeSession", reflect.TypeOf((*MockQuerier)(nil).RevokeSession), ctx, arg)
+}
+
+// RevokeUserSessions mocks base method.
+func (m *MockQuerier) RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RevokeUserSessions", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RevokeUserSessions indicates an expected call of RevokeUserSessions.
+func (mr *MockQuerierMockRecorder) RevokeUserSessions(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeUserSessions", reflect.TypeOf((*MockQuerier)(nil).RevokeUserSessions), ctx, arg)
+}
+
+// StartSession mocks base method.
+func (m *MockQuerier) StartSession(ctx context.Context, arg StartSessionParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StartSession", ctx, arg)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// RevokeRefreshTokenFamily indicates an expected call of RevokeRefreshTokenFamily.
-func (mr *MockQuerierMockRecorder) RevokeRefreshTokenFamily(ctx, jti interface{}) *gomock.Call {
+// StartSession indicates an expected call of StartSession.
+func (mr *MockQuerierMockRecorder) StartSession(ctx, arg interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeRefreshTokenFamily", reflect.TypeOf((*MockQuerier)(nil).RevokeRefreshTokenFamily), ctx, jti)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StartSession", reflect.TypeOf((*MockQuerier)(nil).StartSession), ctx, arg)
 }

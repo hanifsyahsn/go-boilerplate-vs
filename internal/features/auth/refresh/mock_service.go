@@ -9,6 +9,7 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+	shared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 )
 
 // MockS is a mock of S interface.
@@ -35,16 +36,16 @@ func (m *MockS) EXPECT() *MockSMockRecorder {
 }
 
 // Refresh mocks base method.
-func (m *MockS) Refresh(ctx context.Context, refreshToken string) (Result, error) {
+func (m *MockS) Refresh(ctx context.Context, refreshToken string, client shared.SessionClient) (Result, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Refresh", ctx, refreshToken)
+	ret := m.ctrl.Call(m, "Refresh", ctx, refreshToken, client)
 	ret0, _ := ret[0].(Result)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Refresh indicates an expected call of Refresh.
-func (mr *MockSMockRecorder) Refresh(ctx, refreshToken interface{}) *gomock.Call {
+func (mr *MockSMockRecorder) Refresh(ctx, refreshToken, client interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Refresh", reflect.TypeOf((*MockS)(nil).Refresh), ctx, refreshToken)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Refresh", reflect.TypeOf((*MockS)(nil).Refresh), ctx, refreshToken, client)
 }

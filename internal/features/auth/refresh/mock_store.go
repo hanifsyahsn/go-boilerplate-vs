@@ -81,18 +81,34 @@ func (mr *MockQuerierMockRecorder) LockRefreshToken(ctx, jti interface{}) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockRefreshToken", reflect.TypeOf((*MockQuerier)(nil).LockRefreshToken), ctx, jti)
 }
 
-// RevokeRefreshTokenFamily mocks base method.
-func (m *MockQuerier) RevokeRefreshTokenFamily(ctx context.Context, jti uuid.UUID) error {
+// RevokeSession mocks base method.
+func (m *MockQuerier) RevokeSession(ctx context.Context, arg sqlc0.RevokeSessionParams) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RevokeRefreshTokenFamily", ctx, jti)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "RevokeSession", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
-// RevokeRefreshTokenFamily indicates an expected call of RevokeRefreshTokenFamily.
-func (mr *MockQuerierMockRecorder) RevokeRefreshTokenFamily(ctx, jti interface{}) *gomock.Call {
+// RevokeSession indicates an expected call of RevokeSession.
+func (mr *MockQuerierMockRecorder) RevokeSession(ctx, arg interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeRefreshTokenFamily", reflect.TypeOf((*MockQuerier)(nil).RevokeRefreshTokenFamily), ctx, jti)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeSession", reflect.TypeOf((*MockQuerier)(nil).RevokeSession), ctx, arg)
+}
+
+// RevokeUserSessions mocks base method.
+func (m *MockQuerier) RevokeUserSessions(ctx context.Context, arg sqlc0.RevokeUserSessionsParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RevokeUserSessions", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RevokeUserSessions indicates an expected call of RevokeUserSessions.
+func (mr *MockQuerierMockRecorder) RevokeUserSessions(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeUserSessions", reflect.TypeOf((*MockQuerier)(nil).RevokeUserSessions), ctx, arg)
 }
 
 // RotateRefreshToken mocks base method.
@@ -107,6 +123,34 @@ func (m *MockQuerier) RotateRefreshToken(ctx context.Context, arg sqlc.RotateRef
 func (mr *MockQuerierMockRecorder) RotateRefreshToken(ctx, arg interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RotateRefreshToken", reflect.TypeOf((*MockQuerier)(nil).RotateRefreshToken), ctx, arg)
+}
+
+// StartSession mocks base method.
+func (m *MockQuerier) StartSession(ctx context.Context, arg sqlc0.StartSessionParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StartSession", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// StartSession indicates an expected call of StartSession.
+func (mr *MockQuerierMockRecorder) StartSession(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StartSession", reflect.TypeOf((*MockQuerier)(nil).StartSession), ctx, arg)
+}
+
+// TouchSession mocks base method.
+func (m *MockQuerier) TouchSession(ctx context.Context, arg sqlc.TouchSessionParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TouchSession", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// TouchSession indicates an expected call of TouchSession.
+func (mr *MockQuerierMockRecorder) TouchSession(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchSession", reflect.TypeOf((*MockQuerier)(nil).TouchSession), ctx, arg)
 }
 
 // MockStoreI is a mock of StoreI interface.

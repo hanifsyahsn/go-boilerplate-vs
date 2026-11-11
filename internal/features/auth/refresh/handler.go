@@ -36,7 +36,7 @@ func (h *handler) Refresh(c *gin.Context) {
 		return
 	}
 
-	res, err := h.service.Refresh(c, token)
+	res, err := h.service.Refresh(c, token, authshared.SessionClient{UserAgent: c.Request.UserAgent(), IP: c.ClientIP()})
 	if handlerutil.WriteError(c, err, "Refresh Handler") {
 		return
 	}

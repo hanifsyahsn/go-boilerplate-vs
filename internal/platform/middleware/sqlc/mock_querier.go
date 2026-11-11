@@ -34,17 +34,17 @@ func (m *MockQuerier) EXPECT() *MockQuerierMockRecorder {
 	return m.recorder
 }
 
-// GetUserIsActive mocks base method.
-func (m *MockQuerier) GetUserIsActive(ctx context.Context, id int64) (bool, error) {
+// GetAccessStatus mocks base method.
+func (m *MockQuerier) GetAccessStatus(ctx context.Context, arg GetAccessStatusParams) (GetAccessStatusRow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetUserIsActive", ctx, id)
-	ret0, _ := ret[0].(bool)
+	ret := m.ctrl.Call(m, "GetAccessStatus", ctx, arg)
+	ret0, _ := ret[0].(GetAccessStatusRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetUserIsActive indicates an expected call of GetUserIsActive.
-func (mr *MockQuerierMockRecorder) GetUserIsActive(ctx, id interface{}) *gomock.Call {
+// GetAccessStatus indicates an expected call of GetAccessStatus.
+func (mr *MockQuerierMockRecorder) GetAccessStatus(ctx, arg interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserIsActive", reflect.TypeOf((*MockQuerier)(nil).GetUserIsActive), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAccessStatus", reflect.TypeOf((*MockQuerier)(nil).GetAccessStatus), ctx, arg)
 }

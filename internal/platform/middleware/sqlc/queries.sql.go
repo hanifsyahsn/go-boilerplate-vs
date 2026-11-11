@@ -7,22 +7,40 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
-const getUserIsActive = `-- name: GetUserIsActive :one
+const getAccessStatus = `-- name: GetAccessStatus :one
 
-SELECT is_active
-FROM users
-WHERE id = $1
+SELECT u.is_active,
+       EXISTS (SELECT 1
+               FROM auth_sessions s
+               WHERE s.family_id = $1::uuid
+                 AND s.user_id = u.id
+                 AND s.revoked_at IS NULL) AS session_live
+FROM users u
+WHERE u.id = $2::bigint
 `
 
+type GetAccessStatusParams struct {
+	SessionID uuid.UUID `json:"session_id"`
+	UserID    int64     `json:"user_id"`
+}
+
+type GetAccessStatusRow struct {
+	IsActive    bool `json:"is_active"`
+	SessionLive bool `json:"session_live"`
+}
+
 // Queries for the auth middleware.
-// Whether the token's user may still use the API. Read on every authenticated
-// request, so a deactivated user is locked out at once instead of when their
-// token expires. A missing row (deleted user) comes back as sql.ErrNoRows.
-func (q *Queries) GetUserIsActive(ctx context.Context, id int64) (bool, error) {
-	row := q.db.QueryRowContext(ctx, getUserIsActive, id)
-	var is_active bool
-	err := row.Scan(&is_active)
-	return is_active, err
+// Whether the token's user may still use the API and its session is still
+// live. Read on every authenticated request, so a deactivated user or a
+// signed-out session is locked out at once instead of when the access token
+// expires. A missing user row (deleted) comes back as sql.ErrNoRows.
+func (q *Queries) GetAccessStatus(ctx context.Context, arg GetAccessStatusParams) (GetAccessStatusRow, error) {
+	row := q.db.QueryRowContext(ctx, getAccessStatus, arg.SessionID, arg.UserID)
+	var i GetAccessStatusRow
+	err := row.Scan(&i.IsActive, &i.SessionLive)
+	return i, err
 }

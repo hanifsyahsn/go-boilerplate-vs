@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	platformconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	internalsharedconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/handlerutil"
@@ -17,22 +18,29 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestuser"
 )
 
-// UserStatusReader is the one lookup the middleware needs from the DB —
+// AccessStatusReader is the one lookup the middleware needs from the DB —
 // satisfied by the middleware's own sqlc Queries (see query/queries.sql).
-type UserStatusReader interface {
-	GetUserIsActive(ctx context.Context, id int64) (bool, error)
+type AccessStatusReader interface {
+	GetAccessStatus(ctx context.Context, arg sqlc.GetAccessStatusParams) (sqlc.GetAccessStatusRow, error)
 }
 
 // inactiveAccountMessage is the 401 detail for a valid token whose user has
 // been deactivated (or deleted) since it was issued.
 const inactiveAccountMessage = "Your account is no longer active."
 
+// SessionEndedMessage is the 401 detail for a valid token whose session was
+// revoked since it was issued (logout, a remote sign-out, a password change).
+const SessionEndedMessage = "Your session has ended. Please sign in again."
+
 // AccessTokenMiddleware authenticates a request from its access token (cookie
-// first, then `Authorization: Bearer`) and then checks the token's user is
-// still active in the DB — a valid signature and an unexpired token aren't
-// enough on their own, or a deactivated user could keep using the API until
-// the token ran out. It sets the caller's user id and role in the context.
-func AccessTokenMiddleware(jwt jwttoken.M, users UserStatusReader) gin.HandlerFunc {
+// first, then `Authorization: Bearer`) and then checks, in one query, that the
+// token's user is still active and its session (the `sid` claim) still live —
+// a valid signature and an unexpired token aren't enough on their own, or a
+// deactivated user or a signed-out device could keep using the API until the
+// token ran out. A token without a valid sid (issued before sessions) is a
+// 401 like an invalid one. It sets the caller's user id, role and session id
+// in the context.
+func AccessTokenMiddleware(jwt jwttoken.M, status AccessStatusReader) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString, err := extractToken(c)
 		if err != nil {
@@ -55,24 +63,36 @@ func AccessTokenMiddleware(jwt jwttoken.M, users UserStatusReader) gin.HandlerFu
 			return
 		}
 
-		active, err := users.GetUserIsActive(c.Request.Context(), userID)
+		sessionID, err := jwttoken.SessionID(claims)
+		if err != nil {
+			unauthorized(c, apperror.CodeUnauthorized.SafeToThrow(),
+				fmt.Errorf("jwttoken.SessionID() (Access Token Middleware): %w", err))
+			return
+		}
+
+		st, err := status.GetAccessStatus(c.Request.Context(), sqlc.GetAccessStatusParams{SessionID: sessionID, UserID: userID})
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			unauthorized(c, inactiveAccountMessage,
-				fmt.Errorf("users.GetUserIsActive() (Access Token Middleware): user %d not found: %w", userID, err))
+				fmt.Errorf("GetAccessStatus() (Access Token Middleware): user %d not found: %w", userID, err))
 			return
 		case err != nil:
 			jsonapi.WriteErrorsContext(handlerutil.RequestContext(c), c.Writer, apperror.New(apperror.CodeInternal,
-				apperror.CodeInternal.SafeToThrow(), fmt.Errorf("users.GetUserIsActive() (Access Token Middleware): %w", err)))
+				apperror.CodeInternal.SafeToThrow(), fmt.Errorf("GetAccessStatus() (Access Token Middleware): %w", err)))
 			c.Abort()
 			return
-		case !active:
+		case !st.IsActive:
 			unauthorized(c, inactiveAccountMessage,
-				fmt.Errorf("users.GetUserIsActive() (Access Token Middleware): user %d is not active", userID))
+				fmt.Errorf("GetAccessStatus() (Access Token Middleware): user %d is not active", userID))
+			return
+		case !st.SessionLive:
+			unauthorized(c, SessionEndedMessage,
+				fmt.Errorf("GetAccessStatus() (Access Token Middleware): session %s of user %d is not live", sessionID, userID))
 			return
 		}
 
 		c.Set(internalsharedconstant.UserIDKey, userID)
+		c.Set(internalsharedconstant.SessionIDKey, sessionID)
 		// The request context too: the access log, the error writer and other
 		// middlewares log with c.Request.Context(), which doesn't see gin keys.
 		c.Request = c.Request.WithContext(requestuser.With(c.Request.Context(), userID))

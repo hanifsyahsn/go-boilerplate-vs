@@ -9,14 +9,16 @@ import (
 )
 
 // M issues and verifies the app's ES256 JWTs. An access token carries the
-// user's id / name / email / role; a refresh token only the user id. Each
+// user's id / name / email / role and its session (`sid`, the refresh-token
+// family); a refresh token only the user id (its row names the family). Each
 // carries a `typ` claim, and each Verify* rejects the other type.
 type M interface {
 	// CreateToken issues an access + refresh token pair (login, and every
 	// refresh: refresh tokens rotate).
-	CreateToken(user internalshareddto.User, accessTokenDuration, refreshTokenDuration time.Duration) (Pair, error)
+	// sessionID is the login's family id.
+	CreateToken(user internalshareddto.User, sessionID uuid.UUID, accessTokenDuration, refreshTokenDuration time.Duration) (Pair, error)
 	// GenerateAccessToken issues an access token only.
-	GenerateAccessToken(user internalshareddto.User, accessTokenDuration time.Duration) (token string, expiresAt time.Time, err error)
+	GenerateAccessToken(user internalshareddto.User, sessionID uuid.UUID, accessTokenDuration time.Duration) (token string, expiresAt time.Time, err error)
 	VerifyAccessToken(tokenString string) (jwt.MapClaims, error)
 	VerifyRefreshToken(tokenString string) (jwt.MapClaims, error)
 }

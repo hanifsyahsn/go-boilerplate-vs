@@ -26,8 +26,8 @@ type InsertRefreshTokenParams struct {
 	SessionExpiresAt sql.NullTime `json:"session_expires_at"`
 }
 
-// Records an issued refresh token (login starts a family, refresh continues
-// it). session_expires_at is NULL for a trusted device (no cap).
+// Records a refresh token of an existing family (refresh continues it).
+// session_expires_at is NULL for a trusted device (no cap).
 func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error {
 	_, err := q.db.ExecContext(ctx, insertRefreshToken,
 		arg.Jti,
@@ -39,16 +39,104 @@ func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshToken
 	return err
 }
 
-const revokeRefreshTokenFamily = `-- name: RevokeRefreshTokenFamily :exec
-UPDATE refresh_tokens
-SET revoked_at = now()
-WHERE family_id = (SELECT rt.family_id FROM refresh_tokens rt WHERE rt.jti = $1)
+const revokeSession = `-- name: RevokeSession :execrows
+WITH tokens AS (
+    UPDATE refresh_tokens
+    SET revoked_at = now()
+    WHERE family_id = $2::uuid
+      AND revoked_at IS NULL
+)
+UPDATE auth_sessions
+SET revoked_at    = now(),
+    revoke_reason = $1::varchar
+WHERE family_id = $2::uuid
   AND revoked_at IS NULL
 `
 
-// Revokes every live token of the family the given token belongs to (logout,
-// or a rotated token presented again).
-func (q *Queries) RevokeRefreshTokenFamily(ctx context.Context, jti uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, revokeRefreshTokenFamily, jti)
+type RevokeSessionParams struct {
+	Reason   string    `json:"reason"`
+	FamilyID uuid.UUID `json:"family_id"`
+}
+
+// Ends one session: revokes its family's live refresh tokens and marks the
+// session revoked with the reason, in one statement. The row count is the
+// sessions revoked (0 = it was already revoked or doesn't exist).
+func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeSession, arg.Reason, arg.FamilyID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const revokeUserSessions = `-- name: RevokeUserSessions :execrows
+WITH tokens AS (
+    UPDATE refresh_tokens
+    SET revoked_at = now()
+    WHERE user_id = $2::bigint
+      AND revoked_at IS NULL
+      AND ($3::uuid IS NULL OR family_id <> $3::uuid)
+)
+UPDATE auth_sessions
+SET revoked_at    = now(),
+    revoke_reason = $1::varchar
+WHERE user_id = $2::bigint
+  AND revoked_at IS NULL
+  AND ($3::uuid IS NULL OR family_id <> $3::uuid)
+`
+
+type RevokeUserSessionsParams struct {
+	Reason       string        `json:"reason"`
+	UserID       int64         `json:"user_id"`
+	KeepFamilyID uuid.NullUUID `json:"keep_family_id"`
+}
+
+// Ends every live session of a user except keep_family_id (NULL = all): a
+// password change keeps the caller's own, a reset or a deactivation none.
+// The row count is the sessions revoked.
+func (q *Queries) RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeUserSessions, arg.Reason, arg.UserID, arg.KeepFamilyID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const startSession = `-- name: StartSession :exec
+WITH session AS (
+    INSERT INTO auth_sessions (family_id, user_id, trusted, user_agent, client_ip)
+    VALUES ($3::uuid, $2::bigint, $6::boolean,
+            $7::varchar, $8::varchar)
+)
+INSERT INTO refresh_tokens (jti, user_id, family_id, expires_at, session_expires_at)
+VALUES ($1::uuid, $2::bigint, $3::uuid, $4::timestamptz,
+        $5::timestamptz)
+`
+
+type StartSessionParams struct {
+	Jti              uuid.UUID    `json:"jti"`
+	UserID           int64        `json:"user_id"`
+	FamilyID         uuid.UUID    `json:"family_id"`
+	ExpiresAt        time.Time    `json:"expires_at"`
+	SessionExpiresAt sql.NullTime `json:"session_expires_at"`
+	Trusted          bool         `json:"trusted"`
+	UserAgent        string       `json:"user_agent"`
+	ClientIp         string       `json:"client_ip"`
+}
+
+// Starts a login: its auth_sessions row and the family's first refresh token,
+// in one statement (both or neither). session_expires_at is NULL for a
+// trusted device (no cap).
+func (q *Queries) StartSession(ctx context.Context, arg StartSessionParams) error {
+	_, err := q.db.ExecContext(ctx, startSession,
+		arg.Jti,
+		arg.UserID,
+		arg.FamilyID,
+		arg.ExpiresAt,
+		arg.SessionExpiresAt,
+		arg.Trusted,
+		arg.UserAgent,
+		arg.ClientIp,
+	)
 	return err
 }

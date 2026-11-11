@@ -36,8 +36,8 @@ func NewTokenMakerES256(privateKey *ecdsa.PrivateKey, publicKey *ecdsa.PublicKey
 	}
 }
 
-func (maker *MakerES256) CreateToken(user internalshareddto.User, accessTokenDuration, refreshTokenDuration time.Duration) (Pair, error) {
-	accessToken, accessExp, err := maker.GenerateAccessToken(user, accessTokenDuration)
+func (maker *MakerES256) CreateToken(user internalshareddto.User, sessionID uuid.UUID, accessTokenDuration, refreshTokenDuration time.Duration) (Pair, error) {
+	accessToken, accessExp, err := maker.GenerateAccessToken(user, sessionID, accessTokenDuration)
 	if err != nil {
 		return Pair{}, err
 	}
@@ -70,7 +70,7 @@ func (maker *MakerES256) CreateToken(user internalshareddto.User, accessTokenDur
 	}, nil
 }
 
-func (maker *MakerES256) GenerateAccessToken(user internalshareddto.User, accessTokenDuration time.Duration) (string, time.Time, error) {
+func (maker *MakerES256) GenerateAccessToken(user internalshareddto.User, sessionID uuid.UUID, accessTokenDuration time.Duration) (string, time.Time, error) {
 	now := maker.now()
 	exp := now.Add(accessTokenDuration)
 	claims := jwt.MapClaims{
@@ -84,6 +84,7 @@ func (maker *MakerES256) GenerateAccessToken(user internalshareddto.User, access
 		platformconstant.ExpirationKey:     exp.Unix(),
 		platformconstant.IssuedAtKey:       now.Unix(),
 		platformconstant.JSONWebTokenIDKey: uuid.New().String(),
+		platformconstant.SessionIDKey:      sessionID.String(),
 	}
 
 	token, err := jwt.NewWithClaims(jwt.SigningMethodES256, claims).SignedString(maker.privateKey)
@@ -156,6 +157,17 @@ func TokenID(claims jwt.MapClaims) (uuid.UUID, error) {
 	id, err := uuid.Parse(jti)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("token has no valid jti claim: %w", err)
+	}
+	return id, nil
+}
+
+// SessionID reads an access token's `sid` claim as a UUID. A token from before
+// sessions existed has none: the caller treats that as an invalid token.
+func SessionID(claims jwt.MapClaims) (uuid.UUID, error) {
+	sid, _ := claims[platformconstant.SessionIDKey].(string)
+	id, err := uuid.Parse(sid)
+	if err != nil || id == uuid.Nil {
+		return uuid.Nil, fmt.Errorf("token has no valid sid claim: %v", err) //nolint:errorlint // err is nil for uuid.Nil; %w would print %!w(<nil>)
 	}
 	return id, nil
 }

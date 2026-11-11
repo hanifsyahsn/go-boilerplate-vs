@@ -49,8 +49,10 @@ func TestService_Login_U(t *testing.T) {
 	pair := jwttoken.Pair{AccessToken: "acc", RefreshToken: "ref", RefreshTokenID: uuid.New(), RefreshTokenExpiresAt: refreshExp}
 	familyID := uuid.New()
 	now := time.Now()
-	insert := authsharedsqlc.InsertRefreshTokenParams{Jti: pair.RefreshTokenID, UserID: 1, FamilyID: familyID, ExpiresAt: refreshExp}
+	insert := authsharedsqlc.StartSessionParams{Jti: pair.RefreshTokenID, UserID: 1, FamilyID: familyID, ExpiresAt: refreshExp,
+		Trusted: true, UserAgent: "test", ClientIp: "203.0.113.7"}
 	capped := insert
+	capped.Trusted = false
 	capped.SessionExpiresAt = sql.NullTime{Time: now.Add(12 * time.Hour), Valid: true}
 
 	testCases := []struct {
@@ -62,23 +64,23 @@ func TestService_Login_U(t *testing.T) {
 		wantMsg  string
 	}{
 		{
-			name: "right password, trusted device: a token pair with the DB role, the refresh token recorded in a new family with no cap",
+			name: "right password, trusted device: a token pair with the DB role and the session as sid, a trusted session with the client's user agent and IP started with no cap",
 			req:  Request{Email: " jane@example.com ", Password: "Passw0rd!", TrustDevice: true},
 			stub: func(q *sqlc.MockQuerier, sq *authsharedsqlc.MockQuerier, m *jwttoken.MockM) {
 				q.EXPECT().GetUserForLogin(gomock.Any(), "jane@example.com").Return(active, nil)
 				m.EXPECT().CreateToken(internalshareddto.User{ID: 1, Name: "Jane", Email: "jane@example.com", Role: enum.RoleAdmin},
-					15*time.Minute, 24*time.Hour).Return(pair, nil)
-				sq.EXPECT().InsertRefreshToken(gomock.Any(), insert).Return(nil)
+					familyID, 15*time.Minute, 24*time.Hour).Return(pair, nil)
+				sq.EXPECT().StartSession(gomock.Any(), insert).Return(nil)
 			},
 			want: Result{User: authshared.UserResource{ID: "1", Name: "Jane", Email: "jane@example.com", Role: "admin"}, Tokens: pair},
 		},
 		{
-			name: "untrusted device: the family capped at the untrusted session duration, the refresh token no longer than it",
+			name: "untrusted device: an untrusted session capped at the untrusted session duration, the refresh token no longer than it",
 			req:  Request{Email: "jane@example.com", Password: "Passw0rd!"},
 			stub: func(q *sqlc.MockQuerier, sq *authsharedsqlc.MockQuerier, m *jwttoken.MockM) {
 				q.EXPECT().GetUserForLogin(gomock.Any(), "jane@example.com").Return(active, nil)
-				m.EXPECT().CreateToken(gomock.Any(), 15*time.Minute, 12*time.Hour).Return(pair, nil)
-				sq.EXPECT().InsertRefreshToken(gomock.Any(), capped).Return(nil)
+				m.EXPECT().CreateToken(gomock.Any(), familyID, 15*time.Minute, 12*time.Hour).Return(pair, nil)
+				sq.EXPECT().StartSession(gomock.Any(), capped).Return(nil)
 			},
 			want: Result{User: authshared.UserResource{ID: "1", Name: "Jane", Email: "jane@example.com", Role: "admin"}, Tokens: pair},
 		},
@@ -119,7 +121,7 @@ func TestService_Login_U(t *testing.T) {
 			req:  Request{Email: "jane@example.com", Password: "Passw0rd!"},
 			stub: func(q *sqlc.MockQuerier, sq *authsharedsqlc.MockQuerier, m *jwttoken.MockM) {
 				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil)
-				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, errors.New("sign"))
+				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, errors.New("sign"))
 			},
 			wantCode: apperror.CodeInternal,
 		},
@@ -128,8 +130,8 @@ func TestService_Login_U(t *testing.T) {
 			req:  Request{Email: "jane@example.com", Password: "Passw0rd!"},
 			stub: func(q *sqlc.MockQuerier, sq *authsharedsqlc.MockQuerier, m *jwttoken.MockM) {
 				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil)
-				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any()).Return(pair, nil)
-				sq.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(sql.ErrConnDone)
+				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(pair, nil)
+				sq.EXPECT().StartSession(gomock.Any(), gomock.Any()).Return(sql.ErrConnDone)
 			},
 			wantCode: apperror.CodeInternal,
 		},
@@ -232,8 +234,8 @@ func TestService_Login_FailureLimit_U(t *testing.T) {
 					q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(row, a.readErr)
 				}
 				if a.wantCode.IsZero() {
-					m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil)
-					sq.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
+					m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil)
+					sq.EXPECT().StartSession(gomock.Any(), gomock.Any()).Return(nil)
 				}
 
 				_, err := svc.Login(context.Background(), Request{Email: a.email, Password: a.password}, testClient)
@@ -402,8 +404,8 @@ func TestService_Login_LimiterOutcomes_U(t *testing.T) {
 				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil)
 			}
 			if tc.wantCode.IsZero() {
-				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil)
-				sq.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
+				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil)
+				sq.EXPECT().StartSession(gomock.Any(), gomock.Any()).Return(nil)
 			}
 			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, Limiters{Email: tc.email, IP: tc.ip})
 
@@ -529,8 +531,8 @@ func TestService_Login_IPFailureLimit_U(t *testing.T) {
 					}
 				}
 				if a.wantCode.IsZero() {
-					m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil)
-					sq.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
+					m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil)
+					sq.EXPECT().StartSession(gomock.Any(), gomock.Any()).Return(nil)
 				}
 
 				_, err := svc.Login(context.Background(), Request{Email: a.email, Password: a.password}, Client{IP: a.ip})

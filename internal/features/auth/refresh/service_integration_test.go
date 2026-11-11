@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	platformconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
@@ -37,8 +38,13 @@ func TestService_Refresh_I(t *testing.T) {
 		seed testhelper.SeedUserParams
 		// stored is how the presented token's row looks; nil => no row.
 		stored func(sibling uuid.UUID) *testhelper.SeedRefreshTokenParams
+		// sessionRevokedAs, when set, seeds the family's session already
+		// revoked with that reason (a signed-out device).
+		sessionRevokedAs string
 		// siblingRevoked: whether the family's other live token ends revoked.
 		siblingRevoked bool
+		// wantSessionReason: the session's revoke_reason after the call ("" = live).
+		wantSessionReason string
 		// wantCap: the session cap the new token inherits, nil => none.
 		wantCap  *time.Time
 		wantCode apperror.Code
@@ -74,8 +80,16 @@ func TestService_Refresh_I(t *testing.T) {
 			stored: func(sibling uuid.UUID) *testhelper.SeedRefreshTokenParams {
 				return &testhelper.SeedRefreshTokenParams{RevokedAt: &minuteAgo, ReplacedBy: uuid.NullUUID{UUID: sibling, Valid: true}}
 			},
-			siblingRevoked: true,
-			wantCode:       apperror.CodeUnauthorized,
+			siblingRevoked:    true,
+			wantSessionReason: authshared.RevokeReasonTokenReused,
+			wantCode:          apperror.CodeUnauthorized,
+		},
+		{
+			name:              "a live token of a signed-out session is refused and the session stays as it was",
+			stored:            func(uuid.UUID) *testhelper.SeedRefreshTokenParams { return &testhelper.SeedRefreshTokenParams{} },
+			sessionRevokedAs:  authshared.RevokeReasonSignedOutRemotely,
+			wantSessionReason: authshared.RevokeReasonSignedOutRemotely,
+			wantCode:          apperror.CodeUnauthorized,
 		},
 		{
 			name:     "a token with no row (unknown) is refused",
@@ -91,28 +105,39 @@ func TestService_Refresh_I(t *testing.T) {
 
 			// The pair was issued while the user was a plain user; the DB
 			// row may say otherwise now.
-			pair, err := maker.CreateToken(internalshareddto.User{ID: userID, Role: enum.RoleUser}, time.Minute, refreshTTL)
+			familyID := uuid.New()
+			pair, err := maker.CreateToken(internalshareddto.User{ID: userID, Role: enum.RoleUser}, familyID, time.Minute, refreshTTL)
 			require.NoError(t, err)
+			if tc.sessionRevokedAs != "" {
+				testhelper.SeedSession(t, testDB, testhelper.SeedSessionParams{FamilyID: familyID, UserID: userID, RevokeReason: tc.sessionRevokedAs})
+			}
 
 			// Another live token of the same login (the presented one's
 			// successor, in the reuse case).
 			siblingID := uuid.New()
-			var familyID uuid.UUID
+			seeded := false
 			if stored := tc.stored(siblingID); stored != nil {
 				stored.Jti = pair.RefreshTokenID
 				stored.UserID = userID
-				familyID = testhelper.SeedRefreshToken(t, testDB, *stored)
+				stored.FamilyID = familyID
+				testhelper.SeedRefreshToken(t, testDB, *stored)
 				testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: siblingID, UserID: userID, FamilyID: familyID})
+				seeded = true
 			}
 
-			got, err := NewService(NewStore(testDB), maker, time.Minute, refreshTTL).Refresh(context.Background(), pair.RefreshToken)
+			client := authshared.SessionClient{UserAgent: "Mozilla/5.0 (phone)", IP: "198.51.100.4"}
+			got, err := NewService(NewStore(testDB), maker, time.Minute, refreshTTL).Refresh(context.Background(), pair.RefreshToken, client)
 			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)
 
-				if familyID != uuid.Nil {
+				if seeded {
 					require.Equal(t, tc.siblingRevoked, testhelper.GetRefreshToken(t, testDB, siblingID).RevokedAt.Valid)
+					session := testhelper.GetSession(t, testDB, familyID)
+					require.Equal(t, tc.wantSessionReason, session.RevokeReason.String)
+					require.Equal(t, tc.wantSessionReason != "", session.RevokedAt.Valid)
+					require.Empty(t, session.UserAgent, "a refused refresh doesn't touch the session")
 				}
 				return
 			}
@@ -121,6 +146,14 @@ func TestService_Refresh_I(t *testing.T) {
 			claims, err := maker.VerifyAccessToken(got.Tokens.AccessToken)
 			require.NoError(t, err)
 			require.Equal(t, tc.seed.Role, claims[platformconstant.RoleKey])
+			require.Equal(t, familyID.String(), claims[platformconstant.SessionIDKey], "the new access token keeps the session")
+
+			// The session's use is recorded.
+			session := testhelper.GetSession(t, testDB, familyID)
+			require.False(t, session.RevokedAt.Valid)
+			require.Equal(t, "Mozilla/5.0 (phone)", session.UserAgent)
+			require.Equal(t, "198.51.100.4", session.ClientIP)
+			require.WithinDuration(t, time.Now(), session.LastUsedAt, 5*time.Second)
 
 			_, err = maker.VerifyRefreshToken(got.Tokens.RefreshToken)
 			require.NoError(t, err)

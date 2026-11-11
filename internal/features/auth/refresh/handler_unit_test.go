@@ -28,6 +28,9 @@ func TestHandler_Refresh_U(t *testing.T) {
 		RefreshTokenExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	}}
 
+	// The device the handler passes on, from the request (User-Agent, client IP).
+	client := authshared.SessionClient{UserAgent: "Mozilla/5.0 (test)", IP: "203.0.113.7"}
+
 	testCases := []struct {
 		name       string
 		query      string
@@ -41,7 +44,7 @@ func TestHandler_Refresh_U(t *testing.T) {
 		{
 			name:       "from the cookie: both cookies replaced + both tokens in meta",
 			cookie:     "ref-cookie",
-			stub:       func(s *MockS) { s.EXPECT().Refresh(gomock.Any(), "ref-cookie").Return(ok, nil) },
+			stub:       func(s *MockS) { s.EXPECT().Refresh(gomock.Any(), "ref-cookie", client).Return(ok, nil) },
 			wantCode:   http.StatusOK,
 			wantInBody: []string{`"jsonapi":{"version":"1.1"}`, `"meta":{"access_token":"new-acc"`, `"refresh_token":"new-ref"`},
 			wantCookie: true,
@@ -49,7 +52,7 @@ func TestHandler_Refresh_U(t *testing.T) {
 		{
 			name:       "from a sessions document",
 			body:       `{"data":{"type":"sessions","attributes":{"refresh_token":"ref-body"}}}`,
-			stub:       func(s *MockS) { s.EXPECT().Refresh(gomock.Any(), "ref-body").Return(ok, nil) },
+			stub:       func(s *MockS) { s.EXPECT().Refresh(gomock.Any(), "ref-body", client).Return(ok, nil) },
 			wantCode:   http.StatusOK,
 			wantCookie: true,
 		},
@@ -57,13 +60,13 @@ func TestHandler_Refresh_U(t *testing.T) {
 			name:     "the cookie wins over the body",
 			cookie:   "ref-cookie",
 			body:     `{"data":{"type":"sessions","attributes":{"refresh_token":"ref-body"}}}`,
-			stub:     func(s *MockS) { s.EXPECT().Refresh(gomock.Any(), "ref-cookie").Return(ok, nil) },
+			stub:     func(s *MockS) { s.EXPECT().Refresh(gomock.Any(), "ref-cookie", client).Return(ok, nil) },
 			wantCode: http.StatusOK, wantCookie: true,
 		},
 		{
 			name: "an invalid token is a 401",
 			stub: func(s *MockS) {
-				s.EXPECT().Refresh(gomock.Any(), "").Return(Result{}, apperror.New(apperror.CodeUnauthorized, sessionExpiredMessage, nil))
+				s.EXPECT().Refresh(gomock.Any(), "", client).Return(Result{}, apperror.New(apperror.CodeUnauthorized, sessionExpiredMessage, nil))
 			},
 			wantCode:   http.StatusUnauthorized,
 			wantInBody: []string{sessionExpiredMessage},
@@ -83,7 +86,7 @@ func TestHandler_Refresh_U(t *testing.T) {
 		{
 			name:     "service generic error",
 			cookie:   "ref",
-			stub:     func(s *MockS) { s.EXPECT().Refresh(gomock.Any(), "ref").Return(Result{}, errors.New("boom")) },
+			stub:     func(s *MockS) { s.EXPECT().Refresh(gomock.Any(), "ref", client).Return(Result{}, errors.New("boom")) },
 			wantCode: http.StatusInternalServerError,
 		},
 	}
@@ -98,6 +101,8 @@ func TestHandler_Refresh_U(t *testing.T) {
 			Route(r.Group("/api"), NewHandler(svc, authshared.CookieConfig{}))
 
 			req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh"+tc.query, strings.NewReader(tc.body))
+			req.Header.Set("User-Agent", client.UserAgent)
+			req.RemoteAddr = client.IP + ":5555"
 			if tc.cookie != "" {
 				req.AddCookie(&http.Cookie{Name: internalsharedconstant.RefreshTokenCookieKey, Value: tc.cookie})
 			}

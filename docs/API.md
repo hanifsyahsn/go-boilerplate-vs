@@ -111,17 +111,21 @@ and is sent one of two ways:
 The cookie is checked first; when it is absent the `Authorization` header is used.
 
 The token is verified (ES256 signature, `iss`, `aud` = `CLIENT_ID`, `exp`, `typ` = `access`), then
-the user is **re-read from the database on every request**: a user deactivated (or deleted) after
-the token was issued gets **401** on the very next call, not when the token expires.
+the user **and the token's session** are **re-read from the database on every request**: a user
+deactivated (or deleted), or a session signed out (logout, another device's sign-out) after the token
+was issued, gets **401** on the very next call, not when the token expires.
 
 | Failure | Status | `detail` |
 | --- | --- | --- |
 | No token, bad signature, expired, a refresh token used as an access token | 401 | `You're not authorized to perform this action.` |
 | The user is inactive / gone | 401 | `Your account is no longer active.` |
+| The token's session was signed out | 401 | `Your session has ended. Please sign in again.` |
 | A plain user on `/api/admin/*` | 403 | `You don't have access to this.` |
 
 → on a `401` *"not authorized"*, [refresh](#post-apiauthrefresh) once and retry the call. On
-*"no longer active"*, drop the local state and go to the login screen.
+*"no longer active"* or *"session has ended"*, drop the local state and go to the login screen.
+An access token issued before sessions existed (no session claim) is a `401` *"not authorized"*;
+its refresh fails too, so the user signs in again once.
 
 ### Who is the caller?
 
@@ -135,6 +139,7 @@ The access token's payload (decode the JWT; the server verifies it, the client d
 | `typ` | string | always `access` (a refresh token says `refresh`) |
 | `exp` / `iat` | number | unix seconds; after `exp` every call is `401` → refresh |
 | `iss` / `aud` / `jti` | string | issuer, `CLIENT_ID`, token id |
+| `sid` | string | the server's session id — internal, not a contract; don't build on it |
 
 Ids in **responses are strings** (`"id": "42"`) while `sub` is a number — compare with `String(sub)`.
 
@@ -162,8 +167,8 @@ dev), scoped to `COOKIE_DOMAIN` when set. A browser client never reads them: it 
   (it was probably stolen) → `401`, log in again. Exception: within **10 s** of its rotation it's
   treated as two tabs refreshing at once — `401`, but the session survives (the other tab already
   holds the new pair). **Single-flight** your refresh calls anyway.
-- **Logout** revokes the session's refresh tokens. The **access token stays valid until it expires**
-  (it's a stateless JWT) — that's why `ACCESS_TOKEN_DURATION` is short.
+- **Logout** revokes the session: its refresh tokens **and** its access tokens, at once (every request
+  checks the session).
 
 ---
 
@@ -338,7 +343,7 @@ token is spent:
 
 ### `POST /api/auth/logout`
 
-Revokes the presented refresh token's whole session and clears both cookies. The token comes from
+Revokes the presented refresh token's whole session (its refresh and access tokens) and clears both cookies. The token comes from
 the cookie or the same optional `sessions` document as [refresh](#post-apiauthrefresh). A missing
 or invalid token is **still a `204`** — logging out never fails from the client's point of view.
 
@@ -997,5 +1002,4 @@ again later logs the session out.
 ### Current limitations
 
 - No password reset / change, no email verification, no way to change a user's role over the API.
-- Logout doesn't revoke the access token (it lives until `exp`).
 - `refresh_tokens` grows by one row per refresh; nothing prunes it yet.

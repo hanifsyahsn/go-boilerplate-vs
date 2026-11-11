@@ -15,10 +15,13 @@ type Querier interface {
 	// current role, and a deactivated user gets none.
 	GetUserForRefresh(ctx context.Context, id int64) (GetUserForRefreshRow, error)
 	// The presented token's row, locked so two concurrent refreshes of the same
-	// token can't both rotate it.
+	// token can't both rotate it, with its session's state (session_live false =
+	// signed out, or a family without a session).
 	LockRefreshToken(ctx context.Context, jti uuid.UUID) (LockRefreshTokenRow, error)
 	// Revokes the presented token and points it at its successor.
 	RotateRefreshToken(ctx context.Context, arg RotateRefreshTokenParams) error
+	// Records the session's latest use: when, from which browser and IP.
+	TouchSession(ctx context.Context, arg TouchSessionParams) error
 }
 
 var _ Querier = (*Queries)(nil)

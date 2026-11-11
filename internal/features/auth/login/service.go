@@ -33,7 +33,9 @@ const tooManyFailuresMessage = "Too many wrong attempts. Please wait a few minut
 type S interface {
 	// Login checks the credentials of an active account and issues a token
 	// pair. The refresh token starts a new family in refresh_tokens (one per
-	// login, i.e. per device). An untrusted device's family is capped at
+	// login, i.e. per device) together with its auth_sessions row (trusted,
+	// the client's User-Agent and IP), in one statement; the access token's
+	// sid is the family id. An untrusted device's family is capped at
 	// untrustedSessionDuration from now; a trusted one slides with no cap.
 	//
 	// Failed logins are capped twice (token buckets, Limiters): per email,
@@ -188,27 +190,32 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 		refreshTokenDuration = min(refreshTokenDuration, s.untrustedSessionDuration)
 	}
 
+	familyID := s.newFamilyID() // the session's id, carried by the access token as sid
 	tokens, err := s.tokenMaker.CreateToken(internalshareddto.User{
 		ID:    user.ID,
 		Name:  user.Name,
 		Email: user.Email,
 		Role:  enum.Role(user.Role),
-	}, s.accessTokenDuration, refreshTokenDuration)
+	}, familyID, s.accessTokenDuration, refreshTokenDuration)
 	if err != nil {
 		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
 			fmt.Errorf("tokenMaker.CreateToken() (%s): %w", feature, err))
 	}
 
-	if err = s.authSharedQuerier.InsertRefreshToken(ctx, authsharedsqlc.InsertRefreshTokenParams{
+	device := authshared.NewSessionClient(client.UserAgent, client.IP)
+	if err = s.authSharedQuerier.StartSession(ctx, authsharedsqlc.StartSessionParams{
 		Jti:       tokens.RefreshTokenID,
 		UserID:    user.ID,
-		FamilyID:  s.newFamilyID(),
+		FamilyID:  familyID,
 		ExpiresAt: tokens.RefreshTokenExpiresAt,
 
 		SessionExpiresAt: sessionExpiresAt,
+		Trusted:          req.TrustDevice,
+		UserAgent:        device.UserAgent,
+		ClientIp:         device.IP,
 	}); err != nil {
 		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
-			fmt.Errorf("InsertRefreshToken() (%s): %w", feature, err))
+			fmt.Errorf("StartSession() (%s): %w", feature, err))
 	}
 
 	return Result{

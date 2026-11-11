@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout/sqlc"
+	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	internalshareddto "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/dto"
@@ -34,7 +36,7 @@ func TestService_Logout_I(t *testing.T) {
 		// never touched.
 		wantFamilyRevoked bool
 	}{
-		{name: "the token's login is revoked, the other login kept", presentOwn: true, wantFamilyRevoked: true},
+		{name: "the token's session is revoked as logout (its tokens too), the other login kept", presentOwn: true, wantFamilyRevoked: true},
 		{name: "no token: nothing revoked", presentOwn: false, wantFamilyRevoked: false},
 	}
 
@@ -43,23 +45,31 @@ func TestService_Logout_I(t *testing.T) {
 			defer testhelper.Truncate(t, testDB)
 			userID := testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{})
 
-			pair, err := maker.CreateToken(internalshareddto.User{ID: userID}, time.Minute, time.Hour)
+			familyID := uuid.New()
+			pair, err := maker.CreateToken(internalshareddto.User{ID: userID}, familyID, time.Minute, time.Hour)
 			require.NoError(t, err)
-			familyID := testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: pair.RefreshTokenID, UserID: userID})
+			testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: pair.RefreshTokenID, UserID: userID, FamilyID: familyID})
 			sibling := uuid.New()
 			testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: sibling, UserID: userID, FamilyID: familyID})
 			otherLogin := uuid.New()
-			testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: otherLogin, UserID: userID})
+			otherFamily := testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: otherLogin, UserID: userID})
 
 			token := ""
 			if tc.presentOwn {
 				token = pair.RefreshToken
 			}
-			require.NoError(t, NewService(authsharedsqlc.New(testDB), maker).Logout(context.Background(), token))
+			require.NoError(t, NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), maker).Logout(context.Background(), token))
 
 			require.Equal(t, tc.wantFamilyRevoked, testhelper.GetRefreshToken(t, testDB, pair.RefreshTokenID).RevokedAt.Valid)
 			require.Equal(t, tc.wantFamilyRevoked, testhelper.GetRefreshToken(t, testDB, sibling).RevokedAt.Valid)
 			require.False(t, testhelper.GetRefreshToken(t, testDB, otherLogin).RevokedAt.Valid)
+
+			session := testhelper.GetSession(t, testDB, familyID)
+			require.Equal(t, tc.wantFamilyRevoked, session.RevokedAt.Valid)
+			if tc.wantFamilyRevoked {
+				require.Equal(t, authshared.RevokeReasonLogout, session.RevokeReason.String)
+			}
+			require.False(t, testhelper.GetSession(t, testDB, otherFamily).RevokedAt.Valid)
 		})
 	}
 }

@@ -13,7 +13,7 @@ Statuses: **built** = implemented in the boilerplate · **accepted** = agreed, n
 | [0003](0003-rate-limit.md) | Rate limit: `Limiter` interface, token bucket, optional Redis | part built (in-memory: general per-IP, auth per-IP, failed logins per email and per IP) |
 | [0004](0004-csrf-origin-guard.md) | CSRF `OriginGuard` | built |
 | [0005](0005-cleanup-worker.md) | Worker that deletes expired rows | part built (background group + shutdown order) |
-| [0006](0006-sessions-devices.md) | Signed-in devices list + remote sign-out | accepted |
+| [0006](0006-sessions-devices.md) | Signed-in devices list + remote sign-out | part built (sessions, immediate sign-out) |
 | [0007](0007-password-and-email-flows.md) | Forgot / change password, email verification, `Mailer` | accepted |
 | [0008](0008-api-activity-log.md) | API activity log | accepted |
 | [0009](0009-cors.md) | CORS allowlist | built |

@@ -11,6 +11,7 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/refresh/sqlc"
+	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
@@ -29,7 +30,7 @@ func TestService_Refresh_U(t *testing.T) {
 	familyID := uuid.New()
 	claims := jwt.MapClaims{"sub": float64(1), "jti": jti.String()}
 
-	live := sqlc.LockRefreshTokenRow{Jti: jti, UserID: 1, FamilyID: familyID}
+	live := sqlc.LockRefreshTokenRow{Jti: jti, UserID: 1, FamilyID: familyID, SessionLive: true}
 	rotatedAgo := func(d time.Duration) sqlc.LockRefreshTokenRow {
 		row := live
 		row.RevokedAt = sql.NullTime{Time: now.Add(-d), Valid: true}
@@ -41,8 +42,14 @@ func TestService_Refresh_U(t *testing.T) {
 		row.SessionExpiresAt = sql.NullTime{Time: now.Add(d), Valid: true}
 		return row
 	}
-	loggedOut := live
-	loggedOut.RevokedAt = sql.NullTime{Time: now.Add(-time.Second), Valid: true}
+	// Signed out (logout, a remote sign-out, a password change): the session
+	// and its tokens revoked together.
+	signedOut := live
+	signedOut.RevokedAt = sql.NullTime{Time: now.Add(-time.Second), Valid: true}
+	signedOut.SessionLive = false
+	client := authshared.SessionClient{UserAgent: "Mozilla/5.0 (test)", IP: "203.0.113.7"}
+	touch := sqlc.TouchSessionParams{FamilyID: familyID, UserAgent: "Mozilla/5.0 (test)", ClientIp: "203.0.113.7"}
+	reused := authsharedsqlc.RevokeSessionParams{FamilyID: familyID, Reason: authshared.RevokeReasonTokenReused}
 
 	active := sqlc.GetUserForRefreshRow{ID: 1, Name: "Jane", Email: "jane@example.com", Role: "admin", IsActive: true}
 	inactive := active
@@ -70,18 +77,19 @@ func TestService_Refresh_U(t *testing.T) {
 		wantCode apperror.Code
 	}{
 		{
-			name:  "a live token: a new pair with the live role, same family, the old token rotated",
+			name:  "a live token: a new pair with the live role and the same session as sid, same family, the old token rotated, the session's use recorded",
 			token: "ref",
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				verified(q, m, live)
 				gomock.InOrder(
 					q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(active, nil),
-					m.EXPECT().CreateToken(internalshareddto.User{ID: 1, Name: "Jane", Email: "jane@example.com", Role: enum.RoleAdmin}, accessTTL, refreshTTL).
+					m.EXPECT().CreateToken(internalshareddto.User{ID: 1, Name: "Jane", Email: "jane@example.com", Role: enum.RoleAdmin}, familyID, accessTTL, refreshTTL).
 						Return(pair, nil),
 					q.EXPECT().InsertRefreshToken(gomock.Any(), authsharedsqlc.InsertRefreshTokenParams{
 						Jti: pair.RefreshTokenID, UserID: 1, FamilyID: familyID, ExpiresAt: pair.RefreshTokenExpiresAt,
 					}).Return(nil),
 					q.EXPECT().RotateRefreshToken(gomock.Any(), sqlc.RotateRefreshTokenParams{Jti: jti, ReplacedBy: pair.RefreshTokenID}).Return(nil),
+					q.EXPECT().TouchSession(gomock.Any(), touch).Return(nil),
 				)
 			},
 			want: Result{Tokens: pair},
@@ -92,12 +100,13 @@ func TestService_Refresh_U(t *testing.T) {
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				verified(q, m, cappedIn(time.Hour))
 				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(active, nil)
-				m.EXPECT().CreateToken(gomock.Any(), accessTTL, time.Hour).Return(pair, nil)
+				m.EXPECT().CreateToken(gomock.Any(), familyID, accessTTL, time.Hour).Return(pair, nil)
 				q.EXPECT().InsertRefreshToken(gomock.Any(), authsharedsqlc.InsertRefreshTokenParams{
 					Jti: pair.RefreshTokenID, UserID: 1, FamilyID: familyID, ExpiresAt: pair.RefreshTokenExpiresAt,
 					SessionExpiresAt: sql.NullTime{Time: now.Add(time.Hour), Valid: true},
 				}).Return(nil)
 				q.EXPECT().RotateRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
+				q.EXPECT().TouchSession(gomock.Any(), touch).Return(nil)
 			},
 			want: Result{Tokens: pair},
 		},
@@ -107,9 +116,10 @@ func TestService_Refresh_U(t *testing.T) {
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				verified(q, m, cappedIn(30*24*time.Hour))
 				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(active, nil)
-				m.EXPECT().CreateToken(gomock.Any(), accessTTL, refreshTTL).Return(pair, nil)
+				m.EXPECT().CreateToken(gomock.Any(), familyID, accessTTL, refreshTTL).Return(pair, nil)
 				q.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
 				q.EXPECT().RotateRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
+				q.EXPECT().TouchSession(gomock.Any(), touch).Return(nil)
 			},
 			want: Result{Tokens: pair},
 		},
@@ -167,11 +177,11 @@ func TestService_Refresh_U(t *testing.T) {
 			wantCode: apperror.CodeUnauthorized,
 		},
 		{
-			name:  "a spent token presented again: the family is revoked",
+			name:  "a spent token presented again: the session is revoked as token_reused",
 			token: "ref",
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				verified(q, m, rotatedAgo(time.Minute))
-				q.EXPECT().RevokeRefreshTokenFamily(gomock.Any(), jti).Return(nil)
+				q.EXPECT().RevokeSession(gomock.Any(), reused).Return(int64(1), nil)
 			},
 			wantCode: apperror.CodeUnauthorized,
 		},
@@ -184,11 +194,10 @@ func TestService_Refresh_U(t *testing.T) {
 			wantCode: apperror.CodeUnauthorized,
 		},
 		{
-			name:  "a logged-out token: no grace, the family is revoked",
+			name:  "a token of a signed-out session: 401, nothing issued or revoked again",
 			token: "ref",
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
-				verified(q, m, loggedOut)
-				q.EXPECT().RevokeRefreshTokenFamily(gomock.Any(), jti).Return(nil)
+				verified(q, m, signedOut)
 			},
 			wantCode: apperror.CodeUnauthorized,
 		},
@@ -197,7 +206,7 @@ func TestService_Refresh_U(t *testing.T) {
 			token: "ref",
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				verified(q, m, rotatedAgo(time.Minute))
-				q.EXPECT().RevokeRefreshTokenFamily(gomock.Any(), jti).Return(sql.ErrConnDone)
+				q.EXPECT().RevokeSession(gomock.Any(), reused).Return(int64(0), sql.ErrConnDone)
 			},
 			wantCode: apperror.CodeInternal,
 		},
@@ -234,7 +243,7 @@ func TestService_Refresh_U(t *testing.T) {
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				verified(q, m, live)
 				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(active, nil)
-				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, errors.New("sign"))
+				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, errors.New("sign"))
 			},
 			wantCode: apperror.CodeInternal,
 		},
@@ -244,7 +253,7 @@ func TestService_Refresh_U(t *testing.T) {
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				verified(q, m, live)
 				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(active, nil)
-				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any()).Return(pair, nil)
+				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(pair, nil)
 				q.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(sql.ErrConnDone)
 			},
 			wantCode: apperror.CodeInternal,
@@ -255,9 +264,22 @@ func TestService_Refresh_U(t *testing.T) {
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				verified(q, m, live)
 				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(active, nil)
-				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any()).Return(pair, nil)
+				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(pair, nil)
 				q.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
 				q.EXPECT().RotateRefreshToken(gomock.Any(), gomock.Any()).Return(sql.ErrConnDone)
+			},
+			wantCode: apperror.CodeInternal,
+		},
+		{
+			name:  "a touch error is a 500",
+			token: "ref",
+			stub: func(q *MockQuerier, m *jwttoken.MockM) {
+				verified(q, m, live)
+				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(active, nil)
+				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(pair, nil)
+				q.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
+				q.EXPECT().RotateRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
+				q.EXPECT().TouchSession(gomock.Any(), gomock.Any()).Return(sql.ErrConnDone)
 			},
 			wantCode: apperror.CodeInternal,
 		},
@@ -277,7 +299,7 @@ func TestService_Refresh_U(t *testing.T) {
 			svc := NewService(store, m, accessTTL, refreshTTL)
 			svc.(*service).now = func() time.Time { return now }
 
-			got, err := svc.Refresh(context.Background(), tc.token)
+			got, err := svc.Refresh(context.Background(), tc.token, client)
 			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)

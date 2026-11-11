@@ -100,6 +100,9 @@ type SeedRefreshTokenParams struct {
 }
 
 // SeedRefreshToken inserts a refresh_tokens row and returns its family id.
+// The family's auth_sessions row is created too when it doesn't exist yet
+// (live; trusted when the token has no session cap) — SeedSession first for
+// any other session.
 func SeedRefreshToken(t *testing.T, db *sql.DB, p SeedRefreshTokenParams) uuid.UUID {
 	t.Helper()
 
@@ -111,6 +114,12 @@ func SeedRefreshToken(t *testing.T, db *sql.DB, p SeedRefreshTokenParams) uuid.U
 	}
 
 	_, err := db.Exec(`
+		INSERT INTO auth_sessions (family_id, user_id, trusted) VALUES ($1, $2, $3)
+		ON CONFLICT (family_id) DO NOTHING
+	`, p.FamilyID, p.UserID, p.SessionExpiresAt == nil)
+	require.NoError(t, err, "seed the refresh token's session")
+
+	_, err = db.Exec(`
 		INSERT INTO refresh_tokens (jti, user_id, family_id, expires_at, revoked_at, replaced_by, session_expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`, p.Jti, p.UserID, p.FamilyID, p.ExpiresAt, p.RevokedAt, p.ReplacedBy, p.SessionExpiresAt)
@@ -119,10 +128,53 @@ func SeedRefreshToken(t *testing.T, db *sql.DB, p SeedRefreshTokenParams) uuid.U
 	return p.FamilyID
 }
 
+// SeedSessionParams is one auth_sessions row; zero values get defaults.
+type SeedSessionParams struct {
+	FamilyID uuid.UUID // uuid.Nil => a new one
+	UserID   int64
+	Trusted  bool
+	// UserAgent / ClientIP default to "".
+	UserAgent, ClientIP string
+	// CreatedAt / LastUsedAt default to now.
+	CreatedAt, LastUsedAt time.Time
+	// RevokeReason set => revoked now with that reason.
+	RevokeReason string
+}
+
+// SeedSession inserts an auth_sessions row and returns its family id. Seed
+// its refresh tokens with SeedRefreshToken and the same FamilyID.
+func SeedSession(t *testing.T, db *sql.DB, p SeedSessionParams) uuid.UUID {
+	t.Helper()
+
+	if p.FamilyID == uuid.Nil {
+		p.FamilyID = uuid.New()
+	}
+	now := time.Now()
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = now
+	}
+	if p.LastUsedAt.IsZero() {
+		p.LastUsedAt = now
+	}
+	var revokedAt *time.Time
+	var reason *string
+	if p.RevokeReason != "" {
+		revokedAt, reason = &now, &p.RevokeReason
+	}
+
+	_, err := db.Exec(`
+		INSERT INTO auth_sessions (family_id, user_id, trusted, user_agent, client_ip, created_at, last_used_at, revoked_at, revoke_reason)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, p.FamilyID, p.UserID, p.Trusted, p.UserAgent, p.ClientIP, p.CreatedAt, p.LastUsedAt, revokedAt, reason)
+	require.NoError(t, err, "seed session")
+
+	return p.FamilyID
+}
+
 // Truncate empties every table between test cases.
 func Truncate(t *testing.T, db *sql.DB) {
 	t.Helper()
-	_, err := db.Exec(`TRUNCATE TABLE users, notes, refresh_tokens RESTART IDENTITY CASCADE`)
+	_, err := db.Exec(`TRUNCATE TABLE users, notes, refresh_tokens, auth_sessions RESTART IDENTITY CASCADE`)
 	require.NoError(t, err)
 }
 

@@ -81,3 +81,30 @@ func GetRefreshToken(t *testing.T, db *sql.DB, jti uuid.UUID) SeededRefreshToken
 	require.NoError(t, err, "get refresh token %s", jti)
 	return r
 }
+
+// SeededSession is one auth_sessions row, as read back by tests.
+type SeededSession struct {
+	FamilyID     uuid.UUID
+	UserID       int64
+	Trusted      bool
+	UserAgent    string
+	ClientIP     string
+	CreatedAt    time.Time
+	LastUsedAt   time.Time
+	RevokedAt    sql.NullTime
+	RevokeReason sql.NullString
+}
+
+// GetSession reads an auth_sessions row.
+func GetSession(t *testing.T, db *sql.DB, familyID uuid.UUID) SeededSession {
+	t.Helper()
+
+	var s SeededSession
+	err := db.QueryRow(`
+		SELECT family_id, user_id, trusted, user_agent, client_ip, created_at, last_used_at, revoked_at, revoke_reason
+		FROM auth_sessions WHERE family_id = $1
+	`, familyID).Scan(&s.FamilyID, &s.UserID, &s.Trusted, &s.UserAgent, &s.ClientIP, &s.CreatedAt, &s.LastUsedAt,
+		&s.RevokedAt, &s.RevokeReason)
+	require.NoError(t, err, "get session %s", familyID)
+	return s
+}

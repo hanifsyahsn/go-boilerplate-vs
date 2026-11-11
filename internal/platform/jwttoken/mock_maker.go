@@ -10,6 +10,7 @@ import (
 
 	v5 "github.com/golang-jwt/jwt/v5"
 	gomock "github.com/golang/mock/gomock"
+	uuid "github.com/google/uuid"
 	dto "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/dto"
 )
 
@@ -37,24 +38,24 @@ func (m *MockM) EXPECT() *MockMMockRecorder {
 }
 
 // CreateToken mocks base method.
-func (m *MockM) CreateToken(user dto.User, accessTokenDuration, refreshTokenDuration time.Duration) (Pair, error) {
+func (m *MockM) CreateToken(user dto.User, sessionID uuid.UUID, accessTokenDuration, refreshTokenDuration time.Duration) (Pair, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateToken", user, accessTokenDuration, refreshTokenDuration)
+	ret := m.ctrl.Call(m, "CreateToken", user, sessionID, accessTokenDuration, refreshTokenDuration)
 	ret0, _ := ret[0].(Pair)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CreateToken indicates an expected call of CreateToken.
-func (mr *MockMMockRecorder) CreateToken(user, accessTokenDuration, refreshTokenDuration interface{}) *gomock.Call {
+func (mr *MockMMockRecorder) CreateToken(user, sessionID, accessTokenDuration, refreshTokenDuration interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateToken", reflect.TypeOf((*MockM)(nil).CreateToken), user, accessTokenDuration, refreshTokenDuration)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateToken", reflect.TypeOf((*MockM)(nil).CreateToken), user, sessionID, accessTokenDuration, refreshTokenDuration)
 }
 
 // GenerateAccessToken mocks base method.
-func (m *MockM) GenerateAccessToken(user dto.User, accessTokenDuration time.Duration) (string, time.Time, error) {
+func (m *MockM) GenerateAccessToken(user dto.User, sessionID uuid.UUID, accessTokenDuration time.Duration) (string, time.Time, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GenerateAccessToken", user, accessTokenDuration)
+	ret := m.ctrl.Call(m, "GenerateAccessToken", user, sessionID, accessTokenDuration)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(time.Time)
 	ret2, _ := ret[2].(error)
@@ -62,9 +63,9 @@ func (m *MockM) GenerateAccessToken(user dto.User, accessTokenDuration time.Dura
 }
 
 // GenerateAccessToken indicates an expected call of GenerateAccessToken.
-func (mr *MockMMockRecorder) GenerateAccessToken(user, accessTokenDuration interface{}) *gomock.Call {
+func (mr *MockMMockRecorder) GenerateAccessToken(user, sessionID, accessTokenDuration interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateAccessToken", reflect.TypeOf((*MockM)(nil).GenerateAccessToken), user, accessTokenDuration)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateAccessToken", reflect.TypeOf((*MockM)(nil).GenerateAccessToken), user, sessionID, accessTokenDuration)
 }
 
 // VerifyAccessToken mocks base method.

@@ -19,6 +19,7 @@ import (
 	authlogin "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login"
 	authloginsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login/sqlc"
 	authlogout "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout"
+	authlogoutsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout/sqlc"
 	authrefresh "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/refresh"
 	authregister "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register"
 	authregistersqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register/sqlc"
@@ -75,7 +76,7 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 			authrefresh.NewService(authrefresh.NewStore(db), tokenMaker, accessTTL, refreshTTL),
 			cookies,
 		),
-		Logout: authlogout.NewHandler(authlogout.NewService(authSharedQuerier, tokenMaker), cookies),
+		Logout: authlogout.NewHandler(authlogout.NewService(authlogoutsqlc.New(db), authSharedQuerier, tokenMaker), cookies),
 
 		Me: me.NewHandler(me.NewService(mesqlc.New(db))),
 
@@ -136,11 +137,25 @@ func (c apiClient) do(method, path, body, token string) apiResponse {
 // login signs in with the seeded default password and returns the access token.
 func (c apiClient) login(email string) string {
 	c.t.Helper()
+	access, _ := c.loginPair(email)
+	return access
+}
+
+// loginPair signs in and returns the access and the refresh token.
+func (c apiClient) loginPair(email string) (access, refresh string) {
+	c.t.Helper()
 
 	res := c.do(http.MethodPost, "/api/auth/login",
 		`{"data":{"type":"sessions","attributes":{"email":"`+email+`","password":"`+testhelper.DefaultPassword+`"}}}`, "")
 	require.Equal(c.t, http.StatusOK, res.Code, "login: %v", res.Body)
-	return res.Body["meta"].(map[string]any)["access_token"].(string)
+	meta := res.Body["meta"].(map[string]any)
+	return meta["access_token"].(string), meta["refresh_token"].(string)
+}
+
+// errorDetail reads errors[0].detail.
+func errorDetail(t *testing.T, res apiResponse) string {
+	t.Helper()
+	return res.Body["errors"].([]any)[0].(map[string]any)["detail"].(string)
 }
 
 // dataAttr reads data.attributes[name] of a single-resource document.
@@ -228,6 +243,41 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 				require.NoError(t, err)
 
 				require.Equal(t, http.StatusUnauthorized, c.do(http.MethodGet, "/api/me", "", token).Code)
+			},
+		},
+		{
+			name: "logout ends the session at once: its still-unexpired access token is a 401, another device's isn't",
+			run: func(t *testing.T, c apiClient) {
+				testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "jane@example.com"})
+				laptopAccess, laptopRefresh := c.loginPair("jane@example.com")
+				phoneAccess := c.login("jane@example.com")
+				require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/me", "", laptopAccess).Code)
+
+				res := c.do(http.MethodPost, "/api/auth/logout",
+					`{"data":{"type":"sessions","attributes":{"refresh_token":"`+laptopRefresh+`"}}}`, "")
+				require.Equal(t, http.StatusNoContent, res.Code, "logout: %v", res.Body)
+
+				res = c.do(http.MethodGet, "/api/me", "", laptopAccess)
+				require.Equal(t, http.StatusUnauthorized, res.Code)
+				require.Equal(t, "Your session has ended. Please sign in again.", errorDetail(t, res))
+				require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/me", "", phoneAccess).Code)
+
+				res = c.do(http.MethodPost, "/api/auth/refresh",
+					`{"data":{"type":"sessions","attributes":{"refresh_token":"`+laptopRefresh+`"}}}`, "")
+				require.Equal(t, http.StatusUnauthorized, res.Code, "the signed-out session can't be refreshed")
+			},
+		},
+		{
+			name: "a refresh keeps the session: the new access token works and still names it",
+			run: func(t *testing.T, c apiClient) {
+				testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "jane@example.com"})
+				_, refresh := c.loginPair("jane@example.com")
+
+				res := c.do(http.MethodPost, "/api/auth/refresh",
+					`{"data":{"type":"sessions","attributes":{"refresh_token":"`+refresh+`"}}}`, "")
+				require.Equal(t, http.StatusOK, res.Code, "refresh: %v", res.Body)
+				access := res.Body["meta"].(map[string]any)["access_token"].(string)
+				require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/me", "", access).Code)
 			},
 		},
 		{

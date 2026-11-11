@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/refresh/sqlc"
+	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
@@ -35,7 +36,12 @@ type S interface {
 	// past it the refresh is a 401. The user is re-read, so the new token carries the
 	// current role, and a deactivated user gets none. A spent token
 	// presented again (after reuseGrace) revokes every token of its login.
-	Refresh(ctx context.Context, refreshToken string) (Result, error)
+	//
+	// Its session (auth_sessions) must be live — a signed-out session's
+	// token is a 401 — and a refresh records its use (last_used_at, the
+	// client's User-Agent and IP). The new access token keeps the session's
+	// sid.
+	Refresh(ctx context.Context, refreshToken string, client authshared.SessionClient) (Result, error)
 }
 
 type service struct {
@@ -64,7 +70,8 @@ func internalError(err error) error {
 	return apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(), err)
 }
 
-func (s *service) Refresh(ctx context.Context, refreshToken string) (Result, error) {
+func (s *service) Refresh(ctx context.Context, refreshToken string, client authshared.SessionClient) (Result, error) {
+	device := authshared.NewSessionClient(client.UserAgent, client.IP)
 	if refreshToken == "" {
 		return Result{}, sessionExpired(fmt.Errorf("(%s): no refresh token in the cookie or the body", feature))
 	}
@@ -101,12 +108,20 @@ func (s *service) Refresh(ctx context.Context, refreshToken string) (Result, err
 			return sessionExpired(fmt.Errorf("(%s): token %s belongs to user %d, not %d", feature, jti, token.UserID, userID))
 		}
 
+		if !token.SessionLive {
+			// Signed out (logout, a remote sign-out, a password change): the
+			// tokens were revoked with it, so this isn't a reuse to punish.
+			return sessionExpired(fmt.Errorf("(%s): session %s of token %s is not live", feature, token.FamilyID, jti))
+		}
+
 		if token.RevokedAt.Valid {
 			if token.ReplacedBy.Valid && s.now().Sub(token.RevokedAt.Time) < reuseGrace {
 				return sessionExpired(fmt.Errorf("(%s): token %s was just rotated (concurrent refresh)", feature, jti))
 			}
-			if err := q.RevokeRefreshTokenFamily(ctx, jti); err != nil {
-				return internalError(fmt.Errorf("RevokeRefreshTokenFamily(%s) (%s): %w", jti, feature, err))
+			if _, err := q.RevokeSession(ctx, authsharedsqlc.RevokeSessionParams{
+				FamilyID: token.FamilyID, Reason: authshared.RevokeReasonTokenReused,
+			}); err != nil {
+				return internalError(fmt.Errorf("RevokeSession(%s) (%s): %w", token.FamilyID, feature, err))
 			}
 			// Commit the revocation; the 401 is returned after the tx.
 			reused = true
@@ -136,7 +151,7 @@ func (s *service) Refresh(ctx context.Context, refreshToken string) (Result, err
 			Name:  user.Name,
 			Email: user.Email,
 			Role:  enum.Role(user.Role),
-		}, s.accessTokenDuration, refreshTokenDuration)
+		}, token.FamilyID, s.accessTokenDuration, refreshTokenDuration)
 		if err != nil {
 			return internalError(fmt.Errorf("tokenMaker.CreateToken() (%s): %w", feature, err))
 		}
@@ -153,6 +168,11 @@ func (s *service) Refresh(ctx context.Context, refreshToken string) (Result, err
 		}
 		if err := q.RotateRefreshToken(ctx, sqlc.RotateRefreshTokenParams{Jti: jti, ReplacedBy: pair.RefreshTokenID}); err != nil {
 			return internalError(fmt.Errorf("RotateRefreshToken(%s) (%s): %w", jti, feature, err))
+		}
+		if err := q.TouchSession(ctx, sqlc.TouchSessionParams{
+			FamilyID: token.FamilyID, UserAgent: device.UserAgent, ClientIp: device.IP,
+		}); err != nil {
+			return internalError(fmt.Errorf("TouchSession(%s) (%s): %w", token.FamilyID, feature, err))
 		}
 
 		res = Result{Tokens: pair}

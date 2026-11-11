@@ -15,6 +15,7 @@ import (
 	authloginsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login"
 	authloginsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login/sqlc"
 	authlogoutsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout"
+	authlogoutsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout/sqlc"
 	authrefreshsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/refresh"
 	authregistersvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register"
 	authregistersqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register/sqlc"
@@ -143,7 +144,7 @@ func main() {
 				conf.AccessTokenDuration, conf.RefreshTokenDuration),
 			cookies,
 		),
-		Logout: authlogoutsvc.NewHandler(authlogoutsvc.NewService(authSharedQuerier, tokenMaker), cookies),
+		Logout: authlogoutsvc.NewHandler(authlogoutsvc.NewService(authlogoutsqlc.New(conn), authSharedQuerier, tokenMaker), cookies),
 
 		Me: mesvc.NewHandler(mesvc.NewService(mesqlc.New(conn))),
 

@@ -6,17 +6,24 @@ package sqlc
 
 import (
 	"context"
-
-	"github.com/google/uuid"
 )
 
 type Querier interface {
-	// Records an issued refresh token (login starts a family, refresh continues
-	// it). session_expires_at is NULL for a trusted device (no cap).
+	// Records a refresh token of an existing family (refresh continues it).
+	// session_expires_at is NULL for a trusted device (no cap).
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
-	// Revokes every live token of the family the given token belongs to (logout,
-	// or a rotated token presented again).
-	RevokeRefreshTokenFamily(ctx context.Context, jti uuid.UUID) error
+	// Ends one session: revokes its family's live refresh tokens and marks the
+	// session revoked with the reason, in one statement. The row count is the
+	// sessions revoked (0 = it was already revoked or doesn't exist).
+	RevokeSession(ctx context.Context, arg RevokeSessionParams) (int64, error)
+	// Ends every live session of a user except keep_family_id (NULL = all): a
+	// password change keeps the caller's own, a reset or a deactivation none.
+	// The row count is the sessions revoked.
+	RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error)
+	// Starts a login: its auth_sessions row and the family's first refresh token,
+	// in one statement (both or neither). session_expires_at is NULL for a
+	// trusted device (no cap).
+	StartSession(ctx context.Context, arg StartSessionParams) error
 }
 
 var _ Querier = (*Queries)(nil)

@@ -49,17 +49,28 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   `refresh_tokens.session_expires_at` NULL, the session slides with no cap. Untrusted (the default) →
   `session_expires_at = login + UNTRUSTED_SESSION_DURATION` (optional, default 7 days), copied to every
   successor; refresh issues a token no longer than what's left and is a 401 past it.
-- **Reuse detection**: a spent token presented again revokes its whole family (→ 401), since it was probably
-  stolen. Exception: within `reuseGrace` (10s, `refresh/service.go`) of its rotation it's treated as two tabs
+- **Reuse detection**: a spent token presented again revokes its whole session (`token_reused`, → 401), since
+  it was probably stolen. Exception: within `reuseGrace` (10s, `refresh/service.go`) of its rotation it's treated as two tabs
   refreshing at once — 401, family kept. Clients should still single-flight their refresh calls.
 - Refresh re-reads the user, so the new access token carries the **current** role and a deactivated user gets
   none. An unknown jti (no row) is a 401.
 - Refresh / logout take the token from the cookie, else an optional `sessions` document
   (`{"data":{"type":"sessions","attributes":{"refresh_token":"..."}}}`). Refresh answers with a meta-only
   document.
-- Logout revokes the presented token's family and clears the cookies; a missing / invalid token is still a
-  204. The access token is a stateless JWT and stays valid until it
-  expires — keep `ACCESS_TOKEN_DURATION` short.
+- **Sessions** (decision 0006, migration 000006, table `auth_sessions`): one row per refresh-token family =
+  one login on one device (`trusted`, `user_agent` cut to 512 runes, `client_ip`, `created_at`,
+  `last_used_at`, `revoked_at` + `revoke_reason`). Login starts it together with the first refresh token in
+  **one statement** (`authshared` query `StartSession`); refresh requires it live (`LockRefreshToken` joins it:
+  a signed-out session is a 401 and not treated as reuse) and `TouchSession`s it (last use, User-Agent, IP).
+  The access token carries `sid` = the family id; `AccessTokenMiddleware` reads user and session in **one**
+  query (`GetAccessStatus`) on every request — no / bad `sid` → 401 "not authorized" (tokens from before
+  sessions: everyone signs in again once), inactive → "no longer active", session revoked → **"Your session
+  has ended. Please sign in again."** — and sets gin key `session_id` (`constant.SessionIDKey`, a
+  `uuid.UUID`). Ending sessions goes through two shared queries only, each revoking the tokens **and** the
+  session row in one statement: `RevokeSession(family_id, reason)` and `RevokeUserSessions(user_id, reason,
+  keep_family_id NULL = all)`; reasons are the `authshared.RevokeReason*` constants (the column's CHECK).
+- Logout revokes the presented token's session (`logout`) and clears the cookies; a missing / invalid /
+  unknown token is still a 204. The session's access tokens stop working at once.
 
 ### Rate limits and the client IP
 

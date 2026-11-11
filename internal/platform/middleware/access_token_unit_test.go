@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
 	internalsharedconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/constant"
@@ -18,7 +19,12 @@ import (
 )
 
 func TestAccessTokenMiddleware_U(t *testing.T) {
-	claims := jwt.MapClaims{"sub": float64(7), "role": "admin"}
+	sid := uuid.MustParse("6a1f0c9e-3b52-4d8e-9a10-5c2e7f4b8d31")
+	claims := jwt.MapClaims{"sub": float64(7), "role": "admin", "sid": sid.String()}
+	status := func(q *middlewaresqlc.MockQuerier, row middlewaresqlc.GetAccessStatusRow, err error) {
+		q.EXPECT().GetAccessStatus(gomock.Any(), middlewaresqlc.GetAccessStatusParams{SessionID: sid, UserID: 7}).Return(row, err)
+	}
+	live := middlewaresqlc.GetAccessStatusRow{IsActive: true, SessionLive: true}
 
 	testCases := []struct {
 		name       string
@@ -29,25 +35,25 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 		wantInBody string
 	}{
 		{
-			name:   "a bearer token of an active user: id + role in the context",
+			name:   "a bearer token of an active user in a live session: id + role + session in the context",
 			header: "Bearer good",
 			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
 				m.EXPECT().VerifyAccessToken("good").Return(claims, nil)
-				q.EXPECT().GetUserIsActive(gomock.Any(), int64(7)).Return(true, nil)
+				status(q, live, nil)
 			},
 			wantCode:   http.StatusOK,
-			wantInBody: "7:admin|request ctx:7",
+			wantInBody: "7:admin|request ctx:7|session:" + sid.String(),
 		},
 		{
 			name:   "the cookie wins over the header",
 			header: "Bearer header-token",
 			cookie: "cookie-token",
 			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
-				m.EXPECT().VerifyAccessToken("cookie-token").Return(jwt.MapClaims{"sub": float64(7)}, nil)
-				q.EXPECT().GetUserIsActive(gomock.Any(), int64(7)).Return(true, nil)
+				m.EXPECT().VerifyAccessToken("cookie-token").Return(jwt.MapClaims{"sub": float64(7), "sid": sid.String()}, nil)
+				status(q, live, nil)
 			},
 			wantCode:   http.StatusOK,
-			wantInBody: "7:|request ctx:7",
+			wantInBody: "7:|request ctx:7|",
 		},
 		{name: "no token at all", stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {}, wantCode: http.StatusUnauthorized},
 		{name: "not a bearer header", header: "Basic abc", stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {}, wantCode: http.StatusUnauthorized},
@@ -70,11 +76,49 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 			wantCode: http.StatusUnauthorized,
 		},
 		{
+			name:   "an access token without sid (issued before sessions) is a 401 and the DB isn't read",
+			header: "Bearer good",
+			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
+				m.EXPECT().VerifyAccessToken("good").Return(jwt.MapClaims{"sub": float64(7), "role": "admin"}, nil)
+			},
+			wantCode:   http.StatusUnauthorized,
+			wantInBody: "You're not authorized to perform this action.",
+		},
+		{
+			name:   "an access token whose sid is not a UUID is a 401",
+			header: "Bearer good",
+			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
+				m.EXPECT().VerifyAccessToken("good").Return(jwt.MapClaims{"sub": float64(7), "sid": "abc"}, nil)
+			},
+			wantCode:   http.StatusUnauthorized,
+			wantInBody: "You're not authorized to perform this action.",
+		},
+		{
+			name:   "a revoked session is refused at once, before the token expires",
+			header: "Bearer good",
+			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
+				m.EXPECT().VerifyAccessToken("good").Return(claims, nil)
+				status(q, middlewaresqlc.GetAccessStatusRow{IsActive: true, SessionLive: false}, nil)
+			},
+			wantCode:   http.StatusUnauthorized,
+			wantInBody: "Your session has ended. Please sign in again.",
+		},
+		{
+			name:   "a deactivated user (whatever the session) gets the inactive message",
+			header: "Bearer good",
+			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
+				m.EXPECT().VerifyAccessToken("good").Return(claims, nil)
+				status(q, middlewaresqlc.GetAccessStatusRow{IsActive: false, SessionLive: false}, nil)
+			},
+			wantCode:   http.StatusUnauthorized,
+			wantInBody: inactiveAccountMessage,
+		},
+		{
 			name:   "a deactivated user",
 			header: "Bearer good",
 			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
 				m.EXPECT().VerifyAccessToken("good").Return(claims, nil)
-				q.EXPECT().GetUserIsActive(gomock.Any(), int64(7)).Return(false, nil)
+				status(q, middlewaresqlc.GetAccessStatusRow{IsActive: false, SessionLive: true}, nil)
 			},
 			wantCode:   http.StatusUnauthorized,
 			wantInBody: inactiveAccountMessage,
@@ -84,7 +128,7 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 			header: "Bearer good",
 			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
 				m.EXPECT().VerifyAccessToken("good").Return(claims, nil)
-				q.EXPECT().GetUserIsActive(gomock.Any(), int64(7)).Return(false, sql.ErrNoRows)
+				status(q, middlewaresqlc.GetAccessStatusRow{}, sql.ErrNoRows)
 			},
 			wantCode:   http.StatusUnauthorized,
 			wantInBody: inactiveAccountMessage,
@@ -94,7 +138,7 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 			header: "Bearer good",
 			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
 				m.EXPECT().VerifyAccessToken("good").Return(claims, nil)
-				q.EXPECT().GetUserIsActive(gomock.Any(), int64(7)).Return(false, sql.ErrConnDone)
+				status(q, middlewaresqlc.GetAccessStatusRow{}, sql.ErrConnDone)
 			},
 			wantCode: http.StatusInternalServerError,
 		},
@@ -112,8 +156,12 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 			r.Use(AccessTokenMiddleware(m, q))
 			r.GET("/", func(c *gin.Context) {
 				reqUser, _ := requestuser.FromContext(c.Request.Context())
-				c.String(http.StatusOK, "%d:%s|request ctx:%d", c.GetInt64(internalsharedconstant.UserIDKey),
-					c.GetString(internalsharedconstant.UserRoleKey), reqUser)
+				session := ""
+				if v, ok := c.Get(internalsharedconstant.SessionIDKey); ok {
+					session = "session:" + v.(uuid.UUID).String()
+				}
+				c.String(http.StatusOK, "%d:%s|request ctx:%d|%s", c.GetInt64(internalsharedconstant.UserIDKey),
+					c.GetString(internalsharedconstant.UserRoleKey), reqUser, session)
 			})
 
 			req := httptest.NewRequest(http.MethodGet, "/", nil)

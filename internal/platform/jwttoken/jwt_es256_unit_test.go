@@ -38,7 +38,8 @@ func TestMakerES256_CreateToken_U(t *testing.T) {
 	key := newTestKey(t)
 	maker := newTestMaker(t, key, "client", "issuer")
 
-	pair, err := maker.CreateToken(testUser, 15*time.Minute, 24*time.Hour)
+	sessionID := uuid.New()
+	pair, err := maker.CreateToken(testUser, sessionID, 15*time.Minute, 24*time.Hour)
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -49,9 +50,10 @@ func TestMakerES256_CreateToken_U(t *testing.T) {
 		wantClaim map[string]any
 	}{
 		{
-			name:   "access token verifies as access, with the user's claims",
+			name:   "access token verifies as access, with the user's claims and its session",
 			verify: maker.VerifyAccessToken, token: pair.AccessToken,
 			wantClaim: map[string]any{
+				platformconstant.SessionIDKey: sessionID.String(),
 				platformconstant.SubKey:       float64(42),
 				platformconstant.RoleKey:      "admin",
 				platformconstant.EmailKey:     "jane@example.com",
@@ -84,7 +86,10 @@ func TestMakerES256_CreateToken_U(t *testing.T) {
 				require.Equal(t, v, claims[k], k)
 			}
 			_, hasRole := claims[platformconstant.RoleKey]
+			_, hasSession := claims[platformconstant.SessionIDKey]
 			require.Equal(t, claims[platformconstant.TokenTypeKey] == platformconstant.TokenTypeAccess, hasRole)
+			require.Equal(t, claims[platformconstant.TokenTypeKey] == platformconstant.TokenTypeAccess, hasSession,
+				"only the access token carries sid; the refresh token's row names its family")
 		})
 	}
 
@@ -110,7 +115,7 @@ func TestMakerES256_Verify_Rejections_U(t *testing.T) {
 	otherKey := newTestMaker(t, newTestKey(t), "client", "issuer")
 
 	sign := func(m *MakerES256) string {
-		token, _, err := m.GenerateAccessToken(testUser, time.Minute)
+		token, _, err := m.GenerateAccessToken(testUser, uuid.New(), time.Minute)
 		require.NoError(t, err)
 		return token
 	}
@@ -239,14 +244,14 @@ func TestMakerES256_SignErrors_U(t *testing.T) {
 		{
 			name: "GenerateAccessToken returns an error and no token",
 			call: func() (any, error) {
-				token, _, err := maker.GenerateAccessToken(testUser, time.Minute)
+				token, _, err := maker.GenerateAccessToken(testUser, uuid.New(), time.Minute)
 				return token, err
 			},
 			zero: "",
 		},
 		{
 			name: "CreateToken returns an error and an empty pair",
-			call: func() (any, error) { return maker.CreateToken(testUser, time.Minute, time.Hour) },
+			call: func() (any, error) { return maker.CreateToken(testUser, uuid.New(), time.Minute, time.Hour) },
 			zero: Pair{},
 		},
 	}
@@ -305,6 +310,35 @@ func TestTokenID_U(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := TokenID(tc.claims)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestSessionID_U(t *testing.T) {
+	id := uuid.New()
+
+	testCases := []struct {
+		name    string
+		claims  jwt.MapClaims
+		want    uuid.UUID
+		wantErr bool
+	}{
+		{name: "a uuid sid", claims: jwt.MapClaims{"sid": id.String()}, want: id},
+		{name: "missing (a token from before sessions)", claims: jwt.MapClaims{}, wantErr: true},
+		{name: "not a uuid", claims: jwt.MapClaims{"sid": "abc"}, wantErr: true},
+		{name: "the nil uuid", claims: jwt.MapClaims{"sid": uuid.Nil.String()}, wantErr: true},
+		{name: "not a string", claims: jwt.MapClaims{"sid": float64(1)}, wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := SessionID(tc.claims)
 			if tc.wantErr {
 				require.Error(t, err)
 				return

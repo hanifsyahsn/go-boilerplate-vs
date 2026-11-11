@@ -94,8 +94,10 @@ func TestNewRouter_U(t *testing.T) {
 			maker := jwttoken.NewMockM(ctrl)
 			users := middlewaresqlc.NewMockQuerier(ctrl)
 			if tc.role != "" {
-				maker.EXPECT().VerifyAccessToken("token").Return(jwt.MapClaims{"sub": float64(1), "role": tc.role}, nil)
-				users.EXPECT().GetUserIsActive(gomock.Any(), int64(1)).Return(true, nil)
+				maker.EXPECT().VerifyAccessToken("token").Return(
+					jwt.MapClaims{"sub": float64(1), "role": tc.role, "sid": "6a1f0c9e-3b52-4d8e-9a10-5c2e7f4b8d31"}, nil)
+				users.EXPECT().GetAccessStatus(gomock.Any(), gomock.Any()).
+					Return(middlewaresqlc.GetAccessStatusRow{IsActive: true, SessionLive: true}, nil)
 			}
 
 			r, err := NewRouter("test-version", maker, users, h.handlers(), Security{

@@ -10,10 +10,11 @@ import (
 
 type Querier interface {
 	// Queries for the auth middleware.
-	// Whether the token's user may still use the API. Read on every authenticated
-	// request, so a deactivated user is locked out at once instead of when their
-	// token expires. A missing row (deleted user) comes back as sql.ErrNoRows.
-	GetUserIsActive(ctx context.Context, id int64) (bool, error)
+	// Whether the token's user may still use the API and its session is still
+	// live. Read on every authenticated request, so a deactivated user or a
+	// signed-out session is locked out at once instead of when the access token
+	// expires. A missing user row (deleted) comes back as sql.ErrNoRows.
+	GetAccessStatus(ctx context.Context, arg GetAccessStatusParams) (GetAccessStatusRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

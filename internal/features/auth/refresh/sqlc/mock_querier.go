@@ -78,3 +78,17 @@ func (mr *MockQuerierMockRecorder) RotateRefreshToken(ctx, arg interface{}) *gom
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RotateRefreshToken", reflect.TypeOf((*MockQuerier)(nil).RotateRefreshToken), ctx, arg)
 }
+
+// TouchSession mocks base method.
+func (m *MockQuerier) TouchSession(ctx context.Context, arg TouchSessionParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TouchSession", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// TouchSession indicates an expected call of TouchSession.
+func (mr *MockQuerierMockRecorder) TouchSession(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchSession", reflect.TypeOf((*MockQuerier)(nil).TouchSession), ctx, arg)
+}

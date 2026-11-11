@@ -21,8 +21,8 @@ type Server struct {
 
 // NewServer builds the HTTP server around NewRouter; it fails when the router
 // can't apply sec.
-func NewServer(conf config.Config, version string, tokenMaker jwttoken.M, userStatus middleware.UserStatusReader, handlers Handlers, sec Security) (*Server, error) {
-	router, err := NewRouter(version, tokenMaker, userStatus, handlers, sec)
+func NewServer(conf config.Config, version string, tokenMaker jwttoken.M, accessStatus middleware.AccessStatusReader, handlers Handlers, sec Security) (*Server, error) {
+	router, err := NewRouter(version, tokenMaker, accessStatus, handlers, sec)
 	if err != nil {
 		return nil, err
 	}
