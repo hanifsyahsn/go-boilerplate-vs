@@ -72,3 +72,7 @@ desktop.ini
 
 # Private notes (public repo): derivatives tracker
 *.local.md
+
+# Local code-review loop: the external reviewer's workspace rules and its inbox / prompt / history
+.agent/
+docs/review/
