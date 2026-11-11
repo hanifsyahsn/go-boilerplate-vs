@@ -57,7 +57,7 @@ type Security struct {
 	// (they run on every open tab). Required.
 	PublicIPLimit ratelimit.Limiter
 	// AllowedOrigins (ALLOWED_ORIGINS, normalised) are the browser origins
-	// CORS answers. Empty turns CORS off.
+	// CORS answers and the origin guard lets write. Empty turns both off.
 	AllowedOrigins []string
 }
 
@@ -80,8 +80,9 @@ func GinMode(environment string) string {
 	return gin.ReleaseMode
 }
 
-// NewRouter mounts three groups under /api, all behind JSON:API content
-// negotiation (middleware.JSONAPIMediaType):
+// NewRouter mounts three groups under /api, all behind the origin guard
+// (middleware.OriginGuard: a write from an unlisted Origin is a 403), then
+// JSON:API content negotiation (middleware.JSONAPIMediaType):
 //
 //	public   no auth: refresh / logout with no IP limit (every open tab
 //	         calls them); every other public route behind the general per-IP
@@ -137,7 +138,9 @@ func NewRouter(version string, tokenMaker jwttoken.M, userStatus middleware.User
 		jsonapi.WriteMeta(c.Writer, c.Request, http.StatusOK, gin.H{"status": "up", "version": version})
 	})
 
-	api := r.Group("/api", middleware.JSONAPIMediaType())
+	// The origin guard first: a cross-site write is refused before anything
+	// else looks at it.
+	api := r.Group("/api", middleware.OriginGuard(sec.AllowedOrigins), middleware.JSONAPIMediaType())
 
 	// Refresh and logout work off the refresh cookie and run on every open
 	// tab, so they aren't IP-limited (an office or a mobile carrier puts many

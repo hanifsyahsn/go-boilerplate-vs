@@ -30,7 +30,10 @@ auth.md (`AccessTokenMiddleware`, the auth documents). What applies everywhere i
    gets its 204 / 403 instead of the 405: a listed origin is echoed with credentials (never `*`), an unlisted
    one gets no CORS header (its preflight a 403 on `source.header` `Origin`); empty list = off. `Vary` is added
    to, never set, so `Origin` and `Accept` both stay.
-1. `middleware.JSONAPIMediaType` (every `/api` route) checks content negotiation first (406 / 415). Every public
+1. `middleware.OriginGuard(ALLOWED_ORIGINS)` runs first on `/api`: a method other than GET / HEAD / OPTIONS whose
+   `Origin` header is present and not exactly one listed origin (`null` and an empty one included) is a 403 on
+   `source.header` `Origin`; no `Origin` passes (curl, servers); empty list = off. Then
+   `middleware.JSONAPIMediaType` (every `/api` route) checks content negotiation (406 / 415). Every public
    route but refresh / logout then passes `middleware.RateLimitByIP` (the general per-IP budget), and register /
    login a second one (the auth budget) — 429 past either.
 2. `AccessTokenMiddleware` reads the access token from the `app-access-token` cookie, else

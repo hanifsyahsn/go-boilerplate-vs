@@ -34,6 +34,10 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   password; "no longer active" only after the password matched. Sets `app-access-token` (path `/`) and
   `app-refresh-token` (path `/api/auth`) HttpOnly, SameSite=Lax cookies (`COOKIE_SECURE`, `COOKIE_DOMAIN`), and
   answers with the account as `data` and the tokens under `meta` for non-browser clients.
+- **CSRF**: the cookies are SameSite=Lax **and** `/api` runs `middleware.OriginGuard` (decision 0004): a write
+  whose `Origin` isn't in `ALLOWED_ORIGINS` is a 403 before anything else runs. Lax alone leaves a same-site
+  sibling (another subdomain) and old browsers; a request without `Origin` passes (no page sent it). Empty
+  `ALLOWED_ORIGINS` turns the guard off (a startup warning says so) — set it in every deployed environment.
 - Tokens carry `typ` (`access` / `refresh`); each verify rejects the other type.
 - **Refresh tokens rotate** (migration 000004, table `refresh_tokens`, one row per refresh token keyed on its
   `jti`). Login starts a *family* (one per login / device). `POST /api/auth/refresh` locks the presented token's

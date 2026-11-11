@@ -89,6 +89,12 @@ header at all, so only same-origin pages can read the answers.
 
 With the list set, every response carries `Vary: Origin` (next to `Vary: Accept` on `/api`).
 
+**Cross-origin writes.** With the list set, a `POST` / `PATCH` / `DELETE` (any method but `GET`, `HEAD`,
+`OPTIONS`) on `/api` that carries an `Origin` header must carry exactly one listed origin, else **403**
+`forbidden`, `detail` `This request didn't come from an allowed origin.`, `source.header` `Origin` — checked
+before anything else on `/api` (so before the 406 / 415). A request with no `Origin` (curl, a server, a mobile
+app) passes; `Origin: null` doesn't.
+
 ---
 
 ## Authentication

@@ -138,7 +138,7 @@ Windows".
   `server.Handlers` → `server.NewServer(...).Run(ctx)` (graceful shutdown on SIGINT/SIGTERM).
 - `internal/platform` — infrastructure: `config` (viper, `.env` optional), `logging` (`log/slog` setup: `New` /
   `Setup` / `Check` / `Fatal`, a handler adding `request_id`), `server` (`server.go` + `router.go` with the
-  `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `CORS`, `JSONAPIMediaType`,
+  `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `CORS`, `OriginGuard`, `JSONAPIMediaType`,
   `RateLimitByIP`, `AccessTokenMiddleware`, `RequireRole`, its own sqlc for `GetUserIsActive`), `ratelimit`
   (token-bucket `Limiter` interface + in-memory `NewMemory` — see *Rate limits and the client IP*), `jwttoken` (ES256), `db/tx` (generic
   transaction helper), `db/migration`, `constant`.

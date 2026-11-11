@@ -255,27 +255,38 @@ func TestNewRouter_Security_U(t *testing.T) {
 	}
 }
 
-// TestNewRouter_CORS_U pins where CORS sits: on the engine, so a browser
-// preflight on an /api route (which declares no OPTIONS) is answered by CORS,
-// not by the 405 handler.
+// TestNewRouter_CORS_U pins where CORS and the origin guard sit: CORS on the
+// engine, so a browser preflight on an /api route (which declares no OPTIONS)
+// is answered by CORS, not by the 405 handler; the guard first on /api.
 func TestNewRouter_CORS_U(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	testCases := []struct {
-		name       string
-		origin     string
-		wantCode   int
-		wantOrigin string
+		name        string
+		method      string // "" = a preflight (OPTIONS + Access-Control-Request-Method)
+		origin      string
+		contentType string // "" = application/vnd.api+json
+		wantCode    int
+		wantOrigin  string
+		wantDetail  string
 	}{
 		{name: "a preflight on login from a listed origin reaches CORS (204, not 405)",
 			origin: "https://app.example.com", wantCode: http.StatusNoContent, wantOrigin: "https://app.example.com"},
 		{name: "a preflight on login from an unlisted origin is CORS's 403, not 405",
 			origin: "https://evil.example", wantCode: http.StatusForbidden},
+		{name: "the origin guard runs before media-type negotiation (an unlisted origin with a wrong Content-Type gets the 403, not the 415)",
+			method: http.MethodPost, origin: "https://evil.example", contentType: "text/plain", wantCode: http.StatusForbidden,
+			wantDetail: "This request didn't come from an allowed origin."},
+		{name: "a write from a listed origin passes the guard and reaches the handler",
+			method: http.MethodPost, origin: "https://app.example.com", wantCode: http.StatusTeapot,
+			wantOrigin: "https://app.example.com"},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
-			r, err := NewRouter("v", jwttoken.NewMockM(ctrl), middlewaresqlc.NewMockQuerier(ctrl), newMocks(ctrl).handlers(),
+			h := newMocks(ctrl)
+			h.login.EXPECT().Login(gomock.Any()).Do(func(c *gin.Context) { c.Status(http.StatusTeapot) }).AnyTimes()
+			r, err := NewRouter("v", jwttoken.NewMockM(ctrl), middlewaresqlc.NewMockQuerier(ctrl), h.handlers(),
 				Security{
 					AuthIPLimit:    ratelimit.NewMemory(ratelimit.Rate{Burst: 10, Per: time.Minute}),
 					PublicIPLimit:  ratelimit.NewMemory(ratelimit.Rate{Burst: 10, Per: time.Minute}),
@@ -283,13 +294,26 @@ func TestNewRouter_CORS_U(t *testing.T) {
 				})
 			require.NoError(t, err)
 
-			req := httptest.NewRequest(http.MethodOptions, "/api/auth/login", nil)
+			method, contentType := tc.method, tc.contentType
+			if method == "" {
+				method = http.MethodOptions
+			}
+			if contentType == "" {
+				contentType = jsonapi.MediaType
+			}
+			req := httptest.NewRequest(method, "/api/auth/login", strings.NewReader(`{}`))
 			req.Header.Set("Origin", tc.origin)
-			req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+			req.Header.Set("Content-Type", contentType)
+			if tc.method == "" {
+				req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+			}
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 
 			require.Equal(t, tc.wantCode, w.Code, w.Body.String())
+			if tc.wantDetail != "" {
+				require.Contains(t, w.Body.String(), tc.wantDetail)
+			}
 			require.Equal(t, tc.wantOrigin, w.Header().Get("Access-Control-Allow-Origin"))
 			require.NotEmpty(t, w.Header().Get("X-Request-ID"), "CORS runs after RequestID")
 		})
