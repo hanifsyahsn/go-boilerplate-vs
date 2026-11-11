@@ -87,7 +87,14 @@ type Config struct {
 	// memory (one instance). A secret when it carries a password: never
 	// logged.
 	RedisURL string `mapstructure:"REDIS_URL"`
+	// APIKeys (API_KEYS, "name:key,name:key") are the machine callers' keys
+	// for middleware.APIKey, name → key. Optional; each key at least
+	// MinAPIKeyLength characters, names unique. Secrets: never logged.
+	APIKeys map[string]string `mapstructure:"API_KEYS"`
 }
+
+// MinAPIKeyLength is the shortest API key accepted.
+const MinAPIKeyLength = 32
 
 // DefaultActivityLogRetention is ACTIVITY_LOG_RETENTION when unset: 2 years.
 const DefaultActivityLogRetention = 17520 * time.Hour
@@ -160,6 +167,11 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, err
 	}
 
+	apiKeys, err := parseAPIKeys(getListEnv(v, "API_KEYS"))
+	if err != nil {
+		return Config{}, err
+	}
+
 	// Unset is the default; an explicit 0 keeps the log forever.
 	activityLogRetention := DefaultActivityLogRetention
 	if v.GetString("ACTIVITY_LOG_RETENTION") != "" {
@@ -196,6 +208,7 @@ func LoadConfig(path string) (Config, error) {
 		TelegramBotToken:         v.GetString("TELEGRAM_BOT_TOKEN"),
 		TelegramChatID:           v.GetString("TELEGRAM_CHAT_ID"),
 		RedisURL:                 v.GetString("REDIS_URL"),
+		APIKeys:                  apiKeys,
 	}
 
 	if err = config.Validate(); err != nil {
@@ -358,6 +371,34 @@ func NormalizeOrigin(s string) (string, error) {
 		return "", notOrigin
 	}
 	return scheme + "://" + strings.ToLower(u.Host), nil
+}
+
+// parseAPIKeys reads API_KEYS entries ("name:key"). An error names the entry
+// or the client, never a key.
+func parseAPIKeys(entries []string) (map[string]string, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	keys := make(map[string]string, len(entries))
+	var errs []error
+	for i, entry := range entries {
+		name, key, ok := strings.Cut(entry, ":")
+		name, key = strings.TrimSpace(name), strings.TrimSpace(key)
+		switch {
+		case !ok || name == "" || key == "":
+			errs = append(errs, fmt.Errorf("config: API_KEYS entry %d is not name:key", i+1))
+		case len(key) < MinAPIKeyLength:
+			errs = append(errs, fmt.Errorf("config: API_KEYS key of %q is shorter than %d characters", name, MinAPIKeyLength))
+		case keys[name] != "":
+			errs = append(errs, fmt.Errorf("config: API_KEYS name %q is used twice", name))
+		default:
+			keys[name] = key
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	return keys, nil
 }
 
 // redactURLError is err's text without the URL a *url.Error quotes (a

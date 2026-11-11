@@ -140,7 +140,7 @@ Windows".
   SIGINT/SIGTERM) → `stopBg()` → `bg.Wait()` → the DB pool closes (see *Logging*).
 - `internal/platform` — infrastructure: `config` (viper, `.env` optional), `logging` (`log/slog` setup: `New` /
   `Setup` / `Check` / `Fatal`, a handler adding `request_id`), `server` (`server.go` + `router.go` with the
-  `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `ActivityLog`, `CORS`, `OriginGuard`, `JSONAPIMediaType`,
+  `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `ActivityLog`, `CORS`, `OriginGuard`, `JSONAPIMediaType`, `APIKey`,
   `RateLimitByIP`, `AccessTokenMiddleware`, `RequireRole`, its own sqlc for `GetAccessStatus` — user active + session live), `ratelimit`
   (token-bucket `Limiter` interface + in-memory `NewMemory` — see *Rate limits and the client IP*), `mailer`
   (`Mailer` interface: `NewSMTP`, the development `NewLog`, `Fake` for tests), `notifier` (ops alerts: `NewTelegram`
@@ -217,7 +217,8 @@ origin guard, empty = both off with a startup warning). `APP_BASE_URL` (the fron
 `ACTIVITY_LOG_RETENTION` (optional, default `17520h` = 2 years, `0` = keep forever; the cleanup worker applies it).
 `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (optional, both or neither: ops alerts, see logging.md *Ops alerts*).
 `REDIS_URL` (optional, `redis://` / `rediss://`, checked with `redis.ParseURL` without echoing it: the rate limits
-in Redis, see *Gotchas*).
+in Redis, see *Gotchas*). `API_KEYS` (optional, `name:key,…`, keys ≥ 32 characters, names unique; errors never
+echo a key) for `middleware.APIKey`.
 Durations are Go duration strings (`15m`).
 See `.env.example`.
 

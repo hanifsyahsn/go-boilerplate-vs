@@ -17,7 +17,7 @@ Statuses: **built** = implemented in the boilerplate · **accepted** = agreed, n
 | [0007](0007-password-and-email-flows.md) | Forgot / change password, email verification, `Mailer` | built |
 | [0008](0008-api-activity-log.md) | API activity log | built |
 | [0009](0009-cors.md) | CORS allowlist | built |
-| [0010](0010-api-key.md) | API-key middleware for service-to-service calls | accepted |
+| [0010](0010-api-key.md) | API-key middleware for service-to-service calls | built (not mounted) |
 | [0011](0011-ops-notifier.md) | Ops alerts through a `Notifier` interface (Telegram first) | built |
 | [0012](0012-patterns-in-slice-patterns.md) | Recurring derivative patterns go into `slice-patterns.md` | accepted |
 | [0013](0013-lint.md) | Lint: staticcheck + golangci-lint (`make lint`) | built |

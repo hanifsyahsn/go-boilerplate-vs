@@ -62,6 +62,9 @@ func AccessLog() gin.HandlerFunc {
 			"client_ip", c.ClientIP(),
 			"bytes", max(c.Writer.Size(), 0),
 		}
+		if client := c.GetString(APIClientKey); client != "" {
+			args = append(args, "api_client", client) // the name, never the key
+		}
 
 		level := slog.LevelInfo
 		switch {

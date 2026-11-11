@@ -46,6 +46,7 @@ func TestLoadConfig_Env_U(t *testing.T) {
 				require.Equal(t, "info", c.LogLevel)
 				require.Empty(t, c.TrustedProxies, "no proxy trusted by default")
 				require.Empty(t, c.AllowedOrigins, "no origin allowed by default")
+				require.Empty(t, c.APIKeys, "no API key by default")
 				require.Equal(t, 587, c.SMTPPort, "SMTP submission port by default")
 				require.Equal(t, "https://app.example.com", c.AppBaseURL)
 				require.Equal(t, 17520*time.Hour, c.ActivityLogRetention, "the activity log is kept 2 years by default")
@@ -89,6 +90,21 @@ func TestLoadConfig_Env_U(t *testing.T) {
 		{name: "a Redis URL that doesn't parse is refused without echoing it (it can hold a password)",
 			override: map[string]string{"REDIS_URL": "redis://:pa%zzss@host"}, wantErr: "config: invalid REDIS_URL",
 			wantNot: "pa%zzss"},
+		{
+			name:     "API keys read as name to key",
+			override: map[string]string{"API_KEYS": " billing:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb , reporting:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Equal(t, map[string]string{"billing": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "reporting": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"}, c.APIKeys)
+			},
+		},
+		{name: "an API key entry without a name is refused", override: map[string]string{"API_KEYS": ":bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+			wantErr: "config: API_KEYS entry 1 is not name:key", wantNot: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+		{name: "an API key entry without a colon is refused", override: map[string]string{"API_KEYS": "billing"},
+			wantErr: "config: API_KEYS entry 1 is not name:key"},
+		{name: "a short API key is refused without echoing it", override: map[string]string{"API_KEYS": "billing:shortsecret"},
+			wantErr: `config: API_KEYS key of "billing" is shorter than 32 characters`, wantNot: "shortsecret"},
+		{name: "an API client name used twice is refused", override: map[string]string{"API_KEYS": "billing:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,billing:rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"},
+			wantErr: `config: API_KEYS name "billing" is used twice`, wantNot: "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"},
 		{name: "a negative activity log retention", override: map[string]string{"ACTIVITY_LOG_RETENTION": "-1h"}, wantErr: "ACTIVITY_LOG_RETENTION -1h0m0s is negative"},
 		{name: "an activity log retention that isn't a duration", override: map[string]string{"ACTIVITY_LOG_RETENTION": "forever"}, wantErr: "ACTIVITY_LOG_RETENTION"},
 		{
@@ -232,6 +248,7 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			t.Setenv("TELEGRAM_BOT_TOKEN", "")
 			t.Setenv("TELEGRAM_CHAT_ID", "")
 			t.Setenv("REDIS_URL", "")
+			t.Setenv("API_KEYS", "")
 			t.Setenv("SMTP_USERNAME", "")
 			t.Setenv("SMTP_PASSWORD", "")
 			for k, v := range tc.override {

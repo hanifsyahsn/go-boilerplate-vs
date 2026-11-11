@@ -120,6 +120,12 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   15 s per email, a header with CR / LF refused; `NewLog` (development, no `SMTP_HOST`) logs to + subject at info,
   the body only at debug; `mailer.Fake` records messages for tests.
 
+- **Machine callers** (decision 0010): `middleware.APIKey(conf.APIKeys)` on a group of machine-only routes — the
+  boilerplate mounts none. Header `X-API-Key`; its SHA-256 is compared with every configured key's in constant
+  time, over **all** keys (no early exit); none matches → 401 "A valid API key is required." on `source.header`
+  `X-API-Key`; a match sets gin key `api_client` (the name), which `AccessLog` adds to its record — never the key.
+  Never mount it next to the cookie auth on one route: a machine route takes no user session.
+
 ### Rate limits and the client IP
 
 Added 2026-11-09 as the boilerplate's base security.
