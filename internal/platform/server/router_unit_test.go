@@ -13,6 +13,8 @@ import (
 	adminuser "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user"
 	authlogin "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login"
 	authlogout "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout"
+	authpasswordreset "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordreset"
+	authpasswordresetrequest "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest"
 	authrefresh "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/refresh"
 	authregister "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/me"
@@ -63,6 +65,10 @@ func TestNewRouter_U(t *testing.T) {
 			expect: func(h *mocks) { h.login.EXPECT().Login(gomock.Any()).Do(ok) }, wantCode: http.StatusTeapot},
 		{name: "refresh is public", method: http.MethodPost, path: "/api/auth/refresh",
 			expect: func(h *mocks) { h.refresh.EXPECT().Refresh(gomock.Any()).Do(ok) }, wantCode: http.StatusTeapot},
+		{name: "forgot password is public", method: http.MethodPost, path: "/api/auth/password-reset-requests",
+			expect: func(h *mocks) { h.resetReq.EXPECT().Request(gomock.Any()).Do(ok) }, wantCode: http.StatusTeapot},
+		{name: "reset password is public", method: http.MethodPost, path: "/api/auth/password-resets",
+			expect: func(h *mocks) { h.reset.EXPECT().Reset(gomock.Any()).Do(ok) }, wantCode: http.StatusTeapot},
 		{name: "logout is public", method: http.MethodPost, path: "/api/auth/logout",
 			expect: func(h *mocks) { h.logout.EXPECT().Logout(gomock.Any()).Do(ok) }, wantCode: http.StatusTeapot},
 		{name: "me needs a token", method: http.MethodGet, path: "/api/me", wantCode: http.StatusUnauthorized},
@@ -183,6 +189,11 @@ func TestNewRouter_Security_U(t *testing.T) {
 			login("10.0.0.1", "", http.StatusTeapot),
 			login("10.0.0.1", "", http.StatusTooManyRequests),
 		}},
+		{name: "forgot / reset password share the auth per-IP budget with login", calls: []call{
+			{method: http.MethodPost, path: "/api/auth/password-reset-requests", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/password-resets", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			login("10.0.0.1", "", http.StatusTooManyRequests),
+		}},
 		{name: "the general budget is per IP", publicBurst: 1, authBurst: 100, calls: []call{
 			login("10.0.0.1", "", http.StatusTeapot), login("10.0.0.1", "", http.StatusTooManyRequests),
 			login("10.0.0.2", "", http.StatusTeapot),
@@ -235,6 +246,8 @@ func TestNewRouter_Security_U(t *testing.T) {
 			h.login.EXPECT().Login(gomock.Any()).Do(ok).AnyTimes()
 			h.refresh.EXPECT().Refresh(gomock.Any()).Do(ok).AnyTimes()
 			h.logout.EXPECT().Logout(gomock.Any()).Do(ok).AnyTimes()
+			h.resetReq.EXPECT().Request(gomock.Any()).Do(ok).AnyTimes()
+			h.reset.EXPECT().Reset(gomock.Any()).Do(ok).AnyTimes()
 
 			publicBurst, authBurst := tc.publicBurst, tc.authBurst
 			if publicBurst == 0 {
@@ -360,6 +373,8 @@ type mocks struct {
 	login     *authlogin.MockH
 	refresh   *authrefresh.MockH
 	logout    *authlogout.MockH
+	resetReq  *authpasswordresetrequest.MockH
+	reset     *authpasswordreset.MockH
 	me        *me.MockH
 	sessions  *sessionlist.MockH
 	revoke    *sessionrevoke.MockH
@@ -377,6 +392,8 @@ func newMocks(ctrl *gomock.Controller) *mocks {
 		login:     authlogin.NewMockH(ctrl),
 		refresh:   authrefresh.NewMockH(ctrl),
 		logout:    authlogout.NewMockH(ctrl),
+		resetReq:  authpasswordresetrequest.NewMockH(ctrl),
+		reset:     authpasswordreset.NewMockH(ctrl),
 		me:        me.NewMockH(ctrl),
 		sessions:  sessionlist.NewMockH(ctrl),
 		revoke:    sessionrevoke.NewMockH(ctrl),
@@ -391,18 +408,20 @@ func newMocks(ctrl *gomock.Controller) *mocks {
 
 func (m *mocks) handlers() Handlers {
 	return Handlers{
-		Register:      m.register,
-		Login:         m.login,
-		Refresh:       m.refresh,
-		Logout:        m.logout,
-		Me:            m.me,
-		ListSessions:  m.sessions,
-		RevokeSession: m.revoke,
-		CreateNote:    m.create,
-		ListNote:      m.list,
-		DetailNote:    m.detail,
-		UpdateNote:    m.update,
-		DeleteNote:    m.delete,
-		AdminUser:     m.adminUser,
+		Register:             m.register,
+		Login:                m.login,
+		Refresh:              m.refresh,
+		Logout:               m.logout,
+		PasswordResetRequest: m.resetReq,
+		PasswordReset:        m.reset,
+		Me:                   m.me,
+		ListSessions:         m.sessions,
+		RevokeSession:        m.revoke,
+		CreateNote:           m.create,
+		ListNote:             m.list,
+		DetailNote:           m.detail,
+		UpdateNote:           m.update,
+		DeleteNote:           m.delete,
+		AdminUser:            m.adminUser,
 	}
 }

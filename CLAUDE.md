@@ -153,7 +153,8 @@ Windows".
   `dto`, `constant` (context keys, cookie names), `onetimetoken` (email-link tokens: `New` → plain + SHA-256 hash),
   `utility` (`SafeGo` / `SafeGoContext`, `Group` + `GoFunc` for
   background work main waits for at shutdown, …), `testhelper`.
-- `internal/features/<domain>/<action>` — the vertical slices: `auth/{register,login,refresh,logout}`, `me`,
+- `internal/features/<domain>/<action>` — the vertical slices:
+  `auth/{register,login,refresh,logout,passwordresetrequest,passwordreset}`, `me`,
   `note/{create,list,detail,update,delete}`, `session/{list,revoke}` (signed-in devices), `admin/user`. `<domain>/shared` holds what more than one slice of
   that domain needs (`note/shared`: the `NoteResource`, the include policy, the ownership helpers
   `GetOwnedNote` / `LockOwnedNote`, and the shared sqlc querier; `auth/shared`: cookies, reading the refresh

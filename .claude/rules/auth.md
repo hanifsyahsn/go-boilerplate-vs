@@ -93,6 +93,15 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   `send email failed` with `purpose` and `recipient_id`, **never the address or the link**. Texts and links
   (`APP_BASE_URL + "/reset-password?token="`, `"/verify-email?token="`) are `authshared.ResetEmail` /
   `PasswordChangedEmail` / `VerifyEmail`.
+- **Forgot password** (slices `auth/passwordresetrequest`, `auth/passwordreset`, both in the `limited` group):
+  `POST /api/auth/password-reset-requests` (`password-reset-requests`, attribute `email`) is **always 202** with
+  one meta message — unknown email, inactive account, the per-recipient limit (3 / h, key `reset:` + trimmed
+  lowercase email, taken **before** the lookup; refused or failing → nothing sent, logged without the address)
+  and a failed send all look the same; an active account gets a `RESET_PASSWORD` token (1 h) and the email.
+  `POST /api/auth/password-resets` (`password-resets`, `token` + `password` `min=8,maxbytes=72`): in one tx
+  `ConsumeAuthToken` (none → 422 `invalid_token` on `/data/attributes/token`, `authshared.CodeInvalidToken`), new
+  hash + `email_verified_at` (`SetPasswordAfterReset`), `RevokeUserSessions(password_reset)`; bcrypt runs before
+  the tx; after commit the "password changed" notice → 204.
 - **`mailer`**: `NewSMTP` refuses to send without TLS (465 implicit, else STARTTLS required, certificate verified),
   15 s per email, a header with CR / LF refused; `NewLog` (development, no `SMTP_HOST`) logs to + subject at info,
   the body only at debug; `mailer.Fake` records messages for tests.

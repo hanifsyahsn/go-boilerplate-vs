@@ -16,6 +16,9 @@ import (
 	authloginsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login/sqlc"
 	authlogoutsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout"
 	authlogoutsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout/sqlc"
+	authpasswordresetsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordreset"
+	authpasswordresetrequestsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest"
+	authpasswordresetrequestsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest/sqlc"
 	authrefreshsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/refresh"
 	authregistersvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register"
 	authregistersqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register/sqlc"
@@ -37,6 +40,7 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/config"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/mailer"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/server"
@@ -67,6 +71,9 @@ var (
 	// every 3.6 minutes. Only failures count, so a NAT full of people who
 	// type their password right never reaches it.
 	loginIPFailureRate = ratelimit.Rate{Burst: 100, Per: 6 * time.Hour}
+	// resetRecipientRate caps forgot-password emails per address, so the
+	// endpoint can't flood an inbox through our SMTP.
+	resetRecipientRate = ratelimit.Rate{Burst: 3, Per: time.Hour}
 )
 
 func main() {
@@ -125,6 +132,17 @@ func main() {
 
 	cookies := authshared.CookieConfig{Secure: conf.CookieSecure, Domain: conf.CookieDomain}
 
+	// Emails go out off the request path, in the background group main
+	// waits for at shutdown. No SMTP_HOST (development only) logs them.
+	var mail mailer.Mailer = mailer.NewLog()
+	if conf.SMTPHost != "" {
+		mail = mailer.NewSMTP(mailer.SMTPConfig{Host: conf.SMTPHost, Port: conf.SMTPPort,
+			Username: conf.SMTPUsername, Password: conf.SMTPPassword, From: conf.SMTPFrom})
+	} else {
+		slog.WarnContext(ctx, "SMTP_HOST is empty: emails are logged, not sent")
+	}
+	emailer := authshared.Emailer{Mailer: mail, Go: bg.Go, AppBaseURL: conf.AppBaseURL}
+
 	// Queriers shared by more than one slice.
 	authSharedQuerier := authsharedsqlc.New(conn)
 	noteSharedQuerier := notesharedsqlc.New(conn)
@@ -147,7 +165,11 @@ func main() {
 				conf.AccessTokenDuration, conf.RefreshTokenDuration),
 			cookies,
 		),
-		Logout: authlogoutsvc.NewHandler(authlogoutsvc.NewService(authlogoutsqlc.New(conn), authSharedQuerier, tokenMaker), cookies),
+		PasswordResetRequest: authpasswordresetrequestsvc.NewHandler(authpasswordresetrequestsvc.NewService(
+			authpasswordresetrequestsqlc.New(conn), authpasswordresetrequestsvc.NewStore(conn),
+			ratelimit.NewMemory(resetRecipientRate), emailer)),
+		PasswordReset: authpasswordresetsvc.NewHandler(authpasswordresetsvc.NewService(authpasswordresetsvc.NewStore(conn), emailer)),
+		Logout:        authlogoutsvc.NewHandler(authlogoutsvc.NewService(authlogoutsqlc.New(conn), authSharedQuerier, tokenMaker), cookies),
 
 		Me: mesvc.NewHandler(mesvc.NewService(mesqlc.New(conn))),
 

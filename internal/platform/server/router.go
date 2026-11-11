@@ -9,6 +9,8 @@ import (
 	adminuser "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user"
 	authlogin "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login"
 	authlogout "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout"
+	authpasswordreset "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordreset"
+	authpasswordresetrequest "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest"
 	authrefresh "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/refresh"
 	authregister "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/me"
@@ -34,6 +36,9 @@ type Handlers struct {
 	Login    authlogin.H
 	Refresh  authrefresh.H
 	Logout   authlogout.H
+
+	PasswordResetRequest authpasswordresetrequest.H
+	PasswordReset        authpasswordreset.H
 
 	Me me.H
 
@@ -166,6 +171,8 @@ func NewRouter(version string, tokenMaker jwttoken.M, accessStatus middleware.Ac
 	{
 		authregister.Route(limited, h.Register)
 		authlogin.Route(limited, h.Login)
+		authpasswordresetrequest.Route(limited, h.PasswordResetRequest)
+		authpasswordreset.Route(limited, h.PasswordReset)
 	}
 
 	authed := api.Group("")

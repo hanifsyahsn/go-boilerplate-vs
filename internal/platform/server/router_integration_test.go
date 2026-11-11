@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -20,6 +21,9 @@ import (
 	authloginsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login/sqlc"
 	authlogout "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout"
 	authlogoutsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout/sqlc"
+	authpasswordreset "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordreset"
+	authpasswordresetrequest "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest"
+	authpasswordresetrequestsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest/sqlc"
 	authrefresh "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/refresh"
 	authregister "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register"
 	authregistersqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register/sqlc"
@@ -39,6 +43,7 @@ import (
 	sessionlistsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/list/sqlc"
 	sessionrevoke "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/revoke"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/mailer"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/testhelper"
@@ -47,8 +52,9 @@ import (
 )
 
 // newIntegrationRouter wires every slice exactly like cmd/api/main.go, but on
-// the test container's database and a throwaway ES256 key.
-func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
+// the test container's database, a throwaway ES256 key and a fake mailer that
+// sends inline (the returned one, for the email flows).
+func newIntegrationRouter(t *testing.T, db *sql.DB) (*gin.Engine, *mailer.Fake) {
 	t.Helper()
 
 	require.NoError(t, validation.RegisterGinValidators())
@@ -64,6 +70,9 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	cookies := authshared.CookieConfig{}
 	authSharedQuerier := authsharedsqlc.New(db)
 	noteSharedQuerier := notesharedsqlc.New(db)
+	mail := &mailer.Fake{}
+	emailer := authshared.Emailer{Mailer: mail, AppBaseURL: "https://app.example.com",
+		Go: func(ctx context.Context, fn func(context.Context)) { fn(ctx) }}
 
 	handlers := Handlers{
 		Register: authregister.NewHandler(authregister.NewService(authregistersqlc.New(db))),
@@ -79,7 +88,11 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 			authrefresh.NewService(authrefresh.NewStore(db), tokenMaker, accessTTL, refreshTTL),
 			cookies,
 		),
-		Logout: authlogout.NewHandler(authlogout.NewService(authlogoutsqlc.New(db), authSharedQuerier, tokenMaker), cookies),
+		PasswordResetRequest: authpasswordresetrequest.NewHandler(authpasswordresetrequest.NewService(
+			authpasswordresetrequestsqlc.New(db), authpasswordresetrequest.NewStore(db),
+			ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}), emailer)),
+		PasswordReset: authpasswordreset.NewHandler(authpasswordreset.NewService(authpasswordreset.NewStore(db), emailer)),
+		Logout:        authlogout.NewHandler(authlogout.NewService(authlogoutsqlc.New(db), authSharedQuerier, tokenMaker), cookies),
 
 		Me: me.NewHandler(me.NewService(mesqlc.New(db))),
 
@@ -101,7 +114,7 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 			PublicIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}),
 		})
 	require.NoError(t, err)
-	return r
+	return r, mail
 }
 
 // apiClient sends JSON:API requests to the router in-process.
@@ -178,7 +191,7 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	router := newIntegrationRouter(t, testDB)
+	router, mail := newIntegrationRouter(t, testDB)
 
 	testCases := []struct {
 		name string
@@ -364,6 +377,37 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 				require.Equal(t, http.StatusOK, res.Code, "refresh: %v", res.Body)
 				access := res.Body["meta"].(map[string]any)["access_token"].(string)
 				require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/me", "", access).Code)
+			},
+		},
+		{
+			name: "forgot password: the emailed link sets a new password, signs every device out, and works once",
+			run: func(t *testing.T, c apiClient) {
+				testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "jane@example.com"})
+				oldAccess := c.login("jane@example.com")
+
+				res := c.do(http.MethodPost, "/api/auth/password-reset-requests",
+					`{"data":{"type":"password-reset-requests","attributes":{"email":"JANE@example.com"}}}`, "")
+				require.Equal(t, http.StatusAccepted, res.Code, "request: %v", res.Body)
+				sent := mail.Sent()
+				require.Len(t, sent, 1)
+				_, afterToken, _ := strings.Cut(sent[0].Text, "token=")
+				token, _, _ := strings.Cut(afterToken, "\n")
+
+				reset := `{"data":{"type":"password-resets","attributes":{"token":"` + token + `","password":"N3w-Passw0rd"}}}`
+				res = c.do(http.MethodPost, "/api/auth/password-resets", reset, "")
+				require.Equal(t, http.StatusNoContent, res.Code, "reset: %v", res.Body)
+				require.Equal(t, "Your password was changed", mail.Sent()[1].Subject)
+
+				res = c.do(http.MethodGet, "/api/me", "", oldAccess)
+				require.Equal(t, http.StatusUnauthorized, res.Code, "every session ended")
+				require.Equal(t, "Your session has ended. Please sign in again.", errorDetail(t, res))
+				res = c.do(http.MethodPost, "/api/auth/login",
+					`{"data":{"type":"sessions","attributes":{"email":"jane@example.com","password":"N3w-Passw0rd"}}}`, "")
+				require.Equal(t, http.StatusOK, res.Code, "the new password logs in")
+
+				res = c.do(http.MethodPost, "/api/auth/password-resets", reset, "")
+				require.Equal(t, http.StatusUnprocessableEntity, res.Code, "the link works once")
+				require.Equal(t, "This link is invalid or has expired. Ask for a new one.", errorDetail(t, res))
 			},
 		},
 		{

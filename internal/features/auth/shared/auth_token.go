@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/mailer"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/onetimetoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/utility"
@@ -94,3 +96,11 @@ func (e Emailer) Send(ctx context.Context, purpose string, userID int64, m maile
 		}
 	})
 }
+
+// CodeInvalidToken is the 422 of an email link's token that is unknown, used
+// or expired (password reset, email verification).
+var CodeInvalidToken = apperror.NewCode("invalid_token", http.StatusUnprocessableEntity)
+
+// InvalidTokenMessage is CodeInvalidToken's detail; it points at
+// /data/attributes/token.
+const InvalidTokenMessage = "This link is invalid or has expired. Ask for a new one."

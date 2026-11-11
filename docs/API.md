@@ -21,6 +21,8 @@ tokens), a personal **notes** CRUD, and a small admin user directory. The whole 
 | `POST` | `/api/auth/login` | — | [Log in](#post-apiauthlogin): sets the auth cookies, returns the tokens |
 | `POST` | `/api/auth/refresh` | refresh token | [Rotate the token pair](#post-apiauthrefresh) |
 | `POST` | `/api/auth/logout` | refresh token | [Log out](#post-apiauthlogout): revoke the session, clear the cookies |
+| `POST` | `/api/auth/password-reset-requests` | — | [Forgot password](#post-apiauthpassword-reset-requests): email a reset link |
+| `POST` | `/api/auth/password-resets` | — | [Set a new password](#post-apiauthpassword-resets) from the link |
 | `GET` | `/api/me` | user | [The caller's own account](#get-apime) |
 | `GET` | `/api/me/sessions` | user | [My signed-in devices](#get-apimesessions) |
 | `DELETE` | `/api/me/sessions/{id}` | user | [Sign a device out](#delete-apimesessionsid) |
@@ -184,9 +186,12 @@ it comes back evenly over the period):
 | Limit | Applies to | Past it |
 | --- | --- | --- |
 | 300 requests / 1 min **per client IP** (IPv6: per /64) | every public route except refresh and logout (a flood guard; refresh and logout are never IP-limited, every open tab calls them) | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
-| 300 requests / 15 min **per client IP** (IPv6: per /64) | register + login together, on top of the one above | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
+| 300 requests / 15 min **per client IP** (IPv6: per /64) | register, login, forgot password and reset password together, on top of the one above | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
 | 5 **failed** logins / 15 min **per email** (then one more every 3 min) | login: an unknown email and a wrong password both count; a successful login resets it | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login for that email, the right password too, until a try comes back |
 | 100 **failed** logins / 6 h **per client IP**, across every email (IPv6: per /64; then one more every 3.6 min) | login: an unknown email and a wrong password both count; a successful login doesn't count (but doesn't clear the IP's earlier failures); a login refused for its email doesn't count either | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login from that IP, the right password too, until a try comes back |
+
+Forgot password also sends at most **3 emails / 1 h per address**; past it the answer is the same `202` and
+nothing is sent (so the endpoint can't flood an inbox).
 
 The client IP is the connection's address; `X-Forwarded-For` / `X-Real-IP` count only from a proxy listed in
 `TRUSTED_PROXIES`. On a 429, show the message and don't retry automatically.
@@ -361,6 +366,61 @@ Set-Cookie: app-refresh-token=; Path=/api/auth; Max-Age=0; HttpOnly; SameSite=La
 ```
 
 **Errors:** a malformed `sessions` document (`400` / `409` / `422`, see [Request documents](#request-documents)); `500` (DB failure while revoking).
+
+### `POST /api/auth/password-reset-requests`
+
+"Forgot password": emails a link to `APP_BASE_URL/reset-password?token=…` (valid **1 hour**; asking again makes
+the earlier links stop working). **Always `202`** with the same body — an unknown email, a deactivated account
+and the per-address limit look exactly like a sent link, so the endpoint never tells which emails have an
+account. The email goes out in the background.
+
+```bash
+curl -s -X POST "$BASE/api/auth/password-reset-requests" -H "$CT" \
+  -d '{"data":{"type":"password-reset-requests","attributes":{"email":"jane@example.com"}}}'
+```
+
+```json
+{
+  "jsonapi": { "version": "1.1" },
+  "meta": { "message": "If an account exists for that email, we've sent a link to reset the password." },
+  "links": { "self": "/api/auth/password-reset-requests" }
+}
+```
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 422 | `invalid_request_body` | `email` missing or not an email |
+| 429 | `too_many_requests` | the IP's budget (see *Rate limits*) |
+
+### `POST /api/auth/password-resets`
+
+Sets a new password with the link's `token` (the front end reads it from `?token=`). The link works **once**.
+Every session of the account ends (every device signs in again), the email counts as verified (the link proved
+it), and the owner gets a *"Your password was changed"* email. **`204`**, no body.
+
+```bash
+curl -s -X POST "$BASE/api/auth/password-resets" -H "$CT" \
+  -d '{"data":{"type":"password-resets","attributes":{"token":"<from the link>","password":"N3w-Passw0rd"}}}'
+```
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 422 | `invalid_token` | `This link is invalid or has expired. Ask for a new one.` — `source.pointer` `/data/attributes/token`: unknown, already used or expired |
+| 422 | `invalid_request_body` | `password` under 8 characters or over 72 bytes, `token` missing or over 64 characters |
+| 429 | `too_many_requests` | the IP's budget (see *Rate limits*) |
+
+```json
+{
+  "jsonapi": { "version": "1.1" },
+  "errors": [
+    {
+      "status": "422", "code": "invalid_token", "title": "Unprocessable Entity",
+      "detail": "This link is invalid or has expired. Ask for a new one.",
+      "source": { "pointer": "/data/attributes/token" }
+    }
+  ]
+}
+```
 
 ### `GET /api/me`
 
@@ -1057,5 +1117,5 @@ again later logs the session out.
 
 ### Current limitations
 
-- No password reset / change, no email verification, no way to change a user's role over the API.
+- No password change, no email verification, no way to change a user's role over the API.
 - `refresh_tokens` grows by one row per refresh; nothing prunes it yet.
