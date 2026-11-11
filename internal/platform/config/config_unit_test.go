@@ -41,8 +41,36 @@ func TestLoadConfig_Env_U(t *testing.T) {
 				require.Equal(t, "text", c.LogFormat)
 				require.Equal(t, "info", c.LogLevel)
 				require.Empty(t, c.TrustedProxies, "no proxy trusted by default")
+				require.Empty(t, c.AllowedOrigins, "no origin allowed by default")
 			},
 		},
+		{
+			name:     "allowed origins read as a list, normalised to lowercase without a trailing slash",
+			override: map[string]string{"ALLOWED_ORIGINS": " https://App.Example.com/ ,http://localhost:5173"},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Equal(t, []string{"https://app.example.com", "http://localhost:5173"}, c.AllowedOrigins)
+			},
+		},
+		{name: "an allowed origin with a path is refused", override: map[string]string{"ALLOWED_ORIGINS": "https://example.com/app"},
+			wantErr: `config: ALLOWED_ORIGINS entry "https://example.com/app" is not an origin (scheme://host[:port])`},
+		{name: "an allowed origin with a query is refused", override: map[string]string{"ALLOWED_ORIGINS": "https://example.com?x=1"},
+			wantErr: `ALLOWED_ORIGINS entry "https://example.com?x=1"`},
+		{name: "an allowed origin with an empty query is refused", override: map[string]string{"ALLOWED_ORIGINS": "https://example.com?"},
+			wantErr: `ALLOWED_ORIGINS entry "https://example.com?"`},
+		{name: "an allowed origin with a fragment is refused", override: map[string]string{"ALLOWED_ORIGINS": "https://example.com#top"},
+			wantErr: `ALLOWED_ORIGINS entry "https://example.com#top"`},
+		{name: "an allowed origin with user info is refused", override: map[string]string{"ALLOWED_ORIGINS": "https://user:pw@example.com"},
+			wantErr: `ALLOWED_ORIGINS entry "https://user:pw@example.com"`},
+		{name: "an allowed origin that isn't http or https is refused", override: map[string]string{"ALLOWED_ORIGINS": "ftp://example.com"},
+			wantErr: `ALLOWED_ORIGINS entry "ftp://example.com"`},
+		{name: "an allowed origin without a scheme is refused", override: map[string]string{"ALLOWED_ORIGINS": "example.com"},
+			wantErr: `ALLOWED_ORIGINS entry "example.com"`},
+		{name: "an allowed origin without a host is refused", override: map[string]string{"ALLOWED_ORIGINS": "https://:8080"},
+			wantErr: `ALLOWED_ORIGINS entry "https://:8080"`},
+		{name: "a wildcard origin is refused", override: map[string]string{"ALLOWED_ORIGINS": "*"},
+			wantErr: `ALLOWED_ORIGINS entry "*"`},
+		{name: "an allowed origin that doesn't parse is refused", override: map[string]string{"ALLOWED_ORIGINS": "https://exa mple.com"},
+			wantErr: `ALLOWED_ORIGINS entry "https://exa mple.com"`},
 		{
 			name:     "trusted proxies read as a trimmed list of IPs and CIDRs",
 			override: map[string]string{"TRUSTED_PROXIES": " 10.0.0.1, 192.168.0.0/16 ,,2001:db8::1"},
@@ -111,6 +139,7 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			t.Setenv("LOG_FORMAT", "")
 			t.Setenv("LOG_LEVEL", "")
 			t.Setenv("TRUSTED_PROXIES", "")
+			t.Setenv("ALLOWED_ORIGINS", "")
 			for k, v := range tc.override {
 				t.Setenv(k, v)
 			}

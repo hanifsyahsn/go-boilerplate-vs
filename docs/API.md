@@ -74,6 +74,23 @@ Every response carries `Vary: Accept`. `/healthz` sits outside `/api` and skips 
 
 ---
 
+## Cross-origin requests (CORS)
+
+A browser page on another origin may call the API only when its origin is listed in `ALLOWED_ORIGINS`
+(`scheme://host[:port]`, compared ignoring case and a trailing `/`). Empty list = CORS is off: no CORS
+header at all, so only same-origin pages can read the answers.
+
+| Request | Answer |
+| --- | --- |
+| `Origin` listed | `Access-Control-Allow-Origin: <that origin>` (never `*`), `Access-Control-Allow-Credentials: true` (the auth cookies), `Access-Control-Expose-Headers: Location, Retry-After, X-Request-ID` |
+| Preflight (`OPTIONS` + `Access-Control-Request-Method`) from a listed origin | **204** with `Access-Control-Allow-Methods: GET, POST, PATCH, DELETE`, `Access-Control-Allow-Headers: Accept, Authorization, Content-Type, X-Request-ID`, `Access-Control-Max-Age: 600` |
+| Preflight from an unlisted origin | **403** `forbidden`, `detail` `This origin isn't allowed.`, `source.header` `Origin` |
+| Any other request from an unlisted origin | no CORS header (the browser won't let the page read the answer) |
+
+With the list set, every response carries `Vary: Origin` (next to `Vary: Accept` on `/api`).
+
+---
+
 ## Authentication
 
 Every endpoint except `/healthz` and `/api/auth/*` sits behind the access-token middleware. The

@@ -19,13 +19,17 @@ auth.md (`AccessTokenMiddleware`, the auth documents). What applies everywhere i
 
 ### Request flow
 
-0. Every route (404 / 405 / panic included) runs `RequestID` → `AccessLog` → recovery; the engine trusts only
+0. Every route (404 / 405 / panic included) runs `RequestID` → `AccessLog` → recovery → `CORS`; the engine trusts only
    `TRUSTED_PROXIES` for the client IP (see auth.md *Rate limits and the client IP*). `RequestID` keeps an
    incoming `X-Request-ID` matching `^[A-Za-z0-9._:-]{1,128}$`, else makes a UUID, and sets it on the response
    header (before the handlers), in the gin context (`requestid.Key`) and in the request context. `AccessLog`
    writes one `request` record (method, path, status, latency_ms, client_ip, bytes; `user_id` comes from the
    handler once auth has put the caller on the request context): warn with `cancelled=true` when the client went away (request context cancelled), else error
    for a 5xx, info for the rest.
+   `CORS(ALLOWED_ORIGINS)` is on the engine (not `/api`) so a browser preflight, an `OPTIONS` no route declares,
+   gets its 204 / 403 instead of the 405: a listed origin is echoed with credentials (never `*`), an unlisted
+   one gets no CORS header (its preflight a 403 on `source.header` `Origin`); empty list = off. `Vary` is added
+   to, never set, so `Origin` and `Accept` both stay.
 1. `middleware.JSONAPIMediaType` (every `/api` route) checks content negotiation first (406 / 415). Every public
    route but refresh / logout then passes `middleware.RateLimitByIP` (the general per-IP budget), and register /
    login a second one (the auth budget) — 429 past either.

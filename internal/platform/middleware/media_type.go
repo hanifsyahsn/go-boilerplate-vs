@@ -23,7 +23,7 @@ import (
 // Every response varies on Accept.
 func JSONAPIMediaType() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Header("Vary", "Accept")
+		c.Writer.Header().Add("Vary", "Accept") // added: CORS adds Origin
 
 		if !acceptsJSONAPI(c.GetHeader("Accept")) {
 			jsonapi.WriteAppError(c.Writer, apperror.New(apperror.CodeNotAcceptable,

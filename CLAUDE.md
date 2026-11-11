@@ -138,7 +138,7 @@ Windows".
   `server.Handlers` → `server.NewServer(...).Run(ctx)` (graceful shutdown on SIGINT/SIGTERM).
 - `internal/platform` — infrastructure: `config` (viper, `.env` optional), `logging` (`log/slog` setup: `New` /
   `Setup` / `Check` / `Fatal`, a handler adding `request_id`), `server` (`server.go` + `router.go` with the
-  `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `JSONAPIMediaType`,
+  `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `CORS`, `JSONAPIMediaType`,
   `RateLimitByIP`, `AccessTokenMiddleware`, `RequireRole`, its own sqlc for `GetUserIsActive`), `ratelimit`
   (token-bucket `Limiter` interface + in-memory `NewMemory` — see *Rate limits and the client IP*), `jwttoken` (ES256), `db/tx` (generic
   transaction helper), `db/migration`, `constant`.
@@ -199,7 +199,9 @@ Rules:
 optional `REFRESH_TOKEN_DURATION` (default `168h`), `UNTRUSTED_SESSION_DURATION` (default `168h`), `COOKIE_SECURE` (default `true`), `COOKIE_DOMAIN`,
 `LOG_FORMAT` (default `text`; `json` in production), `LOG_LEVEL` (default `info`) — those two must still
 be values `logging.Check` accepts — and `TRUSTED_PROXIES` (comma-separated IPs / CIDRs, default none; each entry
-is checked, see *Rate limits and the client IP*). Durations are Go duration strings (`15m`).
+is checked, see *Rate limits and the client IP*) and `ALLOWED_ORIGINS` (comma-separated `scheme://host[:port]`,
+default none; checked in `Validate`, stored normalised — lowercase, no trailing `/`; one list for CORS and the
+origin guard, empty = both off with a startup warning). Durations are Go duration strings (`15m`).
 See `.env.example`.
 
 ## Testing conventions

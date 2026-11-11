@@ -56,6 +56,9 @@ type Security struct {
 	// generous enough for an office NAT; refresh and logout are left out
 	// (they run on every open tab). Required.
 	PublicIPLimit ratelimit.Limiter
+	// AllowedOrigins (ALLOWED_ORIGINS, normalised) are the browser origins
+	// CORS answers. Empty turns CORS off.
+	AllowedOrigins []string
 }
 
 // The limiters' key prefixes: one bucket per name and client IP.
@@ -88,8 +91,9 @@ func GinMode(environment string) string {
 //	/admin   AccessTokenMiddleware + RequireRole(admin)
 //
 // Every route (404 / 405 / panic included) runs RequestID → AccessLog →
-// recovery first, so every response carries X-Request-ID and gets one access
-// log record.
+// recovery → CORS first, so every response carries X-Request-ID and gets one
+// access log record, and a browser preflight (an OPTIONS no route declares)
+// is answered by CORS instead of a 405.
 //
 // There's also an unauthenticated GET /healthz liveness probe that reports the build
 // version. Unknown routes (404), a wrong method (405) and a panic (500) answer
@@ -119,7 +123,7 @@ func NewRouter(version string, tokenMaker jwttoken.M, userStatus middleware.User
 		jsonapi.WriteError(c.Writer, apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
 			fmt.Errorf("panic: %v", recovered))
 		c.Abort()
-	}))
+	}), middleware.CORS(sec.AllowedOrigins))
 	r.HandleMethodNotAllowed = true
 	r.NoRoute(func(c *gin.Context) {
 		jsonapi.WriteError(c.Writer, apperror.CodeNotFound, "That resource doesn't exist.", nil)

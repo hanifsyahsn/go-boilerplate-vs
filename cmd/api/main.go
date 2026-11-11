@@ -77,6 +77,9 @@ func main() {
 	}
 
 	slog.InfoContext(ctx, "starting go_boilerplate_vs", "version", Version, "environment", conf.Environment)
+	if len(conf.AllowedOrigins) == 0 {
+		slog.WarnContext(ctx, "ALLOWED_ORIGINS is empty: CORS and the origin guard are off")
+	}
 
 	conn, err := sql.Open(conf.DBDriver, conf.DBSource)
 	if err != nil {
@@ -149,6 +152,7 @@ func main() {
 		TrustedProxies: conf.TrustedProxies,
 		AuthIPLimit:    ratelimit.NewMemory(authIPRate),
 		PublicIPLimit:  ratelimit.NewMemory(publicIPRate),
+		AllowedOrigins: conf.AllowedOrigins,
 	})
 	if err != nil {
 		logging.Fatal("build server failed", "err", err)

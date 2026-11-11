@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -52,6 +53,11 @@ type Config struct {
 	// empty trusts no proxy, so the client IP is the connection's address.
 	// Behind a proxy, list it — otherwise every client shares its IP.
 	TrustedProxies []string `mapstructure:"TRUSTED_PROXIES"`
+	// AllowedOrigins (ALLOWED_ORIGINS) are the browser origins allowed to call
+	// the API with credentials: one list for CORS and the origin guard.
+	// Optional, comma separated; each entry is scheme://host[:port], stored
+	// normalised (lowercase, no trailing /). Empty turns both off.
+	AllowedOrigins []string `mapstructure:"ALLOWED_ORIGINS"`
 }
 
 // DefaultRefreshTokenDuration is REFRESH_TOKEN_DURATION when unset: 7 days.
@@ -131,10 +137,14 @@ func LoadConfig(path string) (Config, error) {
 		LogFormat:                getStringEnv(v, "LOG_FORMAT", DefaultLogFormat),
 		LogLevel:                 getStringEnv(v, "LOG_LEVEL", DefaultLogLevel),
 		TrustedProxies:           getListEnv(v, "TRUSTED_PROXIES"),
+		AllowedOrigins:           getListEnv(v, "ALLOWED_ORIGINS"),
 	}
 
 	if err = config.Validate(); err != nil {
 		return Config{}, err
+	}
+	for i, origin := range config.AllowedOrigins {
+		config.AllowedOrigins[i], _ = NormalizeOrigin(origin) // Validate checked every entry
 	}
 
 	return config, nil
@@ -190,7 +200,9 @@ func getBoolEnv(v *viper.Viper, key string, defaultVal bool) (bool, error) {
 }
 
 // Validate enforces every required field. Optional knobs
-// (REFRESH_TOKEN_DURATION, UNTRUSTED_SESSION_DURATION, COOKIE_*, LOG_*, TRUSTED_PROXIES) get their defaults in LoadConfig;
+// (REFRESH_TOKEN_DURATION, UNTRUSTED_SESSION_DURATION, COOKIE_*, LOG_*, TRUSTED_PROXIES,
+// ALLOWED_ORIGINS) get their defaults in LoadConfig, which also normalises
+// ALLOWED_ORIGINS after this check;
 // LOG_FORMAT / LOG_LEVEL must still be values logging accepts, and each
 // TRUSTED_PROXIES entry an IP or a CIDR.
 func (c Config) Validate() error {
@@ -223,7 +235,31 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("TRUSTED_PROXIES: %q is not an IP or a CIDR", proxy))
 		}
 	}
+	for _, origin := range c.AllowedOrigins {
+		if _, err := NormalizeOrigin(origin); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	return errors.Join(errs...)
+}
+
+// NormalizeOrigin checks that s is a browser origin, scheme://host[:port]
+// with scheme http or https and nothing after the host but an optional /, and
+// returns it lowercased without the trailing /. "*" is refused: the API sends
+// credentials, which a wildcard origin can't carry.
+func NormalizeOrigin(s string) (string, error) {
+	notOrigin := fmt.Errorf("config: ALLOWED_ORIGINS entry %q is not an origin (scheme://host[:port])", s)
+	u, err := url.Parse(s)
+	if err != nil {
+		return "", notOrigin
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if (scheme != "http" && scheme != "https") || u.Hostname() == "" || u.User != nil ||
+		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
+		strings.Contains(s, "#") || u.Opaque != "" {
+		return "", notOrigin
+	}
+	return scheme + "://" + strings.ToLower(u.Host), nil
 }
 
 // validProxy reports whether s is an IP or a CIDR, the forms gin's

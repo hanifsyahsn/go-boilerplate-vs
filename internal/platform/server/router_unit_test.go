@@ -255,6 +255,47 @@ func TestNewRouter_Security_U(t *testing.T) {
 	}
 }
 
+// TestNewRouter_CORS_U pins where CORS sits: on the engine, so a browser
+// preflight on an /api route (which declares no OPTIONS) is answered by CORS,
+// not by the 405 handler.
+func TestNewRouter_CORS_U(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	testCases := []struct {
+		name       string
+		origin     string
+		wantCode   int
+		wantOrigin string
+	}{
+		{name: "a preflight on login from a listed origin reaches CORS (204, not 405)",
+			origin: "https://app.example.com", wantCode: http.StatusNoContent, wantOrigin: "https://app.example.com"},
+		{name: "a preflight on login from an unlisted origin is CORS's 403, not 405",
+			origin: "https://evil.example", wantCode: http.StatusForbidden},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			r, err := NewRouter("v", jwttoken.NewMockM(ctrl), middlewaresqlc.NewMockQuerier(ctrl), newMocks(ctrl).handlers(),
+				Security{
+					AuthIPLimit:    ratelimit.NewMemory(ratelimit.Rate{Burst: 10, Per: time.Minute}),
+					PublicIPLimit:  ratelimit.NewMemory(ratelimit.Rate{Burst: 10, Per: time.Minute}),
+					AllowedOrigins: []string{"https://app.example.com"},
+				})
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodOptions, "/api/auth/login", nil)
+			req.Header.Set("Origin", tc.origin)
+			req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, tc.wantCode, w.Code, w.Body.String())
+			require.Equal(t, tc.wantOrigin, w.Header().Get("Access-Control-Allow-Origin"))
+			require.NotEmpty(t, w.Header().Get("X-Request-ID"), "CORS runs after RequestID")
+		})
+	}
+}
+
 func TestNewRouter_SecurityErrors_U(t *testing.T) {
 	testCases := []struct {
 		name    string
