@@ -36,6 +36,7 @@ import (
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/server"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/utility"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/validation"
 
 	_ "github.com/lib/pq"
@@ -95,6 +96,14 @@ func main() {
 	if err = conn.PingContext(ctx); err != nil {
 		logging.Fatal("ping db failed", "err", err)
 	}
+
+	// Background work (workers, emails, the activity recorder) lives past the
+	// signal: bgCtx is cancelled only after the server stopped (below), and
+	// main waits for bg before the DB pool closes.
+	bgCtx, stopBg := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopBg()
+	var bg utility.Group
+	_ = bgCtx // the first worker (decisions 0005, 0007, 0008, 0011) starts with bg.Go(bgCtx, ...)
 
 	if err = validation.RegisterGinValidators(); err != nil {
 		logging.Fatal("register validators failed", "err", err)
@@ -157,7 +166,13 @@ func main() {
 	if err != nil {
 		logging.Fatal("build server failed", "err", err)
 	}
-	if err = srv.Run(ctx); err != nil {
-		logging.Fatal("server run failed", "err", err)
+	runErr := srv.Run(ctx) // returns once in-flight requests are drained
+	// Only now: a request that finished during the drain has queued its
+	// background work, which gets the cancel and flushes before the DB pool
+	// (deferred above) closes.
+	stopBg()
+	bg.Wait()
+	if runErr != nil {
+		logging.Fatal("server run failed", "err", runErr)
 	}
 }

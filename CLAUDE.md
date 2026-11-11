@@ -134,8 +134,9 @@ Windows".
 
 ### Package layout
 
-- `cmd/api` — entrypoint: config → db pool → validators → token maker → one service/handler per slice →
-  `server.Handlers` → `server.NewServer(...).Run(ctx)` (graceful shutdown on SIGINT/SIGTERM).
+- `cmd/api` — entrypoint: config → db pool → background group (`bgCtx`, `bg`) → validators → token maker → one
+  service/handler per slice → `server.Handlers` → `server.NewServer(...).Run(ctx)` (graceful shutdown on
+  SIGINT/SIGTERM) → `stopBg()` → `bg.Wait()` → the DB pool closes (see *Logging*).
 - `internal/platform` — infrastructure: `config` (viper, `.env` optional), `logging` (`log/slog` setup: `New` /
   `Setup` / `Check` / `Fatal`, a handler adding `request_id`), `server` (`server.go` + `router.go` with the
   `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `CORS`, `OriginGuard`, `JSONAPIMediaType`,
@@ -147,7 +148,8 @@ Windows".
   parser), `handlerutil` (`ParseQuery` / `BindResource` / `ParamID` / `WriteData` / `WriteMeta` /
   `WriteError`), `validation` (`notblank`, `rfc3339`, `maxbytes`, `RegisterGinValidators`), `pagination`, `password`
   (bcrypt), `enum` (`Role`: `user` / `admin`), `requestid` (`Header`, `Key`, `With` / `FromContext` / `Detach`),
-  `dto`, `constant` (context keys, cookie names), `utility` (`SafeGo` / `SafeGoContext`, …), `testhelper`.
+  `dto`, `constant` (context keys, cookie names), `utility` (`SafeGo` / `SafeGoContext`, `Group` + `GoFunc` for
+  background work main waits for at shutdown, …), `testhelper`.
 - `internal/features/<domain>/<action>` — the vertical slices: `auth/{register,login,refresh,logout}`, `me`,
   `note/{create,list,detail,update,delete}`, `admin/user`. `<domain>/shared` holds what more than one slice of
   that domain needs (`note/shared`: the `NoteResource`, the include policy, the ownership helpers

@@ -34,6 +34,12 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (*Request
   a cancellation would read as a server error. `RequestContext` falls back to `context.Background()` when
   `c.Request` is nil (`gin.CreateTestContext`).
 - Startup failures: `logging.Fatal("load config failed", "err", err)`. A `TestMain` may use `log.Fatalf`.
+- **Work that must finish before shutdown** (a worker, an email send, the activity recorder) runs in main's
+  `utility.Group` (`bg.Go(ctx, fn)` — `SafeGoContext` underneath), never a bare `SafeGoContext`. `main` cancels
+  `bgCtx` only **after** `srv.Run` returned (requests drained), then `bg.Wait()`, then the DB pool closes — so the
+  last requests' work is flushed, not lost. A service that starts such work takes a `utility.GoFunc` (main passes
+  `bg.Go`; tests pass one that runs `fn` inline) and hands it `requestid.Detach(ctx)`. A worker returns when its
+  ctx is done, after flushing.
 - A goroutine that outlives the request: `utility.SafeGoContext(requestid.Detach(ctx), fn)` — `Detach` keeps
   the request id and the caller, so its logs (and a recovered panic) carry both. **Never `context.WithoutCancel(c)` on a `*gin.Context`**: gin reuses it for the next
   request. Anything async (an emailer, …) takes a ctx for the same reason.
