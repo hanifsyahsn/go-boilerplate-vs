@@ -56,7 +56,8 @@ func (maker *MakerES256) CreateToken(user internalshareddto.User, accessTokenDur
 	}
 	refreshToken, err := jwt.NewWithClaims(jwt.SigningMethodES256, refreshClaims).SignedString(maker.privateKey)
 	if err != nil {
-		// only fails with a nil / invalid private key
+		// defensive: the same key just signed the access token, so a key that
+		// isn't P-256 already failed above
 		return Pair{}, fmt.Errorf("sign refresh token: %w", err)
 	}
 
@@ -87,7 +88,8 @@ func (maker *MakerES256) GenerateAccessToken(user internalshareddto.User, access
 
 	token, err := jwt.NewWithClaims(jwt.SigningMethodES256, claims).SignedString(maker.privateKey)
 	if err != nil {
-		// only fails with a nil / invalid private key
+		// a key that isn't P-256 (a wrong key file); a nil key would panic in
+		// the library, but main stops when the key doesn't load
 		return "", time.Time{}, fmt.Errorf("sign access token: %w", err)
 	}
 	return token, exp, nil

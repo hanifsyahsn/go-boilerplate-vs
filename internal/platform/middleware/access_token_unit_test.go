@@ -60,6 +60,16 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 			wantCode: http.StatusUnauthorized,
 		},
 		{
+			// VerifyAccessToken checks sub; this pins the middleware's own guard
+			// in case a Maker ever returns claims without one: 401, no DB read.
+			name:   "verified claims without a user id are a 401 and the DB isn't read",
+			header: "Bearer good",
+			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
+				m.EXPECT().VerifyAccessToken("good").Return(jwt.MapClaims{"role": "admin"}, nil)
+			},
+			wantCode: http.StatusUnauthorized,
+		},
+		{
 			name:   "a deactivated user",
 			header: "Bearer good",
 			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
