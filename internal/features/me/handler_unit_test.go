@@ -25,10 +25,10 @@ func TestHandler_Get_U(t *testing.T) {
 		{
 			name: "the caller's profile as a users resource",
 			stub: func(s *MockS) {
-				s.EXPECT().Get(gomock.Any(), int64(7)).Return(MeResource{ID: "7", Name: "Jane", Role: "admin"}, nil)
+				s.EXPECT().Get(gomock.Any(), int64(7)).Return(MeResource{ID: "7", Name: "Jane", Role: "admin", EmailVerified: true}, nil)
 			},
 			wantCode:   http.StatusOK,
-			wantInBody: []string{`"type":"users"`, `"id":"7"`, `"role":"admin"`, `"links":{"self":"/api/me"}`},
+			wantInBody: []string{`"type":"users"`, `"id":"7"`, `"role":"admin"`, `"email_verified":true`, `"links":{"self":"/api/me"}`},
 		},
 		{
 			name:  "a sparse fieldset",

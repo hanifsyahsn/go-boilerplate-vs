@@ -11,4 +11,7 @@ type MeResource struct {
 	Email     string    `json:"email"`
 	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"created_at"`
+	// EmailVerified: the account's email link was opened (or a reset link
+	// proved the address). Login isn't blocked without it.
+	EmailVerified bool `json:"email_verified"`
 }

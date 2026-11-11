@@ -1,6 +1,6 @@
 # 0007 — Forgot / change password, email verification, `Mailer`
 
-Status: part built (2026-11-11): the mailer, one-time tokens and forgot and change password; email verification not yet. Source: an implementation in a derivative.
+Status: built (2026-11-11). Source: an implementation in a derivative.
 
 ## Decision
 - Forgot password: email a one-time link (1 h), then set a new password (revokes the user's sessions).
@@ -33,3 +33,11 @@ A prerequisite for any service with its own local users.
 - `POST /api/auth/password-changes` (authed): the current password is required (422 `wrong_password`), wrong
   ones capped at 5 / 15 min per user (429, taken before the compare); the new password and the end of every
   **other** session in one transaction → 204, the caller stays signed in; a notice email follows.
+
+## As built (part 4: email verification)
+- Register issues a 24 h `VERIFY_EMAIL` token in its transaction and emails the link after commit; login isn't
+  blocked for an unverified email; `GET /api/me` carries `email_verified`.
+- `POST /api/auth/email-verifications` (public, auth per-IP group): consume → verified → 204; else the same 422
+  `invalid_token`.
+- `POST /api/me/email-verification-requests` (authed, body optional): 409 `email_already_verified`, 3 / h per
+  user (429), else a new link → 202.

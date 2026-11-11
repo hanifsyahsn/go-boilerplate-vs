@@ -108,6 +108,14 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   current password → 422 `wrong_password` on `/data/attributes/current_password`, the right one `Reset`s the count
   (a failed reset only logged); then in one tx the new hash + `RevokeUserSessions(password_changed, keep = the
   caller's sid)` → 204, the caller stays signed in; then the notice (log label `PASSWORD_CHANGED`).
+- **Email verification** (boilerplate shape): register issues a `VERIFY_EMAIL` token (24 h) in its insert tx
+  and emails the link after commit; login is **not** blocked for an unverified email, `GET /api/me` carries
+  `email_verified`. `POST /api/auth/email-verifications` (`auth/emailverification`, `limited` group,
+  `email-verifications`, `token`): consume → `email_verified_at = COALESCE(…, now())` → 204, else the same 422
+  `invalid_token`. `POST /api/me/email-verification-requests` (`auth/emailverificationrequest`, authed, body
+  optional): verified → 409 `email_already_verified`, then the per-user limit (3 / h, key `verify:` + id → 429),
+  then issue + send → 202 meta "We've sent a new verification link.". A derivative with its own registration
+  flow keeps its domain flow and reuses `onetimetoken`, `auth_tokens`, `ConsumeAuthToken`, `mailer` and the 422.
 - **`mailer`**: `NewSMTP` refuses to send without TLS (465 implicit, else STARTTLS required, certificate verified),
   15 s per email, a header with CR / LF refused; `NewLog` (development, no `SMTP_HOST`) logs to + subject at info,
   the body only at debug; `mailer.Fake` records messages for tests.

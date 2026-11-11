@@ -23,8 +23,10 @@ tokens), a personal **notes** CRUD, and a small admin user directory. The whole 
 | `POST` | `/api/auth/logout` | refresh token | [Log out](#post-apiauthlogout): revoke the session, clear the cookies |
 | `POST` | `/api/auth/password-reset-requests` | — | [Forgot password](#post-apiauthpassword-reset-requests): email a reset link |
 | `POST` | `/api/auth/password-resets` | — | [Set a new password](#post-apiauthpassword-resets) from the link |
+| `POST` | `/api/auth/email-verifications` | — | [Verify my email](#post-apiauthemail-verifications) from the link |
 | `POST` | `/api/auth/password-changes` | user | [Change my password](#post-apiauthpassword-changes) |
 | `GET` | `/api/me` | user | [The caller's own account](#get-apime) |
+| `POST` | `/api/me/email-verification-requests` | user | [Send me a new verification link](#post-apimeemail-verification-requests) |
 | `GET` | `/api/me/sessions` | user | [My signed-in devices](#get-apimesessions) |
 | `DELETE` | `/api/me/sessions/{id}` | user | [Sign a device out](#delete-apimesessionsid) |
 | `POST` | `/api/notes` | user | [Create a note](#1-create-note) |
@@ -187,7 +189,7 @@ it comes back evenly over the period):
 | Limit | Applies to | Past it |
 | --- | --- | --- |
 | 300 requests / 1 min **per client IP** (IPv6: per /64) | every public route except refresh and logout (a flood guard; refresh and logout are never IP-limited, every open tab calls them) | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
-| 300 requests / 15 min **per client IP** (IPv6: per /64) | register, login, forgot password and reset password together, on top of the one above | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
+| 300 requests / 15 min **per client IP** (IPv6: per /64) | register, login, forgot password, reset password and email verification together, on top of the one above | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
 | 5 **failed** logins / 15 min **per email** (then one more every 3 min) | login: an unknown email and a wrong password both count; a successful login resets it | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login for that email, the right password too, until a try comes back |
 | 100 **failed** logins / 6 h **per client IP**, across every email (IPv6: per /64; then one more every 3.6 min) | login: an unknown email and a wrong password both count; a successful login doesn't count (but doesn't clear the IP's earlier failures); a login refused for its email doesn't count either | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login from that IP, the right password too, until a try comes back |
 
@@ -438,6 +440,40 @@ curl -s -X POST "$BASE/api/auth/password-changes" -H "$CT" -H "Authorization: Be
 | 422 | `wrong_password` | `The current password is incorrect.` — `source.pointer` `/data/attributes/current_password` |
 | 422 | `invalid_request_body` | a password missing, the new one under 8 characters, either over 72 bytes |
 | 429 | `too_many_requests` | `Too many wrong attempts. Please wait a few minutes and try again.` — 5 wrong current passwords / 15 min per account (then one more every 3 min), the right one too until a try comes back |
+
+### `POST /api/auth/email-verifications`
+
+Registering emails a link to `APP_BASE_URL/verify-email?token=…` (valid **24 hours**). The front end posts its
+`token` here; the account's email then counts as verified (`email_verified` in [`GET /api/me`](#get-apime)).
+An unverified email doesn't block login. The link works **once**. **`204`**, no body.
+
+```bash
+curl -s -X POST "$BASE/api/auth/email-verifications" -H "$CT" \
+  -d '{"data":{"type":"email-verifications","attributes":{"token":"<from the link>"}}}'
+```
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 422 | `invalid_token` | `This link is invalid or has expired. Ask for a new one.` — `source.pointer` `/data/attributes/token` |
+| 422 | `invalid_request_body` | `token` missing or over 64 characters |
+
+### `POST /api/me/email-verification-requests`
+
+Emails the caller a new verification link (the earlier ones stop working). No body is needed; an empty
+`{"data":{"type":"email-verification-requests"}}` is accepted. **`202`**:
+
+```json
+{
+  "jsonapi": { "version": "1.1" },
+  "meta": { "message": "We've sent a new verification link." },
+  "links": { "self": "/api/me/email-verification-requests" }
+}
+```
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 409 | `email_already_verified` | `Your email is already verified.` |
+| 429 | `too_many_requests` | `Too many attempts. Please wait a few minutes and try again.` — 3 links / 1 h per account |
 
 ### `GET /api/me`
 
@@ -1134,5 +1170,5 @@ again later logs the session out.
 
 ### Current limitations
 
-- No email verification, no way to change a user's role over the API.
+- No way to change a user's role over the API.
 - `refresh_tokens` grows by one row per refresh; nothing prunes it yet.

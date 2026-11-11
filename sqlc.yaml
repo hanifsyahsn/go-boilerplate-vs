@@ -234,3 +234,29 @@ sql:
         emit_exact_table_names: false
         emit_empty_slices: true
         omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/auth/emailverification/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/auth/emailverification/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true
+  - engine: "postgresql"
+    schema: "internal/platform/db/migration"
+    queries: "internal/features/auth/emailverificationrequest/query"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/features/auth/emailverificationrequest/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        omit_unused_structs: true

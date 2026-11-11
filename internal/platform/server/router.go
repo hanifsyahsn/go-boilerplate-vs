@@ -7,6 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	adminuser "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user"
+	authemailverification "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/emailverification"
+	authemailverificationrequest "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/emailverificationrequest"
 	authlogin "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login"
 	authlogout "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout"
 	authpasswordchange "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordchange"
@@ -38,9 +40,11 @@ type Handlers struct {
 	Refresh  authrefresh.H
 	Logout   authlogout.H
 
-	PasswordResetRequest authpasswordresetrequest.H
-	PasswordReset        authpasswordreset.H
-	PasswordChange       authpasswordchange.H
+	PasswordResetRequest     authpasswordresetrequest.H
+	PasswordReset            authpasswordreset.H
+	PasswordChange           authpasswordchange.H
+	EmailVerification        authemailverification.H
+	EmailVerificationRequest authemailverificationrequest.H
 
 	Me me.H
 
@@ -175,6 +179,7 @@ func NewRouter(version string, tokenMaker jwttoken.M, accessStatus middleware.Ac
 		authlogin.Route(limited, h.Login)
 		authpasswordresetrequest.Route(limited, h.PasswordResetRequest)
 		authpasswordreset.Route(limited, h.PasswordReset)
+		authemailverification.Route(limited, h.EmailVerification)
 	}
 
 	authed := api.Group("")
@@ -182,6 +187,7 @@ func NewRouter(version string, tokenMaker jwttoken.M, accessStatus middleware.Ac
 	{
 		me.Route(authed, h.Me)
 		authpasswordchange.Route(authed, h.PasswordChange)
+		authemailverificationrequest.Route(authed, h.EmailVerificationRequest)
 		sessionlist.Route(authed, h.ListSessions)
 		sessionrevoke.Route(authed, h.RevokeSession)
 		createnote.Route(authed, h.CreateNote)

@@ -46,5 +46,7 @@ func (s *service) Get(ctx context.Context, userID int64) (MeResource, error) {
 		Email:     r.Email,
 		Role:      r.Role,
 		CreatedAt: r.CreatedAt,
+
+		EmailVerified: r.EmailVerified,
 	}, nil
 }

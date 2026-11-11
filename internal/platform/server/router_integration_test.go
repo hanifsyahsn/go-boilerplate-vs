@@ -17,6 +17,9 @@ import (
 	"github.com/gin-gonic/gin"
 	adminuser "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user"
 	adminusersqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user/sqlc"
+	authemailverification "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/emailverification"
+	authemailverificationrequest "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/emailverificationrequest"
+	authemailverificationrequestsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/emailverificationrequest/sqlc"
 	authlogin "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login"
 	authloginsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login/sqlc"
 	authlogout "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout"
@@ -28,7 +31,6 @@ import (
 	authpasswordresetrequestsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest/sqlc"
 	authrefresh "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/refresh"
 	authregister "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register"
-	authregistersqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register/sqlc"
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/me"
@@ -77,7 +79,7 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) (*gin.Engine, *mailer.Fake) 
 		Go: func(ctx context.Context, fn func(context.Context)) { fn(ctx) }}
 
 	handlers := Handlers{
-		Register: authregister.NewHandler(authregister.NewService(authregistersqlc.New(db))),
+		Register: authregister.NewHandler(authregister.NewService(authregister.NewStore(db), emailer)),
 		Login: authlogin.NewHandler(
 			authlogin.NewService(authloginsqlc.New(db), authSharedQuerier, tokenMaker, accessTTL, refreshTTL, untrustedTTL,
 				authlogin.Limiters{
@@ -92,6 +94,10 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) (*gin.Engine, *mailer.Fake) 
 		),
 		PasswordResetRequest: authpasswordresetrequest.NewHandler(authpasswordresetrequest.NewService(
 			authpasswordresetrequestsqlc.New(db), authpasswordresetrequest.NewStore(db),
+			ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}), emailer)),
+		EmailVerification: authemailverification.NewHandler(authemailverification.NewService(authemailverification.NewStore(db))),
+		EmailVerificationRequest: authemailverificationrequest.NewHandler(authemailverificationrequest.NewService(
+			authemailverificationrequestsqlc.New(db), authemailverificationrequest.NewStore(db),
 			ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}), emailer)),
 		PasswordChange: authpasswordchange.NewHandler(authpasswordchange.NewService(authpasswordchangesqlc.New(db),
 			authpasswordchange.NewStore(db), ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}), emailer)),
@@ -388,11 +394,12 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 			run: func(t *testing.T, c apiClient) {
 				testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "jane@example.com"})
 				oldAccess := c.login("jane@example.com")
+				before := len(mail.Sent()) // the mailer is shared by every case
 
 				res := c.do(http.MethodPost, "/api/auth/password-reset-requests",
 					`{"data":{"type":"password-reset-requests","attributes":{"email":"JANE@example.com"}}}`, "")
 				require.Equal(t, http.StatusAccepted, res.Code, "request: %v", res.Body)
-				sent := mail.Sent()
+				sent := mail.Sent()[before:]
 				require.Len(t, sent, 1)
 				_, afterToken, _ := strings.Cut(sent[0].Text, "token=")
 				token, _, _ := strings.Cut(afterToken, "\n")
@@ -400,7 +407,7 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 				reset := `{"data":{"type":"password-resets","attributes":{"token":"` + token + `","password":"N3w-Passw0rd"}}}`
 				res = c.do(http.MethodPost, "/api/auth/password-resets", reset, "")
 				require.Equal(t, http.StatusNoContent, res.Code, "reset: %v", res.Body)
-				require.Equal(t, "Your password was changed", mail.Sent()[1].Subject)
+				require.Equal(t, "Your password was changed", mail.Sent()[before+1].Subject)
 
 				res = c.do(http.MethodGet, "/api/me", "", oldAccess)
 				require.Equal(t, http.StatusUnauthorized, res.Code, "every session ended")
@@ -434,6 +441,44 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 					`{"data":{"type":"password-changes","attributes":{"current_password":"wrong-one","password":"An0ther-Passw0rd"}}}`, laptop)
 				require.Equal(t, http.StatusUnprocessableEntity, res.Code)
 				require.Equal(t, "The current password is incorrect.", errorDetail(t, res))
+			},
+		},
+		{
+			name: "email verification: register emails a link, opening it verifies the email (once); a resend after that is a 409",
+			run: func(t *testing.T, c apiClient) {
+				before := len(mail.Sent()) // the mailer is shared by every case
+				res := c.do(http.MethodPost, "/api/auth/register",
+					`{"data":{"type":"users","attributes":{"name":"Jane","email":"verify@example.com","password":"`+testhelper.DefaultPassword+`"}}}`, "")
+				require.Equal(t, http.StatusCreated, res.Code, "register: %v", res.Body)
+				sent := mail.Sent()[before:]
+				require.Len(t, sent, 1)
+				require.Equal(t, "Verify your email", sent[0].Subject)
+				_, token, _ := strings.Cut(sent[0].Text, "token=")
+
+				access := c.login("verify@example.com")
+				require.Equal(t, false, dataAttr(t, c.do(http.MethodGet, "/api/me", "", access), "email_verified"),
+					"an unverified email doesn't block login")
+
+				res = c.do(http.MethodPost, "/api/me/email-verification-requests", "", access)
+				require.Equal(t, http.StatusAccepted, res.Code, "resend: %v", res.Body)
+				require.Equal(t, "We've sent a new verification link.", res.Body["meta"].(map[string]any)["message"])
+				resent := mail.Sent()[before+1]
+				_, newToken, _ := strings.Cut(resent.Text, "token=")
+
+				verify := func(tok string) apiResponse {
+					return c.do(http.MethodPost, "/api/auth/email-verifications",
+						`{"data":{"type":"email-verifications","attributes":{"token":"`+tok+`"}}}`, "")
+				}
+				res = verify(token)
+				require.Equal(t, http.StatusUnprocessableEntity, res.Code, "a resend spends the earlier link")
+				require.Equal(t, http.StatusNoContent, verify(newToken).Code)
+				require.Equal(t, true, dataAttr(t, c.do(http.MethodGet, "/api/me", "", access), "email_verified"))
+				require.Equal(t, http.StatusUnprocessableEntity, verify(newToken).Code, "a link works once")
+
+				res = c.do(http.MethodPost, "/api/me/email-verification-requests",
+					`{"data":{"type":"email-verification-requests"}}`, access)
+				require.Equal(t, http.StatusConflict, res.Code)
+				require.Equal(t, "Your email is already verified.", errorDetail(t, res))
 			},
 		},
 		{

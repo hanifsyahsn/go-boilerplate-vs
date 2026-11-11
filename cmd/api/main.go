@@ -12,6 +12,9 @@ import (
 	"github.com/gin-gonic/gin"
 	adminusersvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user"
 	adminusersqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user/sqlc"
+	authemailverificationsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/emailverification"
+	authemailverificationrequestsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/emailverificationrequest"
+	authemailverificationrequestsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/emailverificationrequest/sqlc"
 	authloginsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login"
 	authloginsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login/sqlc"
 	authlogoutsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout"
@@ -23,7 +26,6 @@ import (
 	authpasswordresetrequestsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest/sqlc"
 	authrefreshsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/refresh"
 	authregistersvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register"
-	authregistersqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/register/sqlc"
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	mesvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/me"
@@ -80,6 +82,8 @@ var (
 	// access token can't brute-force the password): 5 at once, then one every
 	// 3 minutes.
 	passwordChangeRate = ratelimit.Rate{Burst: 5, Per: 15 * time.Minute}
+	// verifyResendRate caps new verification links per user.
+	verifyResendRate = ratelimit.Rate{Burst: 3, Per: time.Hour}
 )
 
 func main() {
@@ -156,7 +160,7 @@ func main() {
 	// Wiring per slice: sqlc.New(conn) → NewStore(conn) (tx slices only) →
 	// NewService(...) → NewHandler(service).
 	handlers := server.Handlers{
-		Register: authregistersvc.NewHandler(authregistersvc.NewService(authregistersqlc.New(conn))),
+		Register: authregistersvc.NewHandler(authregistersvc.NewService(authregistersvc.NewStore(conn), emailer)),
 		Login: authloginsvc.NewHandler(
 			authloginsvc.NewService(authloginsqlc.New(conn), authSharedQuerier, tokenMaker,
 				conf.AccessTokenDuration, conf.RefreshTokenDuration, conf.UntrustedSessionDuration,
@@ -174,6 +178,10 @@ func main() {
 		PasswordResetRequest: authpasswordresetrequestsvc.NewHandler(authpasswordresetrequestsvc.NewService(
 			authpasswordresetrequestsqlc.New(conn), authpasswordresetrequestsvc.NewStore(conn),
 			ratelimit.NewMemory(resetRecipientRate), emailer)),
+		EmailVerification: authemailverificationsvc.NewHandler(authemailverificationsvc.NewService(authemailverificationsvc.NewStore(conn))),
+		EmailVerificationRequest: authemailverificationrequestsvc.NewHandler(authemailverificationrequestsvc.NewService(
+			authemailverificationrequestsqlc.New(conn), authemailverificationrequestsvc.NewStore(conn),
+			ratelimit.NewMemory(verifyResendRate), emailer)),
 		PasswordChange: authpasswordchangesvc.NewHandler(authpasswordchangesvc.NewService(authpasswordchangesqlc.New(conn),
 			authpasswordchangesvc.NewStore(conn), ratelimit.NewMemory(passwordChangeRate), emailer)),
 		PasswordReset: authpasswordresetsvc.NewHandler(authpasswordresetsvc.NewService(authpasswordresetsvc.NewStore(conn), emailer)),

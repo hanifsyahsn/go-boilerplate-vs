@@ -14,7 +14,7 @@ Statuses: **built** = implemented in the boilerplate · **accepted** = agreed, n
 | [0004](0004-csrf-origin-guard.md) | CSRF `OriginGuard` | built |
 | [0005](0005-cleanup-worker.md) | Worker that deletes expired rows | part built (background group + shutdown order) |
 | [0006](0006-sessions-devices.md) | Signed-in devices list + remote sign-out | built |
-| [0007](0007-password-and-email-flows.md) | Forgot / change password, email verification, `Mailer` | part built (mailer, one-time tokens, forgot / change password) |
+| [0007](0007-password-and-email-flows.md) | Forgot / change password, email verification, `Mailer` | built |
 | [0008](0008-api-activity-log.md) | API activity log | accepted |
 | [0009](0009-cors.md) | CORS allowlist | built |
 | [0010](0010-api-key.md) | API-key middleware for service-to-service calls | accepted |

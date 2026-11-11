@@ -28,6 +28,11 @@ func TestService_Get_U(t *testing.T) {
 			row:  sqlc.GetMeRow{ID: userID, Name: "Jane", Email: "jane@example.com", Role: "admin", CreatedAt: now},
 			want: MeResource{ID: "7", Name: "Jane", Email: "jane@example.com", Role: "admin", CreatedAt: now},
 		},
+		{
+			name: "a verified email reads email_verified",
+			row:  sqlc.GetMeRow{ID: userID, Name: "Jane", Role: "user", CreatedAt: now, EmailVerified: true},
+			want: MeResource{ID: "7", Name: "Jane", Role: "user", CreatedAt: now, EmailVerified: true},
+		},
 		{name: "a missing user is a 404", readErr: sql.ErrNoRows, wantCode: apperror.CodeNotFound},
 		{name: "a read error is a 500", readErr: sql.ErrConnDone, wantCode: apperror.CodeInternal},
 	}

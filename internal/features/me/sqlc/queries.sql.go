@@ -11,17 +11,18 @@ import (
 )
 
 const getMe = `-- name: GetMe :one
-SELECT id, name, email, role, created_at
+SELECT id, name, email, role, created_at, (email_verified_at IS NOT NULL)::boolean AS email_verified
 FROM users
 WHERE id = $1
 `
 
 type GetMeRow struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            int64     `json:"id"`
+	Name          string    `json:"name"`
+	Email         string    `json:"email"`
+	Role          string    `json:"role"`
+	CreatedAt     time.Time `json:"created_at"`
+	EmailVerified bool      `json:"email_verified"`
 }
 
 // The caller's own profile (GET /api/me), read live from the DB.
@@ -34,6 +35,7 @@ func (q *Queries) GetMe(ctx context.Context, id int64) (GetMeRow, error) {
 		&i.Email,
 		&i.Role,
 		&i.CreatedAt,
+		&i.EmailVerified,
 	)
 	return i, err
 }
