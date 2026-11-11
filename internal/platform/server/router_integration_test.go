@@ -21,6 +21,8 @@ import (
 	authloginsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login/sqlc"
 	authlogout "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout"
 	authlogoutsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout/sqlc"
+	authpasswordchange "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordchange"
+	authpasswordchangesqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordchange/sqlc"
 	authpasswordreset "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordreset"
 	authpasswordresetrequest "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest"
 	authpasswordresetrequestsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest/sqlc"
@@ -91,6 +93,8 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) (*gin.Engine, *mailer.Fake) 
 		PasswordResetRequest: authpasswordresetrequest.NewHandler(authpasswordresetrequest.NewService(
 			authpasswordresetrequestsqlc.New(db), authpasswordresetrequest.NewStore(db),
 			ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}), emailer)),
+		PasswordChange: authpasswordchange.NewHandler(authpasswordchange.NewService(authpasswordchangesqlc.New(db),
+			authpasswordchange.NewStore(db), ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}), emailer)),
 		PasswordReset: authpasswordreset.NewHandler(authpasswordreset.NewService(authpasswordreset.NewStore(db), emailer)),
 		Logout:        authlogout.NewHandler(authlogout.NewService(authlogoutsqlc.New(db), authSharedQuerier, tokenMaker), cookies),
 
@@ -408,6 +412,28 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 				res = c.do(http.MethodPost, "/api/auth/password-resets", reset, "")
 				require.Equal(t, http.StatusUnprocessableEntity, res.Code, "the link works once")
 				require.Equal(t, "This link is invalid or has expired. Ask for a new one.", errorDetail(t, res))
+			},
+		},
+		{
+			name: "change password: this device stays signed in, the others are signed out at once",
+			run: func(t *testing.T, c apiClient) {
+				testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "jane@example.com"})
+				laptop := c.login("jane@example.com")
+				phone := c.login("jane@example.com")
+
+				res := c.do(http.MethodPost, "/api/auth/password-changes",
+					`{"data":{"type":"password-changes","attributes":{"current_password":"`+testhelper.DefaultPassword+`","password":"N3w-Passw0rd"}}}`, laptop)
+				require.Equal(t, http.StatusNoContent, res.Code, "change: %v", res.Body)
+
+				require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/me", "", laptop).Code)
+				res = c.do(http.MethodGet, "/api/me", "", phone)
+				require.Equal(t, http.StatusUnauthorized, res.Code)
+				require.Equal(t, "Your session has ended. Please sign in again.", errorDetail(t, res))
+
+				res = c.do(http.MethodPost, "/api/auth/password-changes",
+					`{"data":{"type":"password-changes","attributes":{"current_password":"wrong-one","password":"An0ther-Passw0rd"}}}`, laptop)
+				require.Equal(t, http.StatusUnprocessableEntity, res.Code)
+				require.Equal(t, "The current password is incorrect.", errorDetail(t, res))
 			},
 		},
 		{

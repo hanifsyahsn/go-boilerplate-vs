@@ -21,6 +21,10 @@ const (
 	PurposeResetPassword = "RESET_PASSWORD"
 )
 
+// EmailPasswordChanged labels the "password changed" notice in the logs (it
+// carries no token, so it's no auth_tokens purpose).
+const EmailPasswordChanged = "PASSWORD_CHANGED"
+
 // How long a link works.
 const (
 	ResetTokenTTL  = time.Hour

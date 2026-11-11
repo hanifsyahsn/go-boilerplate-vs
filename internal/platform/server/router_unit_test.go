@@ -13,6 +13,7 @@ import (
 	adminuser "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user"
 	authlogin "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login"
 	authlogout "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout"
+	authpasswordchange "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordchange"
 	authpasswordreset "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordreset"
 	authpasswordresetrequest "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest"
 	authrefresh "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/refresh"
@@ -74,6 +75,9 @@ func TestNewRouter_U(t *testing.T) {
 		{name: "me needs a token", method: http.MethodGet, path: "/api/me", wantCode: http.StatusUnauthorized},
 		{name: "me with a token", method: http.MethodGet, path: "/api/me", role: "user",
 			expect: func(h *mocks) { h.me.EXPECT().Get(gomock.Any()).Do(ok) }, wantCode: http.StatusTeapot},
+		{name: "changing the password needs a token", method: http.MethodPost, path: "/api/auth/password-changes", wantCode: http.StatusUnauthorized},
+		{name: "change password", method: http.MethodPost, path: "/api/auth/password-changes", role: "user",
+			expect: func(h *mocks) { h.change.EXPECT().Change(gomock.Any()).Do(ok) }, wantCode: http.StatusTeapot},
 		{name: "my sessions need a token", method: http.MethodGet, path: "/api/me/sessions", wantCode: http.StatusUnauthorized},
 		{name: "list my sessions", method: http.MethodGet, path: "/api/me/sessions", role: "user",
 			expect: func(h *mocks) { h.sessions.EXPECT().List(gomock.Any()).Do(ok) }, wantCode: http.StatusTeapot},
@@ -375,6 +379,7 @@ type mocks struct {
 	logout    *authlogout.MockH
 	resetReq  *authpasswordresetrequest.MockH
 	reset     *authpasswordreset.MockH
+	change    *authpasswordchange.MockH
 	me        *me.MockH
 	sessions  *sessionlist.MockH
 	revoke    *sessionrevoke.MockH
@@ -394,6 +399,7 @@ func newMocks(ctrl *gomock.Controller) *mocks {
 		logout:    authlogout.NewMockH(ctrl),
 		resetReq:  authpasswordresetrequest.NewMockH(ctrl),
 		reset:     authpasswordreset.NewMockH(ctrl),
+		change:    authpasswordchange.NewMockH(ctrl),
 		me:        me.NewMockH(ctrl),
 		sessions:  sessionlist.NewMockH(ctrl),
 		revoke:    sessionrevoke.NewMockH(ctrl),
@@ -414,6 +420,7 @@ func (m *mocks) handlers() Handlers {
 		Logout:               m.logout,
 		PasswordResetRequest: m.resetReq,
 		PasswordReset:        m.reset,
+		PasswordChange:       m.change,
 		Me:                   m.me,
 		ListSessions:         m.sessions,
 		RevokeSession:        m.revoke,

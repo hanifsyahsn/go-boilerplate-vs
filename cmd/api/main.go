@@ -16,6 +16,8 @@ import (
 	authloginsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login/sqlc"
 	authlogoutsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout"
 	authlogoutsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout/sqlc"
+	authpasswordchangesvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordchange"
+	authpasswordchangesqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordchange/sqlc"
 	authpasswordresetsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordreset"
 	authpasswordresetrequestsvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest"
 	authpasswordresetrequestsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest/sqlc"
@@ -74,6 +76,10 @@ var (
 	// resetRecipientRate caps forgot-password emails per address, so the
 	// endpoint can't flood an inbox through our SMTP.
 	resetRecipientRate = ratelimit.Rate{Burst: 3, Per: time.Hour}
+	// passwordChangeRate caps wrong current passwords per user (a stolen
+	// access token can't brute-force the password): 5 at once, then one every
+	// 3 minutes.
+	passwordChangeRate = ratelimit.Rate{Burst: 5, Per: 15 * time.Minute}
 )
 
 func main() {
@@ -168,6 +174,8 @@ func main() {
 		PasswordResetRequest: authpasswordresetrequestsvc.NewHandler(authpasswordresetrequestsvc.NewService(
 			authpasswordresetrequestsqlc.New(conn), authpasswordresetrequestsvc.NewStore(conn),
 			ratelimit.NewMemory(resetRecipientRate), emailer)),
+		PasswordChange: authpasswordchangesvc.NewHandler(authpasswordchangesvc.NewService(authpasswordchangesqlc.New(conn),
+			authpasswordchangesvc.NewStore(conn), ratelimit.NewMemory(passwordChangeRate), emailer)),
 		PasswordReset: authpasswordresetsvc.NewHandler(authpasswordresetsvc.NewService(authpasswordresetsvc.NewStore(conn), emailer)),
 		Logout:        authlogoutsvc.NewHandler(authlogoutsvc.NewService(authlogoutsqlc.New(conn), authSharedQuerier, tokenMaker), cookies),
 

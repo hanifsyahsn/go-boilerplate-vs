@@ -79,6 +79,6 @@ func (s *service) Reset(ctx context.Context, req Request) error {
 		return err
 	}
 
-	s.emailer.Send(ctx, authshared.PurposeResetPassword, userID, authshared.PasswordChangedEmail(email))
+	s.emailer.Send(ctx, authshared.EmailPasswordChanged, userID, authshared.PasswordChangedEmail(email))
 	return nil
 }

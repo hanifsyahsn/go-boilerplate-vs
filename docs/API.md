@@ -23,6 +23,7 @@ tokens), a personal **notes** CRUD, and a small admin user directory. The whole 
 | `POST` | `/api/auth/logout` | refresh token | [Log out](#post-apiauthlogout): revoke the session, clear the cookies |
 | `POST` | `/api/auth/password-reset-requests` | — | [Forgot password](#post-apiauthpassword-reset-requests): email a reset link |
 | `POST` | `/api/auth/password-resets` | — | [Set a new password](#post-apiauthpassword-resets) from the link |
+| `POST` | `/api/auth/password-changes` | user | [Change my password](#post-apiauthpassword-changes) |
 | `GET` | `/api/me` | user | [The caller's own account](#get-apime) |
 | `GET` | `/api/me/sessions` | user | [My signed-in devices](#get-apimesessions) |
 | `DELETE` | `/api/me/sessions/{id}` | user | [Sign a device out](#delete-apimesessionsid) |
@@ -421,6 +422,22 @@ curl -s -X POST "$BASE/api/auth/password-resets" -H "$CT" \
   ]
 }
 ```
+
+### `POST /api/auth/password-changes`
+
+Changes the caller's password (an access token is required). Every **other** device is signed out at once; this
+one stays signed in. The owner gets a *"Your password was changed"* email. **`204`**, no body.
+
+```bash
+curl -s -X POST "$BASE/api/auth/password-changes" -H "$CT" -H "Authorization: Bearer $TOKEN" \
+  -d '{"data":{"type":"password-changes","attributes":{"current_password":"Passw0rd!","password":"N3w-Passw0rd"}}}'
+```
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 422 | `wrong_password` | `The current password is incorrect.` — `source.pointer` `/data/attributes/current_password` |
+| 422 | `invalid_request_body` | a password missing, the new one under 8 characters, either over 72 bytes |
+| 429 | `too_many_requests` | `Too many wrong attempts. Please wait a few minutes and try again.` — 5 wrong current passwords / 15 min per account (then one more every 3 min), the right one too until a try comes back |
 
 ### `GET /api/me`
 
@@ -1117,5 +1134,5 @@ again later logs the session out.
 
 ### Current limitations
 
-- No password change, no email verification, no way to change a user's role over the API.
+- No email verification, no way to change a user's role over the API.
 - `refresh_tokens` grows by one row per refresh; nothing prunes it yet.

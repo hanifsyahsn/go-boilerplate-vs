@@ -102,6 +102,12 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   `ConsumeAuthToken` (none → 422 `invalid_token` on `/data/attributes/token`, `authshared.CodeInvalidToken`), new
   hash + `email_verified_at` (`SetPasswordAfterReset`), `RevokeUserSessions(password_reset)`; bcrypt runs before
   the tx; after commit the "password changed" notice → 204.
+- **Change password** (slice `auth/passwordchange`, authed, `POST /api/auth/password-changes`, `password-changes`:
+  `current_password` `maxbytes=72`, `password` `min=8,maxbytes=72`): the per-user failure limiter (5 / 15 min, key
+  `pwchange:` + user id) is **taken first** (refused → 429 "Too many wrong attempts…", error → 500), a wrong
+  current password → 422 `wrong_password` on `/data/attributes/current_password`, the right one `Reset`s the count
+  (a failed reset only logged); then in one tx the new hash + `RevokeUserSessions(password_changed, keep = the
+  caller's sid)` → 204, the caller stays signed in; then the notice (log label `PASSWORD_CHANGED`).
 - **`mailer`**: `NewSMTP` refuses to send without TLS (465 implicit, else STARTTLS required, certificate verified),
   15 s per email, a header with CR / LF refused; `NewLog` (development, no `SMTP_HOST`) logs to + subject at info,
   the body only at debug; `mailer.Fake` records messages for tests.

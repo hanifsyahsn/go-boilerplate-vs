@@ -173,7 +173,8 @@ Request: `Title string \`json:"title" binding:"required,notblank,max=255" label:
 
 Used by: `note/update`, `note/delete`. Also (token rows, not an owned resource) `auth/refresh`, `session/revoke`
 (lock the caller's live session, then revoke), `admin/user` (deactivate + revoke the user's sessions),
-`auth/passwordreset` (an atomic consume is the lock), `auth/passwordresetrequest` (issue a token).
+`auth/passwordreset` (an atomic consume is the lock), `auth/passwordresetrequest` (issue a token),
+`auth/passwordchange` (new hash + revoke the other sessions).
 
 Every update / delete / state transition of an existing row starts with the `FOR UPDATE` lock **inside** the
 tx, then writes, then (update) reads back in the same tx. `store.go`:
