@@ -24,6 +24,7 @@ Statuses: **built** = implemented in the boilerplate · **accepted** = agreed, n
 | [0014](0014-after-coding-check.md) | After coding: `make check` (gofmt, go vet, lint, go test), humans and AI | built |
 | [0015](0015-error-code-carries-status.md) | An error code carries its HTTP status and title (`apperror.NewCode`) | built |
 | [0016](0016-piece-done-size-review-stop.md) | One piece: done checklist, size, and when code review stops | built |
+| [0017](0017-race-detector-in-docker.md) | Race detector: `go test -race` inside Docker (`make test_race`) | accepted |
 
 The list of derivatives, where each decision came from and the adoption tracker are kept out of this public repo,
 in a gitignored `DERIVATIVES.local.md` next to this file on the maintainer's machine.
