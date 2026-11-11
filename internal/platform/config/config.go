@@ -76,6 +76,11 @@ type Config struct {
 	// cleanup worker deletes older ones). Optional, defaults to
 	// DefaultActivityLogRetention; 0 keeps them forever.
 	ActivityLogRetention time.Duration `mapstructure:"ACTIVITY_LOG_RETENTION"`
+	// TelegramBotToken / TelegramChatID send ops alerts (panics, failed
+	// background jobs) to a Telegram chat. Optional, both or neither; neither
+	// turns alerts off. The token is a secret: never logged.
+	TelegramBotToken string `mapstructure:"TELEGRAM_BOT_TOKEN"`
+	TelegramChatID   string `mapstructure:"TELEGRAM_CHAT_ID"`
 }
 
 // DefaultActivityLogRetention is ACTIVITY_LOG_RETENTION when unset: 2 years.
@@ -182,6 +187,8 @@ func LoadConfig(path string) (Config, error) {
 		SMTPFrom:                 v.GetString("SMTP_FROM"),
 		AppBaseURL:               v.GetString("APP_BASE_URL"),
 		ActivityLogRetention:     activityLogRetention,
+		TelegramBotToken:         v.GetString("TELEGRAM_BOT_TOKEN"),
+		TelegramChatID:           v.GetString("TELEGRAM_CHAT_ID"),
 	}
 
 	if err = config.Validate(); err != nil {
@@ -304,6 +311,9 @@ func (c Config) Validate() error {
 		if _, err := mail.ParseAddress(c.SMTPFrom); err != nil {
 			errs = append(errs, fmt.Errorf("config: SMTP_FROM %q is not an email address: %w", c.SMTPFrom, err))
 		}
+	}
+	if (c.TelegramBotToken == "") != (c.TelegramChatID == "") {
+		errs = append(errs, errors.New("config: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID go together"))
 	}
 	if c.ActivityLogRetention < 0 {
 		errs = append(errs, fmt.Errorf("config: ACTIVITY_LOG_RETENTION %s is negative (0 keeps the log forever)", c.ActivityLogRetention))

@@ -64,6 +64,18 @@ func TestLoadConfig_Env_U(t *testing.T) {
 				require.Zero(t, c.ActivityLogRetention)
 			},
 		},
+		{
+			name:     "telegram settings read as a pair",
+			override: map[string]string{"TELEGRAM_BOT_TOKEN": "123:abc", "TELEGRAM_CHAT_ID": "-100"},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Equal(t, "123:abc", c.TelegramBotToken)
+				require.Equal(t, "-100", c.TelegramChatID)
+			},
+		},
+		{name: "a telegram token without a chat", override: map[string]string{"TELEGRAM_BOT_TOKEN": "123:abc"},
+			wantErr: "config: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID go together"},
+		{name: "a telegram chat without a token", override: map[string]string{"TELEGRAM_CHAT_ID": "-100"},
+			wantErr: "config: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID go together"},
 		{name: "a negative activity log retention", override: map[string]string{"ACTIVITY_LOG_RETENTION": "-1h"}, wantErr: "ACTIVITY_LOG_RETENTION -1h0m0s is negative"},
 		{name: "an activity log retention that isn't a duration", override: map[string]string{"ACTIVITY_LOG_RETENTION": "forever"}, wantErr: "ACTIVITY_LOG_RETENTION"},
 		{
@@ -204,6 +216,8 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			t.Setenv("ALLOWED_ORIGINS", "")
 			t.Setenv("SMTP_PORT", "")
 			t.Setenv("ACTIVITY_LOG_RETENTION", "")
+			t.Setenv("TELEGRAM_BOT_TOKEN", "")
+			t.Setenv("TELEGRAM_CHAT_ID", "")
 			t.Setenv("SMTP_USERNAME", "")
 			t.Setenv("SMTP_PASSWORD", "")
 			for k, v := range tc.override {

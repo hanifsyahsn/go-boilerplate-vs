@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -50,8 +51,10 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/mailer"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/notifier"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/server"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/utility"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/validation"
 
@@ -129,13 +132,29 @@ func main() {
 	defer stopBg()
 	var bg utility.Group
 
+	// Ops alerts (decision 0011): Telegram when configured, else none. Every
+	// recovered panic (a request's or a background goroutine's) is one.
+	var alerts notifier.Notifier = notifier.NewNoop()
+	if conf.TelegramBotToken != "" {
+		telegram := notifier.NewTelegram(conf.TelegramBotToken, conf.TelegramChatID, conf.Environment, "go_boilerplate_vs")
+		bg.Go(bgCtx, telegram.Run)
+		alerts = telegram
+	}
+	utility.SetPanicHook(func(ctx context.Context, recovered any) {
+		alerts.Notify(ctx, notifier.Alert{Level: notifier.LevelError, Title: "panic", Text: fmt.Sprint(recovered),
+			RequestID: requestid.FromContext(ctx)})
+	})
+
 	// The API activity log: queued by the middleware, written in batches by
 	// the recorder, flushed at shutdown (decision 0008).
 	activity := activitylog.NewRecorder(activitylogsqlc.New(conn))
+	activity.SetNotifier(alerts)
 	bg.Go(bgCtx, activity.Run)
 	// Expired tokens, dead sessions, old activity rows: a minute after start,
 	// then daily, on every replica (the deletes are idempotent).
-	bg.Go(bgCtx, cleanup.NewWorker(cleanupsqlc.New(conn), conf.ActivityLogRetention).Run)
+	cleaner := cleanup.NewWorker(cleanupsqlc.New(conn), conf.ActivityLogRetention)
+	cleaner.SetNotifier(alerts)
+	bg.Go(bgCtx, cleaner.Run)
 
 	if err = validation.RegisterGinValidators(); err != nil {
 		logging.Fatal("register validators failed", "err", err)

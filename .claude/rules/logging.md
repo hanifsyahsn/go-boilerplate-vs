@@ -4,6 +4,7 @@ paths:
   - "internal/platform/logging/**"
   - "internal/features/activitylog/**"
   - "internal/features/cleanup/**"
+  - "internal/platform/notifier/**"
   - "internal/platform/middleware/**"
   - "internal/platform/server/**"
   - "internal/shared/requestid/**"
@@ -65,3 +66,18 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (*Request
   `ACTIVITY_LOG_RETENTION` (default `17520h`, `0` = forever) are deleted by the cleanup worker (decision 0005).
 - Tests: `TestActivityLog_U`, `TestRecorder_U` / `_QueueFull_U` / `_Drain_U`, `TestRecorder_ShutdownFlush_I`
   (500 rows, cancel, all 500 in the table), `-race` in Docker.
+
+### Ops alerts
+
+- **`internal/platform/notifier`** (decision 0011): `Notifier.Notify(ctx, Alert{Level, Title, Text, RequestID})`
+  never blocks and never errors. `NewTelegram(token, chatID, environment, service)` when `TELEGRAM_BOT_TOKEN` +
+  `TELEGRAM_CHAT_ID` are set (both or neither), else `NewNoop()`. Telegram: a 100-alert queue sent by `Run` in
+  main's background group (full → dropped, warn `notifier: queue full, alert dropped`); **one alert per `Title`
+  per 5 min**, the held-back ones counted into the next ("(N more since)"); plain text `"[env] service — LEVEL:
+  Title\nText"` (+ `request_id`), no link preview, 5 s timeout. **The bot token never reaches a log**: a send
+  failure is `notifier: send failed` with `status` and the error with the token replaced by `***` (a
+  `*url.Error` carries the URL, which carries the token).
+- What alerts: every recovered panic (`utility.SetPanicHook`, called by `SafeGoContext`'s recover and the
+  router's recovery — main sets it to `Alert{error, "panic", …, request id}`), `cleanup failed: <table>`,
+  `activity log: write failed` (the worker and the recorder take it through `SetNotifier`). A `Title` is short
+  and stable (it is the dedupe key); a `Text` never holds a body, token, password or email address.

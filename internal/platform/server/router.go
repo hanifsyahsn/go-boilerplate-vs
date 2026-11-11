@@ -29,7 +29,9 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/enum"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/handlerutil"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/jsonapi"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/utility"
 )
 
 // Handlers is every feature slice's handler, wired in cmd/api/main.go. A new
@@ -147,6 +149,7 @@ func NewRouter(version string, tokenMaker jwttoken.M, accessStatus middleware.Ac
 	r.Use(gin.CustomRecovery(func(c *gin.Context, recovered any) {
 		jsonapi.WriteError(c.Writer, apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
 			fmt.Errorf("panic: %v", recovered))
+		utility.ReportPanic(handlerutil.RequestContext(c), recovered)
 		c.Abort()
 	}), middleware.CORS(sec.AllowedOrigins))
 	r.HandleMethodNotAllowed = true

@@ -46,7 +46,7 @@ Cross-topic map (touching the left → also read the right):
   `middleware/rate_limit.go`, `server.Security`) → `auth.md` (*Rate limits and the client IP*) + `jsonapi.md`
   (*Request flow*).
 - **An error shape / status code** → `jsonapi.md` (*Errors*, *Request flow* step 4) + `logging.md`.
-- **A goroutine / background worker, the activity log** → `logging.md`.
+- **A goroutine / background worker, the activity log, an ops alert** → `logging.md`.
 - **A migration** → *Gotchas* here + the rule of the table's feature (`users` / `refresh_tokens` → `auth.md`)
   + `slice-patterns.md` §1 for an owned, soft-deleted table.
 
@@ -143,7 +143,8 @@ Windows".
   `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `ActivityLog`, `CORS`, `OriginGuard`, `JSONAPIMediaType`,
   `RateLimitByIP`, `AccessTokenMiddleware`, `RequireRole`, its own sqlc for `GetAccessStatus` — user active + session live), `ratelimit`
   (token-bucket `Limiter` interface + in-memory `NewMemory` — see *Rate limits and the client IP*), `mailer`
-  (`Mailer` interface: `NewSMTP`, the development `NewLog`, `Fake` for tests), `jwttoken` (ES256), `db/tx` (generic
+  (`Mailer` interface: `NewSMTP`, the development `NewLog`, `Fake` for tests), `notifier` (ops alerts: `NewTelegram`
+  / `NewNoop`), `jwttoken` (ES256), `db/tx` (generic
   transaction helper), `db/migration`, `constant`.
 - `internal/shared` — cross-cutting: `apperror` (typed error → HTTP status, with a JSON:API `Source`),
   `jsonapi` (documents, serializer, sparse fieldsets, links, error objects, `?include` policy, the query
@@ -214,6 +215,7 @@ origin guard, empty = both off with a startup warning). `APP_BASE_URL` (the fron
 `ENVIRONMENT=development` (an empty `SMTP_HOST` there logs emails instead), `SMTP_PORT` defaults to `587`
 (465 = implicit TLS, any other port must offer STARTTLS), `SMTP_USERNAME` / `SMTP_PASSWORD` optional.
 `ACTIVITY_LOG_RETENTION` (optional, default `17520h` = 2 years, `0` = keep forever; the cleanup worker applies it).
+`TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (optional, both or neither: ops alerts, see logging.md *Ops alerts*).
 Durations are Go duration strings (`15m`).
 See `.env.example`.
 

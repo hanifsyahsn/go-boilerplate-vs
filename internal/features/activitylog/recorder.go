@@ -5,6 +5,7 @@ package activitylog
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math"
 	"sync/atomic"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/activitylog/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/notifier"
 )
 
 const (
@@ -34,6 +36,7 @@ type Recorder struct {
 	querier sqlc.Querier
 	queue   chan middleware.Activity
 	dropped atomic.Int64
+	alerts  notifier.Notifier
 
 	// batchSize / interval are seams for tests.
 	batchSize int
@@ -44,10 +47,14 @@ func NewRecorder(querier sqlc.Querier) *Recorder {
 	return &Recorder{
 		querier:   querier,
 		queue:     make(chan middleware.Activity, QueueSize),
+		alerts:    notifier.NewNoop(),
 		batchSize: BatchSize,
 		interval:  FlushInterval,
 	}
 }
+
+// SetNotifier makes a failed write an ops alert too (decision 0011).
+func (r *Recorder) SetNotifier(n notifier.Notifier) { r.alerts = n }
 
 // Record queues a; a full queue drops it (counted, logged at the next write).
 func (r *Recorder) Record(a middleware.Activity) {
@@ -126,6 +133,8 @@ func (r *Recorder) write(ctx context.Context, batch []middleware.Activity) {
 	defer cancel()
 	if err := r.querier.InsertActivityLogs(wctx, p); err != nil {
 		slog.ErrorContext(ctx, "activity log: write failed", "rows", len(batch), "err", err)
+		r.alerts.Notify(ctx, notifier.Alert{Level: notifier.LevelError, Title: "activity log: write failed",
+			Text: fmt.Sprintf("%d rows dropped: %v", len(batch), err)})
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/cleanup/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/notifier"
 	"github.com/stretchr/testify/require"
 )
 
@@ -182,6 +183,45 @@ func TestWorker_Run_U(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
 			tc.run(t, NewWorker(q, 0), q)
+		})
+	}
+}
+
+// recordingNotifier keeps the alerts it is given.
+type recordingNotifier struct {
+	mu  sync.Mutex
+	got []notifier.Alert
+}
+
+func (r *recordingNotifier) Notify(_ context.Context, a notifier.Alert) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.got = append(r.got, a)
+}
+
+func TestWorker_Alerts_U(t *testing.T) {
+	testCases := []struct {
+		name string
+		want []notifier.Alert
+	}{
+		{name: "a table's failure is an ops alert titled with the table",
+			want: []notifier.Alert{{Level: notifier.LevelError, Title: "cleanup failed: auth_tokens", Text: sql.ErrConnDone.Error()}}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&syncBuffer{}, nil)))
+			defer slog.SetDefault(prev)
+			ctrl := gomock.NewController(t)
+			q := sqlc.NewMockQuerier(ctrl)
+			q.EXPECT().DeleteExpiredRefreshTokens(gomock.Any(), gomock.Any()).Return(int64(0), nil)
+			q.EXPECT().DeleteOrphanSessions(gomock.Any(), gomock.Any()).Return(int64(0), nil)
+			q.EXPECT().DeleteExpiredAuthTokens(gomock.Any(), gomock.Any()).Return(int64(0), sql.ErrConnDone)
+			alerts := &recordingNotifier{}
+			w := NewWorker(q, 0)
+			w.SetNotifier(alerts)
+			w.RunOnce(context.Background())
+			require.Equal(t, tc.want, alerts.got)
 		})
 	}
 }

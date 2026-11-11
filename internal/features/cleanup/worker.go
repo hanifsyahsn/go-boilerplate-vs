@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/cleanup/sqlc"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/notifier"
 )
 
 const (
@@ -31,6 +32,7 @@ type Result struct {
 type Worker struct {
 	querier           sqlc.Querier
 	activityRetention time.Duration
+	alerts            notifier.Notifier
 
 	// Seams for tests.
 	batchSize     int32
@@ -45,12 +47,16 @@ func NewWorker(querier sqlc.Querier, activityRetention time.Duration) *Worker {
 	return &Worker{
 		querier:           querier,
 		activityRetention: activityRetention,
+		alerts:            notifier.NewNoop(),
 		batchSize:         batchSize,
 		firstRunDelay:     firstRunDelay,
 		interval:          Interval,
 		now:               time.Now,
 	}
 }
+
+// SetNotifier makes a table's failure an ops alert too (decision 0011).
+func (w *Worker) SetNotifier(n notifier.Notifier) { w.alerts = n }
 
 // Run waits firstRunDelay, runs once, then once every Interval, until ctx is
 // done.
@@ -97,6 +103,7 @@ func (w *Worker) deleteAll(ctx context.Context, table string, del func(context.C
 		n, err := del(ctx, w.batchSize)
 		if err != nil {
 			slog.ErrorContext(ctx, "cleanup failed", "table", table, "err", err)
+			w.alerts.Notify(ctx, notifier.Alert{Level: notifier.LevelError, Title: "cleanup failed: " + table, Text: err.Error()})
 			return total
 		}
 		total += n

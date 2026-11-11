@@ -13,6 +13,7 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/activitylog/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/notifier"
 	"github.com/stretchr/testify/require"
 )
 
@@ -207,6 +208,41 @@ func TestClampInt32_U(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, clampInt32(tc.n))
+		})
+	}
+}
+
+// recordingNotifier keeps the alerts it is given.
+type recordingNotifier struct {
+	mu  sync.Mutex
+	got []notifier.Alert
+}
+
+func (r *recordingNotifier) Notify(_ context.Context, a notifier.Alert) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.got = append(r.got, a)
+}
+
+func TestRecorder_Alerts_U(t *testing.T) {
+	testCases := []struct {
+		name string
+		want []notifier.Alert
+	}{
+		{name: "a failed write is an ops alert with the rows lost",
+			want: []notifier.Alert{{Level: notifier.LevelError, Title: "activity log: write failed", Text: "2 rows dropped: db down"}}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&syncBuffer{}, nil)))
+			defer slog.SetDefault(prev)
+			q := &fakeQuerier{fail: 1, written: make(chan int, 10)}
+			alerts := &recordingNotifier{}
+			r := NewRecorder(q)
+			r.SetNotifier(alerts)
+			r.write(context.Background(), []middleware.Activity{activity(0), activity(1)})
+			require.Equal(t, tc.want, alerts.got)
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,6 +33,8 @@ import (
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/jsonapi"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/utility"
 	"github.com/stretchr/testify/require"
 )
 
@@ -443,5 +446,48 @@ func (m *mocks) handlers() Handlers {
 		UpdateNote:               m.update,
 		DeleteNote:               m.delete,
 		AdminUser:                m.adminUser,
+	}
+}
+
+// TestNewRouter_PanicHook_U: a request's panic reaches the panic hook (main's
+// ops alert) with the request's id.
+func TestNewRouter_PanicHook_U(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	testCases := []struct {
+		name string
+	}{
+		{name: "a handler panic: 500 to the client, the hook gets the value and the request id"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			type report struct {
+				recovered any
+				requestID string
+			}
+			got := make(chan report, 1)
+			utility.SetPanicHook(func(ctx context.Context, recovered any) {
+				got <- report{recovered: recovered, requestID: requestid.FromContext(ctx)}
+			})
+			defer utility.SetPanicHook(nil)
+
+			ctrl := gomock.NewController(t)
+			h := newMocks(ctrl)
+			h.register.EXPECT().Register(gomock.Any()).Do(func(*gin.Context) { panic("boom") })
+			r, err := NewRouter("v", jwttoken.NewMockM(ctrl), middlewaresqlc.NewMockQuerier(ctrl), h.handlers(), Security{
+				AuthIPLimit:   ratelimit.NewMemory(ratelimit.Rate{Burst: 10, Per: time.Minute}),
+				PublicIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 10, Per: time.Minute}),
+			})
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/register", nil)
+			req.Header.Set("X-Request-ID", "req-42")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusInternalServerError, w.Code)
+			rep := <-got
+			require.Equal(t, "boom", rep.recovered)
+			require.Equal(t, "req-42", rep.requestID)
+		})
 	}
 }
