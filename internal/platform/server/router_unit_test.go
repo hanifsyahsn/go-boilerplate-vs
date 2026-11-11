@@ -98,7 +98,7 @@ func TestNewRouter_U(t *testing.T) {
 				users.EXPECT().GetUserIsActive(gomock.Any(), int64(1)).Return(true, nil)
 			}
 
-			r, err := NewRouter("test-version", maker, users, h.handlers(), Security{AuthIPLimit: ratelimit.New(100, time.Minute)})
+			r, err := NewRouter("test-version", maker, users, h.handlers(), Security{AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 100, Per: time.Minute})})
 			require.NoError(t, err)
 
 			req := httptest.NewRequest(tc.method, tc.path, nil)
@@ -195,7 +195,7 @@ func TestNewRouter_Security_U(t *testing.T) {
 			h.logout.EXPECT().Logout(gomock.Any()).Do(ok).AnyTimes()
 
 			r, err := NewRouter("test-version", jwttoken.NewMockM(ctrl), middlewaresqlc.NewMockQuerier(ctrl), h.handlers(),
-				Security{TrustedProxies: tc.trusted, AuthIPLimit: ratelimit.New(2, time.Minute)})
+				Security{TrustedProxies: tc.trusted, AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 2, Per: time.Minute})})
 			require.NoError(t, err)
 
 			for i, c := range tc.calls {
@@ -221,7 +221,7 @@ func TestNewRouter_SecurityErrors_U(t *testing.T) {
 		{name: "no auth IP limit: refused, the auth routes must never run unlimited",
 			sec: Security{}, wantErr: "AuthIPLimit is required"},
 		{name: "a trusted proxy gin can't parse is refused",
-			sec: Security{TrustedProxies: []string{"not-an-ip"}, AuthIPLimit: ratelimit.New(1, time.Minute)}, wantErr: "trusted proxies"},
+			sec: Security{TrustedProxies: []string{"not-an-ip"}, AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute})}, wantErr: "trusted proxies"},
 	}
 
 	for _, tc := range testCases {

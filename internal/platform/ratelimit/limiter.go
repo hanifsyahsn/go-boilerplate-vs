@@ -1,78 +1,62 @@
-// Package ratelimit is an in-memory fixed-window counter. Counters live in the
-// process, so they hold for one instance only (several instances would each
-// count apart — move to a shared store such as Redis then). Keys are whatever the
-// caller limits on: an IP, an email, "login:<identifier>".
+// Package ratelimit is the rate limiter behind every limit of the API: a token
+// bucket per key, behind the Limiter interface (decision 0003). Keys are
+// whatever the caller limits on: an IP (IPKey), "login:<email>".
+//
+// Memory (NewMemory) keeps the buckets in the process, so it holds for one
+// instance only: several replicas would each count apart.
 package ratelimit
 
 import (
-	"sync"
+	"context"
+	"net/netip"
 	"time"
 )
 
-// Limiter allows at most limit hits per key in each window.
-type Limiter struct {
-	limit  int
-	window time.Duration
-	now    func() time.Time
-
-	mu        sync.Mutex
-	counts    map[string]*bucket
-	lastSweep time.Time
+// Rate is a bucket's size and refill: Burst tokens, refilled evenly over Per
+// (Burst / Per tokens a second). "5 failed logins / 15 min" is {5, 15 min}:
+// five at once, then one more every three minutes.
+type Rate struct {
+	Burst int
+	Per   time.Duration
 }
 
-type bucket struct {
-	start time.Time
-	count int
+// interval is how long one token takes to come back.
+func (r Rate) interval() time.Duration {
+	return r.Per / time.Duration(r.Burst)
 }
 
-// New returns a limiter of limit hits per window.
-func New(limit int, window time.Duration) *Limiter {
-	return &Limiter{limit: limit, window: window, now: time.Now, counts: map[string]*bucket{}}
+// Decision is a limiter's answer for one key.
+type Decision struct {
+	// Allowed: the key had a token, and Take took it.
+	Allowed bool
+	// RetryAfter is how long until the key has a token again; 0 when Allowed.
+	RetryAfter time.Duration
 }
 
-// Allow records a hit for key and reports whether it is within the limit.
-func (l *Limiter) Allow(key string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	b := l.current(key)
-	b.count++
-	return b.count <= l.limit
+// Limiter is a token bucket per key. Every method can fail (a shared store
+// that's down); Memory never does.
+type Limiter interface {
+	// Take takes a token from key's bucket when it has one. It's atomic: N
+	// parallel Takes on a key with k tokens allow exactly min(N, k). There is
+	// no "peek, then take later" on purpose — that gap is a race.
+	Take(ctx context.Context, key string) (Decision, error)
+	// Reset refills key's bucket (a successful login clears its failures).
+	Reset(ctx context.Context, key string) error
 }
 
-// Blocked reports whether key already used up its window, without a hit.
-func (l *Limiter) Blocked(key string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	return l.current(key).count >= l.limit
-}
-
-// Reset forgets key (a successful login clears its failures).
-func (l *Limiter) Reset(key string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	delete(l.counts, key)
-}
-
-// current is key's bucket for this window; caller holds mu. Expired buckets
-// are swept at most once per window, so the map doesn't grow forever.
-func (l *Limiter) current(key string) *bucket {
-	now := l.now()
-	if now.Sub(l.lastSweep) >= l.window {
-		for k, b := range l.counts {
-			if now.Sub(b.start) >= l.window {
-				delete(l.counts, k)
-			}
-		}
-		l.lastSweep = now
+// IPKey is the key of a client IP: the address itself for IPv4, its /64
+// network for IPv6 — one subscriber usually gets a whole /64, so keying on the
+// full address would hand a client 2^64 fresh buckets. A string that isn't an
+// IP is returned as it is.
+func IPKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
 	}
-
-	b, ok := l.counts[key]
-	if !ok || now.Sub(b.start) >= l.window {
-		b = &bucket{start: now}
-		l.counts[key] = b
+	addr = addr.Unmap()
+	if addr.Is4() {
+		return addr.String()
 	}
-	return b
+	prefix, _ := addr.Prefix(64) // a valid IPv6 address always has a /64
+	return prefix.String()
 }

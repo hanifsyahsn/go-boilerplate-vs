@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -35,11 +36,14 @@ type S interface {
 	// login, i.e. per device). An untrusted device's family is capped at
 	// untrustedSessionDuration from now; a trusted one slides with no cap.
 	//
-	// Failed logins are capped per email (the failures limiter): an unknown
-	// email and a wrong password both count, a success clears the count, and
-	// once the window is used up every attempt for that email is a 429
-	// without touching the DB — the right password included, until the
-	// window ends.
+	// Failed logins are capped per email (the failures limiter, a token
+	// bucket): every attempt takes a token *first*, atomically, so parallel
+	// guesses can't all pass a check before any is counted; the right password
+	// refills the bucket, so in effect only failures count. Once it's empty
+	// every attempt for that email is a 429 without touching the DB — the
+	// right password included, until a token comes back. A limiter that
+	// errors or refuses the key is a 500 / 429 (fail closed); only a failed
+	// refill after a success is just logged.
 	Login(ctx context.Context, req Request) (Result, error)
 }
 
@@ -52,7 +56,7 @@ type service struct {
 	// untrustedSessionDuration caps a login without trust_device.
 	untrustedSessionDuration time.Duration
 	// failures counts wrong credentials per email (failureKey).
-	failures *ratelimit.Limiter
+	failures ratelimit.Limiter
 	// checkPassword is password.CheckOrWaste; a seam for the test that pins
 	// the unknown-email path still spends a bcrypt comparison.
 	checkPassword func(hash, plain string) bool
@@ -65,7 +69,7 @@ func NewService(
 	authSharedQuerier authsharedsqlc.Querier,
 	tokenMaker jwttoken.M,
 	accessTokenDuration, refreshTokenDuration, untrustedSessionDuration time.Duration,
-	failures *ratelimit.Limiter,
+	failures ratelimit.Limiter,
 ) S {
 	return &service{
 		querier:              querier,
@@ -91,7 +95,15 @@ func failureKey(email string) string {
 
 func (s *service) Login(ctx context.Context, req Request) (Result, error) {
 	key := failureKey(req.Email)
-	if s.failures.Blocked(key) {
+	// Take before anything else (not peek now, count later): the bcrypt
+	// comparison takes ~100ms, and a check-then-count would let N parallel
+	// requests all pass the check before the first one is counted.
+	d, err := s.failures.Take(ctx, key)
+	if err != nil {
+		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
+			fmt.Errorf("failures.Take() (%s): %w", feature, err))
+	}
+	if !d.Allowed {
 		return Result{}, apperror.New(apperror.CodeTooManyRequests, tooManyFailuresMessage,
 			fmt.Errorf("(%s): login failures exceeded for an email", feature))
 	}
@@ -102,7 +114,6 @@ func (s *service) Login(ctx context.Context, req Request) (Result, error) {
 		// about the time a wrong password does and timing doesn't reveal
 		// which emails have an account.
 		s.checkPassword("", req.Password)
-		s.failures.Allow(key)
 		return Result{}, apperror.New(apperror.CodeUnauthorized, invalidCredentialsMessage,
 			fmt.Errorf("GetUserForLogin() (%s): unknown email: %w", feature, err))
 	}
@@ -112,13 +123,16 @@ func (s *service) Login(ctx context.Context, req Request) (Result, error) {
 	}
 
 	if !s.checkPassword(user.PasswordHash, req.Password) {
-		s.failures.Allow(key)
 		return Result{}, apperror.New(apperror.CodeUnauthorized, invalidCredentialsMessage,
 			fmt.Errorf("(%s): wrong password for user %d", feature, user.ID))
 	}
 
-	// The credentials are right: the email's failures start over.
-	s.failures.Reset(key)
+	// The credentials are right: the email's failures start over (this
+	// attempt's token included). A failed refill only leaves the count as it
+	// was, so it doesn't fail the login.
+	if err := s.failures.Reset(ctx, key); err != nil {
+		slog.WarnContext(ctx, "login: reset failure count failed", "feature", feature, "err", err)
+	}
 
 	// Checked after the password, so only the account holder learns it's
 	// deactivated.

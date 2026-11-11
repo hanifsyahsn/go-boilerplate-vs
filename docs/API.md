@@ -148,12 +148,13 @@ dev), scoped to `COOKIE_DOMAIN` when set. A browser client never reads them: it 
 
 All `/api/auth/*` endpoints are **public** (no access token).
 
-**Rate limits** (in memory, per server instance):
+**Rate limits** (in memory, per server instance; token buckets — the full allowance is available at once, then
+it comes back evenly over the period):
 
 | Limit | Applies to | Past it |
 | --- | --- | --- |
-| 300 requests / 15 min **per client IP** | register + login together (refresh and logout are never limited) | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` |
-| 5 **failed** logins / 15 min **per email** | login: an unknown email and a wrong password both count; a successful login resets it | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login for that email, the right password too, until the window ends |
+| 300 requests / 15 min **per client IP** (IPv6: per /64) | register + login together (refresh and logout are never limited) | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
+| 5 **failed** logins / 15 min **per email** (then one more every 3 min) | login: an unknown email and a wrong password both count; a successful login resets it | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login for that email, the right password too, until a try comes back |
 
 The client IP is the connection's address; `X-Forwarded-For` / `X-Real-IP` count only from a proxy listed in
 `TRUSTED_PROXIES`. On a 429, show the message and don't retry automatically.

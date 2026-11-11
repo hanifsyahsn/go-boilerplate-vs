@@ -44,15 +44,15 @@ import (
 // Version is set at build time (-ldflags "-X main.Version=...").
 var Version = "dev"
 
-// Rate limits (in memory, one instance — see internal/platform/ratelimit).
-const (
-	// authIPLimit / authIPWindow cap register + login together per client IP.
-	// Generous on purpose: an office behind one NAT shares an IP.
-	authIPLimit  = 300
-	authIPWindow = 15 * time.Minute
-	// loginFailureLimit / loginFailureWindow cap failed logins per email.
-	loginFailureLimit  = 5
-	loginFailureWindow = 15 * time.Minute
+// Rate limits: token buckets, in memory, one instance (see
+// internal/platform/ratelimit).
+var (
+	// authIPRate caps register + login together per client IP. Generous on
+	// purpose: an office behind one NAT shares an IP.
+	authIPRate = ratelimit.Rate{Burst: 300, Per: 15 * time.Minute}
+	// loginFailureRate caps failed logins per email: 5 at once, then one
+	// more every 3 minutes.
+	loginFailureRate = ratelimit.Rate{Burst: 5, Per: 15 * time.Minute}
 )
 
 func main() {
@@ -111,7 +111,7 @@ func main() {
 		Login: authloginsvc.NewHandler(
 			authloginsvc.NewService(authloginsqlc.New(conn), authSharedQuerier, tokenMaker,
 				conf.AccessTokenDuration, conf.RefreshTokenDuration, conf.UntrustedSessionDuration,
-				ratelimit.New(loginFailureLimit, loginFailureWindow)),
+				ratelimit.NewMemory(loginFailureRate)),
 			cookies,
 		),
 		Refresh: authrefreshsvc.NewHandler(
@@ -135,7 +135,7 @@ func main() {
 	gin.SetMode(server.GinMode(conf.Environment))
 	srv, err := server.NewServer(conf, Version, tokenMaker, middlewaresqlc.New(conn), handlers, server.Security{
 		TrustedProxies: conf.TrustedProxies,
-		AuthIPLimit:    ratelimit.New(authIPLimit, authIPWindow),
+		AuthIPLimit:    ratelimit.NewMemory(authIPRate),
 	})
 	if err != nil {
 		logging.Fatal("build server failed", "err", err)

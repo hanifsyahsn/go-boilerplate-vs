@@ -51,7 +51,7 @@ type Security struct {
 	// client can't spoof its IP past the per-IP limit.
 	TrustedProxies []string
 	// AuthIPLimit caps register / login per client IP. Required.
-	AuthIPLimit *ratelimit.Limiter
+	AuthIPLimit ratelimit.Limiter
 }
 
 // authIPLimitName keys the auth routes' counters in AuthIPLimit.

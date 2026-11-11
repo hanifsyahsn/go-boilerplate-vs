@@ -65,7 +65,7 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 		Register: authregister.NewHandler(authregister.NewService(authregistersqlc.New(db))),
 		Login: authlogin.NewHandler(
 			authlogin.NewService(authloginsqlc.New(db), authSharedQuerier, tokenMaker, accessTTL, refreshTTL, untrustedTTL,
-				ratelimit.New(testLimit, time.Minute)),
+				ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute})),
 			cookies,
 		),
 		Refresh: authrefresh.NewHandler(
@@ -86,7 +86,7 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	}
 
 	r, err := NewRouter("test-version", tokenMaker, middlewaresqlc.New(db), handlers,
-		Security{AuthIPLimit: ratelimit.New(testLimit, time.Minute)})
+		Security{AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute})})
 	require.NoError(t, err)
 	return r
 }

@@ -2,6 +2,9 @@ package middleware
 
 import (
 	"fmt"
+	"math"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
@@ -13,18 +16,31 @@ import (
 // TooManyRequestsMessage is the 429 detail of the per-IP limit.
 const TooManyRequestsMessage = "Too many attempts. Please wait a few minutes and try again."
 
-// RateLimitByIP answers 429 once the caller's IP used up its window on the
-// routes it guards (the public auth endpoints). name separates the counters
-// of differently limited routes sharing one limiter.
+// RateLimitByIP answers 429, with Retry-After, once the caller's IP has no
+// token left on the routes it guards (the public auth endpoints). name
+// separates the buckets of differently limited routes sharing one limiter.
 //
 // The IP is gin's c.ClientIP(), which only reads X-Forwarded-For /
 // X-Real-IP from a trusted proxy (TRUSTED_PROXIES, see server.Security);
 // otherwise it's the connection's address, so a client can't pick its own.
-func RateLimitByIP(l *ratelimit.Limiter, name string) gin.HandlerFunc {
+// An IPv6 client is limited per /64 (ratelimit.IPKey).
+//
+// A limiter error is a 500: the limiter decides how to survive its store
+// going down (decision 0003), so an error reaching here means it couldn't.
+func RateLimitByIP(l ratelimit.Limiter, name string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		ctx := handlerutil.RequestContext(c)
 		ip := c.ClientIP()
-		if !l.Allow(name + ":" + ip) {
-			jsonapi.WriteErrorsContext(handlerutil.RequestContext(c), c.Writer,
+		d, err := l.Take(ctx, name+":"+ratelimit.IPKey(ip))
+		if err != nil {
+			jsonapi.WriteErrorsContext(ctx, c.Writer, apperror.New(apperror.CodeInternal,
+				apperror.CodeInternal.SafeToThrow(), fmt.Errorf("rate limit %s: Take() (Rate Limit Middleware): %w", name, err)))
+			c.Abort()
+			return
+		}
+		if !d.Allowed {
+			c.Header("Retry-After", RetryAfterSeconds(d.RetryAfter))
+			jsonapi.WriteErrorsContext(ctx, c.Writer,
 				apperror.New(apperror.CodeTooManyRequests, TooManyRequestsMessage,
 					fmt.Errorf("rate limit %s exceeded by %s (Rate Limit Middleware)", name, ip)))
 			c.Abort()
@@ -32,4 +48,10 @@ func RateLimitByIP(l *ratelimit.Limiter, name string) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// RetryAfterSeconds is a Retry-After header value: whole seconds, rounded up,
+// at least 1.
+func RetryAfterSeconds(d time.Duration) string {
+	return strconv.Itoa(max(1, int(math.Ceil(d.Seconds()))))
 }

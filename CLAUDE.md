@@ -140,7 +140,7 @@ Windows".
   `Setup` / `Check` / `Fatal`, a handler adding `request_id`), `server` (`server.go` + `router.go` with the
   `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `JSONAPIMediaType`,
   `RateLimitByIP`, `AccessTokenMiddleware`, `RequireRole`, its own sqlc for `GetUserIsActive`), `ratelimit`
-  (in-memory fixed-window counter — see *Rate limits and the client IP*), `jwttoken` (ES256), `db/tx` (generic
+  (token-bucket `Limiter` interface + in-memory `NewMemory` — see *Rate limits and the client IP*), `jwttoken` (ES256), `db/tx` (generic
   transaction helper), `db/migration`, `constant`.
 - `internal/shared` — cross-cutting: `apperror` (typed error → HTTP status, with a JSON:API `Source`),
   `jsonapi` (documents, serializer, sparse fieldsets, links, error objects, `?include` policy, the query

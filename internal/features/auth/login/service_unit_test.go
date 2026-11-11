@@ -1,9 +1,13 @@
 package login
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +17,7 @@ import (
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	internalshareddto "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/dto"
@@ -126,7 +131,7 @@ func TestService_Login_U(t *testing.T) {
 			m := jwttoken.NewMockM(ctrl)
 			tc.stub(q, sq, m)
 
-			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, ratelimit.New(5, time.Minute))
+			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: time.Minute}))
 			svc.(*service).newFamilyID = func() uuid.UUID { return familyID }
 			svc.(*service).now = func() time.Time { return now }
 
@@ -180,7 +185,7 @@ func TestService_Login_FailureLimit_U(t *testing.T) {
 	}{
 		{name: "unknown emails count as failures; past the limit the email is a 429 without a DB read",
 			attempts: []attempt{unknown("ghost@example.com"), unknown("ghost@example.com"), blocked("ghost@example.com")}},
-		{name: "wrong passwords count; once blocked even the right password is a 429 until the window ends",
+		{name: "wrong passwords count; once the bucket is empty even the right password is a 429",
 			attempts: []attempt{wrong("jane@example.com"), wrong("jane@example.com"), blocked("jane@example.com")}},
 		{name: "a successful login clears the email's failures",
 			attempts: []attempt{wrong("jane@example.com"), right, wrong("jane@example.com"), wrong("jane@example.com"),
@@ -203,7 +208,7 @@ func TestService_Login_FailureLimit_U(t *testing.T) {
 			q := sqlc.NewMockQuerier(ctrl)
 			sq := authsharedsqlc.NewMockQuerier(ctrl)
 			m := jwttoken.NewMockM(ctrl)
-			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, ratelimit.New(2, time.Minute))
+			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, ratelimit.NewMemory(ratelimit.Rate{Burst: 2, Per: time.Minute}))
 
 			for i, a := range tc.attempts {
 				if a.wantCode != apperror.CodeTooManyRequests {
@@ -259,7 +264,7 @@ func TestService_Login_TimingEqualized_U(t *testing.T) {
 			q := sqlc.NewMockQuerier(ctrl)
 			q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(tc.row, tc.readErr)
 			svc := NewService(q, authsharedsqlc.NewMockQuerier(ctrl), jwttoken.NewMockM(ctrl),
-				15*time.Minute, 24*time.Hour, 12*time.Hour, ratelimit.New(5, time.Minute))
+				15*time.Minute, 24*time.Hour, 12*time.Hour, ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: time.Minute}))
 
 			var calls [][]string
 			svc.(*service).checkPassword = func(hash, plain string) bool {
@@ -273,6 +278,169 @@ func TestService_Login_TimingEqualized_U(t *testing.T) {
 			require.Equal(t, apperror.CodeUnauthorized, appErr.Code)
 			require.Equal(t, invalidCredentialsMessage, appErr.Message, "same answer either way")
 			require.Equal(t, [][]string{tc.wantCheck}, calls)
+		})
+	}
+}
+
+// stubLimiter answers Take with takeErr, or with a refusal when refuse is set,
+// and records the calls.
+type stubLimiter struct {
+	takeErr, resetErr error
+	refuse            bool
+	calls             []string
+}
+
+func (l *stubLimiter) Take(_ context.Context, key string) (ratelimit.Decision, error) {
+	l.calls = append(l.calls, "Take "+key)
+	if l.refuse {
+		return ratelimit.Decision{RetryAfter: time.Minute}, nil
+	}
+	return ratelimit.Decision{Allowed: l.takeErr == nil}, l.takeErr
+}
+
+func (l *stubLimiter) Reset(_ context.Context, key string) error {
+	l.calls = append(l.calls, "Reset "+key)
+	return l.resetErr
+}
+
+// TestService_Login_LimiterOutcomes_U pins what the failures limiter's answers
+// do: a token is taken before the DB read; an error is a 500 and a refusal (an
+// empty bucket, or a full bucket map refusing a new key) a 429, both before
+// the DB read — never an uncounted guess; a failed refill after the right
+// password still logs in, logged.
+func TestService_Login_LimiterOutcomes_U(t *testing.T) {
+	hash, err := password.Hash("Passw0rd!")
+	require.NoError(t, err)
+	active := sqlc.GetUserForLoginRow{ID: 1, Name: "Jane", Email: "jane@example.com", PasswordHash: hash, Role: "user", IsActive: true}
+	storeDown := errors.New("store down")
+	const key = "login:jane@example.com"
+
+	testCases := []struct {
+		name      string
+		limiter   *stubLimiter
+		password  string
+		readsUser bool
+		wantCode  apperror.Code // zero = success
+		wantErr   error
+		wantCalls []string
+		wantLog   string
+	}{
+		{name: "a limiter that fails is a 500 before the DB read",
+			limiter: &stubLimiter{takeErr: storeDown}, password: "wrong",
+			wantCode: apperror.CodeInternal, wantErr: storeDown, wantCalls: []string{"Take " + key}},
+		{name: "a limiter that refuses the key is a 429 before the DB read, the right password too",
+			limiter: &stubLimiter{refuse: true}, password: "Passw0rd!",
+			wantCode: apperror.CodeTooManyRequests, wantCalls: []string{"Take " + key}},
+		{name: "a wrong password keeps the token it took",
+			limiter: &stubLimiter{}, password: "wrong", readsUser: true,
+			wantCode: apperror.CodeUnauthorized, wantCalls: []string{"Take " + key}},
+		{name: "the right password gives the token back by refilling the bucket",
+			limiter: &stubLimiter{}, password: "Passw0rd!", readsUser: true,
+			wantCalls: []string{"Take " + key, "Reset " + key}},
+		{name: "the right password still logs in when the bucket can't be refilled, and it's logged",
+			limiter: &stubLimiter{resetErr: storeDown}, password: "Passw0rd!", readsUser: true,
+			wantCalls: []string{"Take " + key, "Reset " + key},
+			wantLog:   `"msg":"login: reset failure count failed"`},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			l, err := logging.New(&buf, logging.FormatJSON, "debug")
+			require.NoError(t, err)
+			prev := slog.Default()
+			slog.SetDefault(l)
+			defer slog.SetDefault(prev)
+
+			ctrl := gomock.NewController(t)
+			q := sqlc.NewMockQuerier(ctrl)
+			sq := authsharedsqlc.NewMockQuerier(ctrl)
+			m := jwttoken.NewMockM(ctrl)
+			if tc.readsUser {
+				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil)
+			}
+			if tc.wantCode.IsZero() {
+				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil)
+				sq.EXPECT().InsertRefreshToken(gomock.Any(), gomock.Any()).Return(nil)
+			}
+			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, tc.limiter)
+
+			_, err = svc.Login(context.Background(), Request{Email: "jane@example.com", Password: tc.password})
+			require.Equal(t, tc.wantCalls, tc.limiter.calls)
+			if tc.wantCode.IsZero() {
+				require.NoError(t, err)
+				require.Contains(t, buf.String(), tc.wantLog)
+				return
+			}
+			var appErr *apperror.AppError
+			require.ErrorAs(t, err, &appErr)
+			require.Equal(t, tc.wantCode, appErr.Code)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestService_Login_ParallelGuesses_U pins that parallel wrong guesses for one
+// email can't outrun the count: while every guess that got through is still
+// in its (slow) bcrypt comparison, the rest are already 429s, so exactly the
+// burst reach the comparison.
+func TestService_Login_ParallelGuesses_U(t *testing.T) {
+	active := sqlc.GetUserForLoginRow{ID: 1, Email: "jane@example.com", PasswordHash: "$2a$10$stored", IsActive: true}
+
+	testCases := []struct {
+		name         string
+		burst        int
+		parallel     int
+		wantCompared int32
+	}{
+		{name: "20 parallel guesses against 2 tries: 2 reach bcrypt, 18 are 429s", burst: 2, parallel: 20, wantCompared: 2},
+		{name: "3 parallel guesses against 5 tries: all 3 reach bcrypt", burst: 5, parallel: 3, wantCompared: 3},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			q := sqlc.NewMockQuerier(ctrl)
+			q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil).AnyTimes()
+			svc := NewService(q, authsharedsqlc.NewMockQuerier(ctrl), jwttoken.NewMockM(ctrl),
+				15*time.Minute, 24*time.Hour, 12*time.Hour,
+				ratelimit.NewMemory(ratelimit.Rate{Burst: tc.burst, Per: time.Hour}))
+
+			// Every comparison blocks until release: the guesses that got
+			// through are all "in bcrypt" while the others decide.
+			var compared, tooMany, unauthorized atomic.Int32
+			release := make(chan struct{})
+			svc.(*service).checkPassword = func(string, string) bool {
+				compared.Add(1)
+				<-release
+				return false
+			}
+
+			var wg sync.WaitGroup
+			for range tc.parallel {
+				wg.Go(func() {
+					_, err := svc.Login(context.Background(), Request{Email: "jane@example.com", Password: "guess"})
+					var appErr *apperror.AppError
+					if errors.As(err, &appErr) {
+						switch appErr.Code {
+						case apperror.CodeTooManyRequests:
+							tooMany.Add(1)
+						case apperror.CodeUnauthorized:
+							unauthorized.Add(1)
+						}
+					}
+				})
+			}
+			require.Eventually(t, func() bool { return compared.Load()+tooMany.Load() == int32(tc.parallel) },
+				5*time.Second, time.Millisecond, "every guess is either in bcrypt or refused")
+			close(release)
+			wg.Wait()
+
+			require.Equal(t, tc.wantCompared, compared.Load())
+			require.Equal(t, tc.wantCompared, unauthorized.Load())
+			require.Equal(t, int32(tc.parallel)-tc.wantCompared, tooMany.Load())
 		})
 	}
 }

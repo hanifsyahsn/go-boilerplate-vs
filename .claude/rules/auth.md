@@ -64,26 +64,41 @@ Added 2026-11-09 as the boilerplate's base security.
   **every** peer — that's what let a client pick its own IP. Behind nginx / a load balancer, list its IP or CIDR,
   else every client shares the proxy's IP. Each entry is validated in `Config.Validate()` (IP or CIDR) and again
   by gin; `NewRouter` / `NewServer` return the error and `main` stops.
-- **`internal/platform/ratelimit.Limiter`**: in-memory fixed window per key — `Allow` (count a hit, within
-  limit?), `Blocked` (used up, without a hit), `Reset` (forget the key); expired buckets are swept once per window.
-  One instance only (see *Gotchas* in CLAUDE.md).
+- **`internal/platform/ratelimit.Limiter`** (decision 0003): a **token bucket** per key behind an interface —
+  `Take` (take a token if there is one, **atomically**) and `Reset` (refill); each takes a ctx and can return an
+  error (a shared store that's down); `Take` answers a `Decision{Allowed, RetryAfter}`. **No peek-then-take**:
+  a check now and a count later is a race (N parallel requests all pass the check) — take first, give back
+  with `Reset`. A
+  `Rate{Burst, Per}` is Burst tokens refilled evenly over Per: `{5, 15m}` = five at once, then one every 3 min.
+  `ratelimit.NewMemory(rate)` is the in-process one (never errors; one instance only, see *Gotchas* in
+  CLAUDE.md). It keeps only buckets still refilling (a full one is dropped; swept once per `Per`, and while the
+  map is full once per token interval — not on every request, which a flood could use to burn CPU) and at most `DefaultMaxKeys` (100,000) of them: when all are still refilling, a **new** key is
+  refused (warn `rate limit: bucket map full, new key refused`) rather than an old one forgotten — forgetting
+  would let a flood of fresh keys wipe a victim's count. Keys of a client IP go through `ratelimit.IPKey`: IPv4
+  as is, **IPv6 per /64** (one subscriber gets a whole /64).
 - **Per IP** (`middleware.RateLimitByIP(limiter, "auth")`, `Security.AuthIPLimit`, **required** — `NewRouter`
-  refuses nil): register and login share one budget, 300 / 15 min per IP (`authIPLimit` / `authIPWindow` in
-  `main.go`; generous because an office NAT shares one IP). Past it → 429 `too_many_requests`, detail
-  `middleware.TooManyRequestsMessage`, the handler never runs. **Refresh and logout are not IP-limited**: they run
+  refuses nil): register and login share one bucket, 300 / 15 min per IP (`authIPRate` in `main.go`; generous
+  because an office NAT shares one IP). Past it → 429 `too_many_requests` with `Retry-After` (whole seconds,
+  rounded up — `middleware.RetryAfterSeconds`), detail `middleware.TooManyRequestsMessage`, the handler never
+  runs. A limiter error is a 500 (the limiter owns surviving its store — decision 0003). **Refresh and logout are not IP-limited**: they run
   off the refresh cookie on every open tab.
-- **Per email, failed logins** (`login` service, its own limiter, 5 / 15 min — `loginFailureLimit` /
-  `loginFailureWindow`): key `login:` + trimmed, lowercased email (as `GetUserForLogin` matches it). An unknown
-  email and a wrong password both count (so a 429 doesn't reveal whether the email exists); the right password
-  clears the count — a deactivated account included, it isn't a guess; once used up, every attempt for that
-  email is a 429 *before the DB read*, the right password too, until the window ends. Known trade-off: anyone can
-  lock an email out for one window.
+- **Per email, failed logins** (`login` service, its own limiter, 5 / 15 min — `loginFailureRate`): key
+  `login:` + trimmed, lowercased email (as `GetUserForLogin` matches it). Every attempt `Take`s a token
+  **before the DB read** (so parallel guesses can't outrun the count — `TestService_Login_ParallelGuesses_U`);
+  an unknown email and a wrong password keep it (so a 429 doesn't reveal whether the email exists); the right
+  password `Reset`s the bucket — a deactivated account included, it isn't a guess — so in effect only failures
+  count. Once empty, every attempt for that email is a 429, the right password too, until a token comes back
+  (3 min). A limiter error is a 500 and a refused key (empty bucket, or a full bucket map) a 429 — fail closed,
+  never an uncounted guess; a failed `Reset` after the right password is only logged. The login 429 carries no `Retry-After` yet. Known trade-off: anyone can keep an email locked out
+  by spending a token every 3 min.
 - **A new public endpoint** (no access token) goes into the `limited` group in `router.go` unless, like
   refresh, it runs automatically per tab. **One that sends email** (verify link, password reset) also needs a
   per-recipient limit in its service (e.g. 3 / h), or it can be used to spam any address through our SMTP.
-- Tests: `middleware/rate_limit_unit_test.go`, `server/router_unit_test.go` (`TestNewRouter_Security_U` — which
+- Tests: `ratelimit/limiter_unit_test.go` (`TestMemory_U`, `TestMemory_Take_Parallel_U`, `TestIPKey_U`), `middleware/rate_limit_unit_test.go`,
+  `server/router_unit_test.go` (`TestNewRouter_Security_U` — which
   routes are limited, forged vs trusted `X-Forwarded-For`; `TestNewRouter_SecurityErrors_U`),
-  `login/service_unit_test.go` (`TestService_Login_FailureLimit_U`), config's `TRUSTED_PROXIES` cases.
+  `login/service_unit_test.go` (`TestService_Login_FailureLimit_U`,
+  `TestService_Login_LimiterOutcomes_U`, `TestService_Login_ParallelGuesses_U`), config's `TRUSTED_PROXIES` cases.
   Integration routers pass a high limit (`testLimit`) so multi-login flows from httptest's one address pass.
 - `make sec SEC_PASSWORD=imsureitislocal` (local only — see *Gotchas* in CLAUDE.md; gosec without generated code, semgrep with `p/golang` + `.semgrep/`, govulncheck, gitleaks over git
   history) is the security scan; it runs all four and fails at the end if any failed, and must stay green (see
