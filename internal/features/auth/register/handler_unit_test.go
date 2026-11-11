@@ -55,6 +55,31 @@ func TestHandler_Register_U(t *testing.T) {
 			wantInBody: []string{"Password must be at least 8 characters long."},
 		},
 		{
+			name: "a 72-byte password (72 plain letters) is accepted",
+			body: doc(`{"name":"Jane","email":"jane@example.com","password":"` + strings.Repeat("a", 72) + `"}`),
+			stub: func(s *MockS) {
+				s.EXPECT().Register(gomock.Any(), Request{Name: "Jane", Email: "jane@example.com", Password: strings.Repeat("a", 72)}).
+					Return(authshared.UserResource{ID: "1", Name: "Jane", Email: "jane@example.com", Role: "user"}, nil)
+			},
+			wantCode: http.StatusCreated,
+		},
+		{
+			name:     "a 73-byte password is a 422 before the service",
+			body:     doc(`{"name":"Jane","email":"jane@example.com","password":"` + strings.Repeat("a", 73) + `"}`),
+			stub:     func(s *MockS) {},
+			wantCode: http.StatusUnprocessableEntity,
+			wantInBody: []string{"Password is too long (at most 72 bytes).",
+				`"pointer":"/data/attributes/password"`},
+		},
+		{
+			name:     "40 accented letters (40 characters, 80 bytes) are a 422, never reaching bcrypt's 500",
+			body:     doc(`{"name":"Jane","email":"jane@example.com","password":"` + strings.Repeat("é", 40) + `"}`),
+			stub:     func(s *MockS) {},
+			wantCode: http.StatusUnprocessableEntity,
+			wantInBody: []string{"Password is too long (at most 72 bytes). Accented letters and emoji count as more than one character",
+				`"pointer":"/data/attributes/password"`},
+		},
+		{
 			name:       "the role can't be chosen: 403",
 			body:       doc(`{"name":"Jane","email":"jane@example.com","password":"Passw0rd!","role":"admin"}`),
 			stub:       func(s *MockS) {},

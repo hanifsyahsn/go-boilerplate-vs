@@ -1,10 +1,40 @@
 package password
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// TestHash_LengthLimit_U pins bcrypt's input limit, in bytes: the reason the
+// requests validate passwords with maxbytes=72, not a character count.
+func TestHash_LengthLimit_U(t *testing.T) {
+	testCases := []struct {
+		name    string
+		plain   string
+		wantErr bool
+	}{
+		{name: "72 plain letters (72 bytes) hash", plain: strings.Repeat("a", 72)},
+		{name: "36 accented letters (72 bytes) hash", plain: strings.Repeat("é", 36)},
+		{name: "73 bytes are refused", plain: strings.Repeat("a", 73), wantErr: true},
+		{name: "40 accented letters (40 characters, 80 bytes) are refused", plain: strings.Repeat("é", 40), wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			hash, err := Hash(tc.plain)
+			if tc.wantErr {
+				require.ErrorIs(t, err, bcrypt.ErrPasswordTooLong)
+				require.Empty(t, hash)
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, Check(hash, tc.plain))
+		})
+	}
+}
 
 func TestHashAndCheck_U(t *testing.T) {
 	hash, err := Hash("S3cret!pass")

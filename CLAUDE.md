@@ -145,7 +145,7 @@ Windows".
 - `internal/shared` — cross-cutting: `apperror` (typed error → HTTP status, with a JSON:API `Source`),
   `jsonapi` (documents, serializer, sparse fieldsets, links, error objects, `?include` policy, the query
   parser), `handlerutil` (`ParseQuery` / `BindResource` / `ParamID` / `WriteData` / `WriteMeta` /
-  `WriteError`), `validation` (`notblank`, `rfc3339`, `RegisterGinValidators`), `pagination`, `password`
+  `WriteError`), `validation` (`notblank`, `rfc3339`, `maxbytes`, `RegisterGinValidators`), `pagination`, `password`
   (bcrypt), `enum` (`Role`: `user` / `admin`), `requestid` (`Header`, `Key`, `With` / `FromContext` / `Detach`),
   `dto`, `constant` (context keys, cookie names), `utility` (`SafeGo` / `SafeGoContext`, …), `testhelper`.
 - `internal/features/<domain>/<action>` — the vertical slices: `auth/{register,login,refresh,logout}`, `me`,

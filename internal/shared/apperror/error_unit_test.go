@@ -317,6 +317,7 @@ type testPayload struct {
 	Tags     []string `validate:"unique"`
 	IDs      []int64  `validate:"min=1"`
 	Refs     []int64  `validate:"max=1"`
+	Secret   string   `validate:"maxbytes=4"`
 }
 
 func registerCustomValidators(v *validator.Validate) {
@@ -324,6 +325,9 @@ func registerCustomValidators(v *validator.Validate) {
 		return fl.Field().String() != ""
 	})
 	_ = v.RegisterValidation("strongpassword", func(fl validator.FieldLevel) bool {
+		return false // always fail, we just need the tag to trigger
+	})
+	_ = v.RegisterValidation("maxbytes", func(fl validator.FieldLevel) bool {
 		return false // always fail, we just need the tag to trigger
 	})
 }
@@ -346,6 +350,7 @@ func TestValidatorError(t *testing.T) {
 		Tags:     []string{"a", "a"}, // unique -> fails
 		IDs:      []int64{},          // min=1 on a slice -> fails, counted in items
 		Refs:     []int64{1, 2},      // max=1 on a slice -> fails, counted in items
+		Secret:   "ééé",              // maxbytes=4 -> fails
 	}
 
 	err := v.Struct(payload)
@@ -376,6 +381,8 @@ func TestValidatorError(t *testing.T) {
 	assert.Equal(t, "Tags must not contain duplicates.", byField["Tags"].Detail)
 	assert.Equal(t, "IDs must contain at least 1 item(s).", byField["IDs"].Detail)
 	assert.Equal(t, "Refs must contain at most 1 item(s).", byField["Refs"].Detail)
+	assert.Equal(t, "Secret is too long (at most 4 bytes). Accented letters and emoji count as more than one character, "+
+		"so use a shorter one.", byField["Secret"].Detail)
 	assert.Equal(t, "/Name", byField["Name"].Pointer)
 }
 

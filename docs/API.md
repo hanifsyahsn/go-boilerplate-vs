@@ -170,7 +170,7 @@ Creates an account. The role is always `user` — there is no way to register an
 | --- | --- | --- | --- |
 | `name` | string | yes | not blank, ≤ 255; trimmed |
 | `email` | string | yes | valid email, ≤ 255; trimmed; **unique ignoring case** |
-| `password` | string | yes | 8–72 characters (72 = bcrypt's input limit) |
+| `password` | string | yes | at least 8 characters and at most **72 bytes** (bcrypt's input limit — see below) |
 
 Any other attribute (`role`, `is_active`, …) is a **403**.
 
@@ -215,7 +215,7 @@ Supports `fields[users]`.
 | Attribute | Type | Required | Rules |
 | --- | --- | --- | --- |
 | `email` | string | yes | valid email, ≤ 255 |
-| `password` | string | yes | ≤ 72 |
+| `password` | string | yes | ≤ 72 bytes (no longer password can be registered) |
 | `trust_device` | boolean | no (default `false`) | `true` ("remember this device"): the session slides with no cap; otherwise it ends `UNTRUSTED_SESSION_DURATION` after the login |
 
 ```bash
@@ -453,6 +453,12 @@ A failed rule is **422 Unprocessable Entity**, one error per field, each with it
   ]
 }
 ```
+
+**Password length is in bytes.** bcrypt reads at most 72 bytes. Plain letters, digits and symbols are one byte
+each, an accented letter (`é`) two and an emoji four — so 40 accented letters are 40 characters but 80 bytes,
+and are refused with `422` "Password is too long (at most 72 bytes). Accented letters and emoji count as more
+than one character, so use a shorter one." (`source.pointer` `/data/attributes/password`), on register and on
+login. A form can count `new TextEncoder().encode(pw).length` to warn early.
 
 The `detail` names the field by its **label**, not its JSON name: `title` → "Title", `body` →
 "Content", `name` → "Name", `email` → "Email", `password` → "Password", `refresh_token` →

@@ -58,6 +58,8 @@ The whole API is JSON:API 1.1; keep it that way in a new slice.
   No `data` / not one object → 400; wrong `type` → 409; an `id` on a create (client-generated) → 403; on an
   update the `id` is required and must equal the URL's (else 409); any `relationships` → 403; an attribute the
   `Request` doesn't declare (read-only, unknown) → 403; a wrong JSON type → 422; a failed rule → 422 per field.
+  A limit that is really in bytes (bcrypt's 72, a column in bytes) uses the custom `maxbytes=N`, never `max=N`
+  (which counts characters).
   Every error carries `source.pointer` (`/data/attributes/title`).
 - **Updates are `PATCH` and partial**: `Request` fields are pointers, nil keeps the current value (`note/update`
   → `COALESCE(sqlc.narg(...), col)`; `admin/user` with nothing to change just reads the user back).

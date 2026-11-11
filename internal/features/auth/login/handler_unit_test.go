@@ -55,6 +55,23 @@ func TestHandler_Login_U(t *testing.T) {
 			wantInBody: []string{"Password is required.", `"pointer":"/data/attributes/password"`},
 		},
 		{
+			name:     "a password over 72 bytes is a 422 (none that long can be registered)",
+			body:     doc(`{"email":"jane@example.com","password":"` + strings.Repeat("é", 37) + `"}`),
+			stub:     func(s *MockS) {},
+			wantCode: http.StatusUnprocessableEntity,
+			wantInBody: []string{"Password is too long (at most 72 bytes).",
+				`"pointer":"/data/attributes/password"`},
+		},
+		{
+			name: "a 72-byte password reaches the service",
+			body: doc(`{"email":"jane@example.com","password":"` + strings.Repeat("é", 36) + `"}`),
+			stub: func(s *MockS) {
+				s.EXPECT().Login(gomock.Any(), Request{Email: "jane@example.com", Password: strings.Repeat("é", 36)}).Return(ok, nil)
+			},
+			wantCode:    http.StatusOK,
+			wantCookies: true,
+		},
+		{
 			name:     "plain JSON is not a document: 400",
 			body:     `{"email":"jane@example.com","password":"Passw0rd!"}`,
 			stub:     func(s *MockS) {},
