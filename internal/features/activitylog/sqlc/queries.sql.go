@@ -15,7 +15,7 @@ import (
 
 const insertActivityLogs = `-- name: InsertActivityLogs :exec
 INSERT INTO api_activity_logs (occurred_at, request_id, user_id, session_id, method, route, path, status,
-                               latency_ms, response_bytes, client_ip, user_agent)
+                               latency_ms, response_bytes, client_ip, user_agent, api_client)
 SELECT r.occurred_at,
        r.request_id,
        NULLIF(r.user_id, 0),
@@ -27,7 +27,8 @@ SELECT r.occurred_at,
        r.latency_ms,
        r.response_bytes,
        r.client_ip,
-       r.user_agent
+       r.user_agent,
+       r.api_client
 FROM (SELECT unnest($1::timestamptz[]) AS occurred_at,
              unnest($2::varchar[])      AS request_id,
              unnest($3::bigint[])          AS user_id,
@@ -39,7 +40,8 @@ FROM (SELECT unnest($1::timestamptz[]) AS occurred_at,
              unnest($9::integer[])      AS latency_ms,
              unnest($10::integer[])  AS response_bytes,
              unnest($11::varchar[])       AS client_ip,
-             unnest($12::varchar[])      AS user_agent) r
+             unnest($12::varchar[])      AS user_agent,
+             unnest($13::varchar[])      AS api_client) r
 `
 
 type InsertActivityLogsParams struct {
@@ -55,6 +57,7 @@ type InsertActivityLogsParams struct {
 	ResponseBytes []int32     `json:"response_bytes"`
 	ClientIp      []string    `json:"client_ip"`
 	UserAgent     []string    `json:"user_agent"`
+	ApiClient     []string    `json:"api_client"`
 }
 
 // One batch of activity rows in one statement: each argument is a column, the
@@ -74,6 +77,7 @@ func (q *Queries) InsertActivityLogs(ctx context.Context, arg InsertActivityLogs
 		pq.Array(arg.ResponseBytes),
 		pq.Array(arg.ClientIp),
 		pq.Array(arg.UserAgent),
+		pq.Array(arg.ApiClient),
 	)
 	return err
 }

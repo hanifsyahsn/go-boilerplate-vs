@@ -40,6 +40,7 @@ func TestActivityLog_U(t *testing.T) {
 		target    string
 		userAgent string
 		auth      bool
+		apiClient string // set as APIKey sets it (a machine call)
 		// panics makes the handler panic (a recovery after ActivityLog answers 500).
 		panics bool
 		check  func(t *testing.T, got []Activity)
@@ -60,11 +61,21 @@ func TestActivityLog_U(t *testing.T) {
 				require.Equal(t, "192.0.2.1", a.ClientIP)
 				require.WithinDuration(t, time.Now(), a.OccurredAt, 5*time.Second)
 			}},
-		{name: "an anonymous request has no user or session", method: http.MethodGet, target: "/api/notes/42", check: func(t *testing.T, got []Activity) {
+		{name: "an anonymous request has no user, session or API client", method: http.MethodGet, target: "/api/notes/42", check: func(t *testing.T, got []Activity) {
 			require.Len(t, got, 1)
 			require.Zero(t, got[0].UserID)
 			require.Equal(t, uuid.Nil, got[0].SessionID)
+			require.Empty(t, got[0].APIClient)
 		}},
+		{name: "a machine call carries the API client's name, never its key", method: http.MethodGet, target: "/api/notes/42",
+			apiClient: "billing", check: func(t *testing.T, got []Activity) {
+				require.Len(t, got, 1)
+				require.Equal(t, "billing", got[0].APIClient)
+			}},
+		{name: "a long API client name is cut to the column size in runes", method: http.MethodGet, target: "/api/notes/42",
+			apiClient: strings.Repeat("ß", 150), check: func(t *testing.T, got []Activity) {
+				require.Len(t, []rune(got[0].APIClient), 100)
+			}},
 		{name: "a 404 has an empty route", method: http.MethodGet, target: "/api/nope", check: func(t *testing.T, got []Activity) {
 			require.Len(t, got, 1)
 			require.Empty(t, got[0].Route)
@@ -102,9 +113,12 @@ func TestActivityLog_U(t *testing.T) {
 				}
 				c.String(http.StatusTeapot, "short")
 			}
-			if tc.auth {
+			switch {
+			case tc.auth:
 				r.GET("/api/notes/:id", signedIn, handler)
-			} else {
+			case tc.apiClient != "":
+				r.GET("/api/notes/:id", func(c *gin.Context) { c.Set(APIClientKey, tc.apiClient); c.Next() }, handler)
+			default:
 				r.GET("/api/notes/:id", handler)
 			}
 			r.GET("/api/long/*rest", handler)

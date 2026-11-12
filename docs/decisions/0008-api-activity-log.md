@@ -12,7 +12,9 @@ Every service needs it; one shared, tested version instead of one per service. T
 
 ## As built
 - Table `api_activity_logs` (when, request id, user / session — NULL when anonymous, no FK —, method, matched
-  route, path without query string, status, latency, response size, client IP, user agent). No body, no query.
+  route, path without query string, status, latency, response size, client IP, user agent, and — amended
+  2026-11-12, migration 000009 — `api_client`: the machine caller's name from 0010, `''` when none, never the key,
+  so a machine call isn't recorded as an anonymous one). No body, no query.
 - `middleware.ActivityLog` right after `AccessLog` (404 / 405 / panics recorded, `/healthz` skipped);
   `activitylog.Recorder` never blocks (4096 queue, drops counted and logged), writes batches of 200 or every 2 s
   in one `INSERT … unnest` statement, drains and writes the queue at shutdown (`TestRecorder_ShutdownFlush_I`).

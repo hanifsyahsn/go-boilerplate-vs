@@ -66,6 +66,9 @@ func TestRecorder_Columns_I(t *testing.T) {
 		wantUser  any
 		wantSesID any
 	}{
+		{name: "a machine call keeps the API client's name",
+			a:        middleware.Activity{OccurredAt: at, Method: "POST", Path: "/api/internal/sync", Status: 200, APIClient: "billing"},
+			wantUser: nil, wantSesID: nil},
 		{name: "a signed-in request keeps user and session",
 			a: middleware.Activity{OccurredAt: at, RequestID: "req-1", UserID: 7, SessionID: sid, Method: "PATCH", Route: "/api/notes/:id",
 				Path: "/api/notes/1", Status: 200, Latency: 1500 * time.Millisecond, ResponseBytes: 321, ClientIP: "203.0.113.7", UserAgent: "UA"},
@@ -82,16 +85,16 @@ func TestRecorder_Columns_I(t *testing.T) {
 			r.write(context.Background(), []middleware.Activity{tc.a})
 
 			var (
-				occurredAt                             time.Time
-				requestID, method, route, path, ip, ua string
-				userID, sessionID                      any
-				status, latencyMs, responseBytes       int
+				occurredAt                                        time.Time
+				requestID, method, route, path, ip, ua, apiClient string
+				userID, sessionID                                 any
+				status, latencyMs, responseBytes                  int
 			)
 			require.NoError(t, testDB.QueryRow(`
 				SELECT occurred_at, request_id, user_id, session_id::text, method, route, path, status, latency_ms,
-				       response_bytes, client_ip, user_agent
+				       response_bytes, client_ip, user_agent, api_client
 				FROM api_activity_logs`).Scan(&occurredAt, &requestID, &userID, &sessionID, &method, &route, &path, &status,
-				&latencyMs, &responseBytes, &ip, &ua))
+				&latencyMs, &responseBytes, &ip, &ua, &apiClient))
 			require.True(t, occurredAt.Equal(tc.a.OccurredAt))
 			require.Equal(t, tc.a.RequestID, requestID)
 			require.Equal(t, tc.wantUser, userID)
@@ -104,6 +107,7 @@ func TestRecorder_Columns_I(t *testing.T) {
 			require.Equal(t, tc.a.ResponseBytes, responseBytes)
 			require.Equal(t, tc.a.ClientIP, ip)
 			require.Equal(t, tc.a.UserAgent, ua)
+			require.Equal(t, tc.a.APIClient, apiClient, "\"\" = not a machine call")
 		})
 	}
 }

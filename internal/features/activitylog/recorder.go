@@ -118,7 +118,7 @@ func (r *Recorder) write(ctx context.Context, batch []middleware.Activity) {
 		UserID: make([]int64, len(batch)), SessionID: make([]uuid.UUID, len(batch)),
 		Method: make([]string, len(batch)), Route: make([]string, len(batch)), Path: make([]string, len(batch)),
 		Status: make([]int32, len(batch)), LatencyMs: make([]int32, len(batch)), ResponseBytes: make([]int32, len(batch)),
-		ClientIp: make([]string, len(batch)), UserAgent: make([]string, len(batch)),
+		ClientIp: make([]string, len(batch)), UserAgent: make([]string, len(batch)), ApiClient: make([]string, len(batch)),
 	}
 	for i, a := range batch {
 		p.OccurredAt[i], p.RequestID[i], p.UserID[i], p.SessionID[i] = a.OccurredAt, a.RequestID, a.UserID, a.SessionID
@@ -126,7 +126,7 @@ func (r *Recorder) write(ctx context.Context, batch []middleware.Activity) {
 		p.Status[i] = clampInt32(int64(a.Status))
 		p.LatencyMs[i] = clampInt32(a.Latency.Milliseconds())
 		p.ResponseBytes[i] = clampInt32(int64(a.ResponseBytes))
-		p.ClientIp[i], p.UserAgent[i] = a.ClientIP, a.UserAgent
+		p.ClientIp[i], p.UserAgent[i], p.ApiClient[i] = a.ClientIP, a.UserAgent, a.APIClient
 	}
 
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), flushTimeout)

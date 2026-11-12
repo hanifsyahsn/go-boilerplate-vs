@@ -56,7 +56,8 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (*Request
 - **API activity log** (decision 0008, migration 000008, table `api_activity_logs`, package
   `internal/features/activitylog`): one row per request — when, `request_id`, user and session (NULL = not
   signed in; no FK on purpose), method, the matched **route** pattern (`c.FullPath()`, empty for 404 / 405),
-  path **without** the query string, status, latency, response size, client IP, User-Agent. **No body or query
+  path **without** the query string, status, latency, response size, client IP, User-Agent, `api_client` (migration 000009: `middleware.APIKey`'s
+  client name, `''` = not a machine call, never the key). **No body or query
   string** (they can hold passwords and tokens). `middleware.ActivityLog` runs on the engine right after
   `AccessLog`, outside recovery (404 / 405 / panics recorded too), skips `/healthz`, cuts values to the column
   sizes in runes.

@@ -26,6 +26,7 @@ type Activity struct {
 	ResponseBytes int
 	ClientIP      string
 	UserAgent     string
+	APIClient     string // APIKey's client name, "" = not a machine call (never the key)
 }
 
 // ActivityRecorder takes an Activity off the request path. Record must never
@@ -40,6 +41,7 @@ const (
 	pathMaxRunes      = 2048
 	clientIPMaxRunes  = 64
 	userAgentMaxRunes = 512
+	apiClientMaxRunes = 100
 )
 
 // healthzPath is the liveness probe, polled too often to be worth a row.
@@ -47,7 +49,8 @@ const healthzPath = "/healthz"
 
 // ActivityLog hands every request (404 / 405 / panics included: it runs right
 // after AccessLog, outside recovery) to rec once it is answered. The caller
-// comes from the gin keys AccessTokenMiddleware sets. Values longer than
+// comes from the gin keys AccessTokenMiddleware sets, a machine caller from
+// the one APIKey sets. Values longer than
 // their column are cut to that many runes; latency and size clamp to int32.
 // /healthz isn't recorded.
 func ActivityLog(rec ActivityRecorder) gin.HandlerFunc {
@@ -76,6 +79,7 @@ func ActivityLog(rec ActivityRecorder) gin.HandlerFunc {
 			ResponseBytes: min(max(c.Writer.Size(), 0), math.MaxInt32),
 			ClientIP:      utility.TruncateRunes(c.ClientIP(), clientIPMaxRunes),
 			UserAgent:     utility.TruncateRunes(c.Request.UserAgent(), userAgentMaxRunes),
+			APIClient:     utility.TruncateRunes(c.GetString(APIClientKey), apiClientMaxRunes),
 		})
 	}
 }
