@@ -305,6 +305,7 @@ type stubLimiter struct {
 	takeErr, giveBackErr error
 	refuse               bool
 	calls                []string
+	giveBackCtxErrs      []error // ctx.Err() as each Reset / Return saw it
 }
 
 func (l *stubLimiter) Take(_ context.Context, key string) (ratelimit.Decision, error) {
@@ -315,14 +316,68 @@ func (l *stubLimiter) Take(_ context.Context, key string) (ratelimit.Decision, e
 	return ratelimit.Decision{Allowed: l.takeErr == nil}, l.takeErr
 }
 
-func (l *stubLimiter) Reset(_ context.Context, key string) error {
+func (l *stubLimiter) Reset(ctx context.Context, key string) error {
 	l.calls = append(l.calls, "Reset "+key)
+	l.giveBackCtxErrs = append(l.giveBackCtxErrs, ctx.Err())
 	return l.giveBackErr
 }
 
-func (l *stubLimiter) Return(_ context.Context, key string) error {
+func (l *stubLimiter) Return(ctx context.Context, key string) error {
 	l.calls = append(l.calls, "Return "+key)
+	l.giveBackCtxErrs = append(l.giveBackCtxErrs, ctx.Err())
 	return l.giveBackErr
+}
+
+// TestService_Login_GiveBackOutlivesRequest_U: a client that hangs up cancels
+// the request ctx, and a shared store (Redis) refuses a call on a cancelled
+// ctx; a give-back on it would leave the count taken although no password
+// was tried (or the right one was). Every give-back runs on a ctx that
+// outlives the request.
+func TestService_Login_GiveBackOutlivesRequest_U(t *testing.T) {
+	hash, err := password.Hash("Passw0rd!")
+	require.NoError(t, err)
+	active := sqlc.GetUserForLoginRow{ID: 1, Name: "Jane", Email: "jane@example.com", PasswordHash: hash, Role: "user", IsActive: true}
+	testCases := []struct {
+		name        string
+		email       *stubLimiter
+		foldErr     error
+		readsUser   bool
+		wantIPGives int
+		wantEmGives int
+	}{
+		{name: "a fold that fails because the client went away still gives the IP its token back",
+			email: &stubLimiter{}, foldErr: context.Canceled, wantIPGives: 1},
+		{name: "an email that refuses after the client went away still gives the IP its token back",
+			email: &stubLimiter{refuse: true}, wantIPGives: 1},
+		{name: "the right password still resets the email and returns the IP's token after the client went away",
+			email: &stubLimiter{}, readsUser: true, wantIPGives: 1, wantEmGives: 1},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			q := sqlc.NewMockQuerier(ctrl)
+			sq := authsharedsqlc.NewMockQuerier(ctrl)
+			sq.EXPECT().FoldEmail(gomock.Any(), gomock.Any()).Return("jane@example.com", tc.foldErr)
+			if tc.readsUser {
+				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil)
+			}
+			tm := jwttoken.NewMockM(ctrl)
+			tm.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil).AnyTimes()
+			sq.EXPECT().StartSession(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+			ip := &stubLimiter{}
+			svc := NewService(q, sq, tm, 15*time.Minute, 24*time.Hour, 12*time.Hour, Limiters{Email: tc.email, IP: ip})
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel() // the client hung up
+			_, _ = svc.Login(ctx, Request{Email: "jane@example.com", Password: "Passw0rd!"}, testClient)
+
+			require.Len(t, ip.giveBackCtxErrs, tc.wantIPGives)
+			require.Len(t, tc.email.giveBackCtxErrs, tc.wantEmGives)
+			for _, e := range append(ip.giveBackCtxErrs, tc.email.giveBackCtxErrs...) {
+				require.NoError(t, e, "a give-back ran on the cancelled request ctx")
+			}
+		})
+	}
 }
 
 // TestService_Login_LimiterOutcomes_U pins what the two limiters' answers do:

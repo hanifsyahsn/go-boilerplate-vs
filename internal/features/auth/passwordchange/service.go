@@ -82,7 +82,9 @@ func (s *service) Change(ctx context.Context, userID int64, sessionID uuid.UUID,
 		return apperror.New(CodeWrongPassword, wrongPasswordMessage,
 			fmt.Errorf("(%s): wrong current password for user %d", feature, userID)).WithPointer("/data/attributes/current_password")
 	}
-	if err = s.failures.Reset(ctx, key); err != nil {
+	// On a ctx that outlives the request: a hung-up client would make a shared
+	// store refuse the reset, leaving a right password counted as a failure.
+	if err = s.failures.Reset(context.WithoutCancel(ctx), key); err != nil {
 		slog.WarnContext(ctx, "password change: reset failure count failed", "err", err)
 	}
 

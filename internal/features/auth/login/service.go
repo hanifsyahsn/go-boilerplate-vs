@@ -145,7 +145,7 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 	folded, err := s.authSharedQuerier.FoldEmail(ctx, email)
 	if err != nil {
 		// No password is tried, so this attempt doesn't count against the IP.
-		s.giveBack(ctx, "ip", s.limits.IP.Return(ctx, ipKey))
+		s.giveBack(ctx, "ip", s.limits.IP.Return(context.WithoutCancel(ctx), ipKey))
 		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
 			fmt.Errorf("FoldEmail() (%s): %w", feature, err))
 	}
@@ -154,7 +154,7 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 	d, err = s.limits.Email.Take(ctx, emailKey)
 	if err != nil || !d.Allowed {
 		// No password is tried, so this attempt doesn't count against the IP.
-		s.giveBack(ctx, "ip", s.limits.IP.Return(ctx, ipKey))
+		s.giveBack(ctx, "ip", s.limits.IP.Return(context.WithoutCancel(ctx), ipKey))
 	}
 	if err != nil {
 		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
@@ -188,8 +188,8 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 	// attempt's token included), and the IP gets this attempt's token back —
 	// only that one, the IP's other failures stay counted. A failed give-back
 	// only leaves a count as it was, so it doesn't fail the login.
-	s.giveBack(ctx, "email", s.limits.Email.Reset(ctx, emailKey))
-	s.giveBack(ctx, "ip", s.limits.IP.Return(ctx, ipKey))
+	s.giveBack(ctx, "email", s.limits.Email.Reset(context.WithoutCancel(ctx), emailKey))
+	s.giveBack(ctx, "ip", s.limits.IP.Return(context.WithoutCancel(ctx), ipKey))
 
 	// Checked after the password, so only the account holder learns it's
 	// deactivated.
@@ -240,7 +240,11 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 }
 
 // giveBack logs a failed Reset / Return of a failure budget; it never fails
-// the login.
+// the login. Every give-back runs on
+// context.WithoutCancel(ctx): a client that hung up cancels the request ctx,
+// a shared store refuses a call on it, and the count would stay taken
+// although no password was tried (or the right one was). The store bounds
+// each call itself (ratelimit.RedisTimeout).
 func (s *service) giveBack(ctx context.Context, limiter string, err error) {
 	if err != nil {
 		slog.WarnContext(ctx, "login: give back failure count failed", "feature", feature, "limiter", limiter, "err", err)

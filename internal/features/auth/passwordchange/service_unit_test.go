@@ -265,3 +265,44 @@ func TestService_Change_ParallelGuesses_U(t *testing.T) {
 		})
 	}
 }
+
+// ctxLimiter records ctx.Err() as each Reset saw it.
+type ctxLimiter struct{ resetCtxErrs []error }
+
+func (l *ctxLimiter) Take(context.Context, string) (ratelimit.Decision, error) {
+	return ratelimit.Decision{Allowed: true}, nil
+}
+func (l *ctxLimiter) Reset(ctx context.Context, _ string) error {
+	l.resetCtxErrs = append(l.resetCtxErrs, ctx.Err())
+	return nil
+}
+func (*ctxLimiter) Return(context.Context, string) error { return nil }
+
+func TestService_Change_ResetOutlivesRequest_U(t *testing.T) {
+	testCases := []struct {
+		name string
+	}{
+		{name: "the right current password resets the failure count even after the client went away"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			q := sqlc.NewMockQuerier(ctrl)
+			q.EXPECT().GetUserPassword(gomock.Any(), gomock.Any()).Return("hash-of:Passw0rd!", nil)
+			store := NewMockStoreI(ctrl)
+			store.EXPECT().RunInTx(gomock.Any(), gomock.Any()).Return(context.Canceled).AnyTimes()
+			limiter := &ctxLimiter{}
+			svc := NewService(q, store, limiter,
+				authshared.Emailer{Mailer: &mailer.Fake{}, Go: func(ctx context.Context, fn func(context.Context)) { fn(ctx) }})
+			svc.(*service).check = func(hash, plain string) bool { return hash == "hash-of:"+plain }
+			svc.(*service).hash = func(plain string) (string, error) { return "hash-of:" + plain, nil }
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel() // the client hung up
+			_ = svc.Change(ctx, 7, uuid.New(), Request{CurrentPassword: "Passw0rd!", Password: "N3w-Passw0rd"})
+
+			require.Len(t, limiter.resetCtxErrs, 1)
+			require.NoError(t, limiter.resetCtxErrs[0], "the reset ran on the cancelled request ctx")
+		})
+	}
+}
