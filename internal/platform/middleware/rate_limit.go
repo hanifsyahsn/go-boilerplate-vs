@@ -2,9 +2,6 @@ package middleware
 
 import (
 	"fmt"
-	"math"
-	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
@@ -39,19 +36,12 @@ func RateLimitByIP(l ratelimit.Limiter, name string) gin.HandlerFunc {
 			return
 		}
 		if !d.Allowed {
-			c.Header("Retry-After", RetryAfterSeconds(d.RetryAfter))
 			jsonapi.WriteErrorsContext(ctx, c.Writer,
 				apperror.New(apperror.CodeTooManyRequests, TooManyRequestsMessage,
-					fmt.Errorf("rate limit %s exceeded by %s (Rate Limit Middleware)", name, ip)))
+					fmt.Errorf("rate limit %s exceeded by %s (Rate Limit Middleware)", name, ip)).WithRetryAfter(d.RetryAfter))
 			c.Abort()
 			return
 		}
 		c.Next()
 	}
-}
-
-// RetryAfterSeconds is a Retry-After header value: whole seconds, rounded up,
-// at least 1.
-func RetryAfterSeconds(d time.Duration) string {
-	return strconv.Itoa(max(1, int(math.Ceil(d.Seconds()))))
 }

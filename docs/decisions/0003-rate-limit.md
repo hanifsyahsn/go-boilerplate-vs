@@ -12,8 +12,8 @@ logins per IP, the general per-IP layer.
    users share one IP behind NAT / CGNAT, and a forged token fails the signature check before the DB); 300 / 1 min
    per IP, a flood guard only; no IP allowlist.
 4. Redis down: ordinary endpoints **fail open** (warning logged); auth endpoints **fall back to the in-memory limiter**.
-5. The Redis implementation is an atomic Lua token bucket with a TTL long enough for a bucket to refill, ported
-   from a derivative that already runs it and reshaped to the boilerplate's conventions (slog, JSON:API 429 +
+5. The Redis implementation is an atomic Lua token bucket with a TTL long enough for a bucket to refill, shaped
+   to the boilerplate's conventions (slog, JSON:API 429 +
    `Retry-After`).
 6. **Failed logins per client IP, across emails** (added 2026-11-11): 100 / 6 h. Credential stuffing tries each
    leaked email once, so the per-email cap never fires. Taken before the email's token; given back with a new
@@ -21,8 +21,17 @@ logins per IP, the general per-IP layer.
    `Reset`, which would let one real account wipe an attacker's count. No IP allowlist: only failures count, so a
    shared IP full of people who type their password right never reaches it.
 
+## Which store a service runs (added 2026-11-12)
+- **The rate limit is required** for any service with sign-in or public endpoints. The store is chosen by how
+  the service is deployed:
+  - **One instance:** in-memory is enough. Leave `REDIS_URL` empty and run no Redis.
+  - **More than one replica:** Redis is required. Set `REDIS_URL` before the second replica starts. Without it each
+    replica counts on its own, so every limit is multiplied by the replica count.
+- A service that has no Redis yet adds it the day it scales out. "We don't use Redis" is never a reason to skip
+  the limit.
+
 ## Porting rules (agreed 2026-11-11)
-The derivative's Redis limiter is **not** ported as it is:
+A Redis limiter brought in from elsewhere is **not** taken as it is:
 - Redis down: auth endpoints fall back to in-memory (point 4) — never fail open on login / register / reset.
 - No key read from a raw body (unbounded read, unnormalised email). Per-identifier limits live in the service,
   after the request is bound, on the normalised value.
@@ -39,8 +48,8 @@ The derivative's Redis limiter is **not** ported as it is:
   back. Accepted for an emergency mode.
 
 ## Why
-Today the boilerplate guards auth only, in memory, so every limit multiplies by the replica count. Derivatives
-already run token buckets (one of them on Redis); small services shouldn't have to run Redis.
+Before this decision the boilerplate guarded auth only, in memory, so every limit multiplied by the replica count.
+Token buckets are the common choice; small services shouldn't have to run Redis.
 
 ## As built (Redis + fallback)
 - `ratelimit.NewRedis(client, rate, name)`: one Lua script per operation, Redis' own clock, keys `rl:<name>:<key>`
@@ -48,3 +57,10 @@ already run token buckets (one of them on Redis); small services shouldn't have 
 - `WithFallback(redis, memory, name)` for the auth limits (never fail open), `FailOpen(redis, name)` for the
   general per-IP limit; the "store unavailable" warning at most once per 30 s per limiter.
 - The same behaviour table runs against both implementations; 50 parallel takes on a burst of 10 allow exactly 10.
+
+## Every 429 carries Retry-After (added 2026-11-12)
+Point 5's "429 + `Retry-After`" holds for **every** limit, not only the per-IP middleware. A service-level limit
+(per-email / per-IP failed logins, wrong current passwords, verification links) answers its 429 with
+`apperror.AppError.WithRetryAfter(decision.RetryAfter)`. The JSON:API error writer sends that as `Retry-After`
+(whole seconds, rounded up, at least 1), and CORS exposes the header. Before this, only the per-IP limit sent it:
+`AppError` couldn't carry a response header.

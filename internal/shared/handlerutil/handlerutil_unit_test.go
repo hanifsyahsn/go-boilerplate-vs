@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
@@ -269,8 +270,15 @@ func TestWriteError_U(t *testing.T) {
 		wantCode    int
 		wantInBody  string
 		wantPointer string
+		// wantRetryAfter is the Retry-After header ("" = none).
+		wantRetryAfter string
 	}{
 		{name: "no error", err: nil, wantWrote: false},
+		{
+			name:      "a service's 429 with a wait: Retry-After reaches the response",
+			err:       apperror.New(apperror.CodeTooManyRequests, "Too many.", nil).WithRetryAfter(90 * time.Second),
+			wantWrote: true, wantCode: http.StatusTooManyRequests, wantInBody: "Too many.", wantRetryAfter: "90",
+		},
 		{name: "app error kept", err: apperror.New(apperror.CodeNotFound, "Not here.", nil), wantWrote: true, wantCode: http.StatusNotFound, wantInBody: "Not here."},
 		{
 			name:      "validation errors: a 422 per field",
@@ -293,6 +301,7 @@ func TestWriteError_U(t *testing.T) {
 			}
 			require.Equal(t, tc.wantCode, w.Code)
 			require.Contains(t, w.Body.String(), tc.wantInBody)
+			require.Equal(t, tc.wantRetryAfter, w.Header().Get("Retry-After"))
 			if tc.wantPointer != "" {
 				require.Equal(t, &apperror.Source{Pointer: tc.wantPointer}, errorDoc(t, w.Body.String()).Errors[0].Source)
 			}

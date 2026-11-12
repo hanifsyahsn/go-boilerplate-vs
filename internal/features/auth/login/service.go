@@ -133,7 +133,7 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 	}
 	if !d.Allowed {
 		return Result{}, apperror.New(apperror.CodeTooManyRequests, tooManyFailuresMessage,
-			fmt.Errorf("(%s): login failures exceeded for an IP", feature))
+			fmt.Errorf("(%s): login failures exceeded for an IP", feature)).WithRetryAfter(d.RetryAfter)
 	}
 
 	d, err = s.limits.Email.Take(ctx, emailKey)
@@ -147,7 +147,7 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 	}
 	if !d.Allowed {
 		return Result{}, apperror.New(apperror.CodeTooManyRequests, tooManyFailuresMessage,
-			fmt.Errorf("(%s): login failures exceeded for an email", feature))
+			fmt.Errorf("(%s): login failures exceeded for an email", feature)).WithRetryAfter(d.RetryAfter)
 	}
 
 	user, err := s.querier.GetUserForLogin(ctx, strings.TrimSpace(req.Email))

@@ -88,21 +88,3 @@ func TestRateLimitByIP_U(t *testing.T) {
 		})
 	}
 }
-
-func TestRetryAfterSeconds_U(t *testing.T) {
-	testCases := []struct {
-		name string
-		wait time.Duration
-		want string
-	}{
-		{name: "whole seconds stay as they are", wait: 30 * time.Second, want: "30"},
-		{name: "a part of a second rounds up", wait: 2500 * time.Millisecond, want: "3"},
-		{name: "never less than one second", wait: 0, want: "1"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, RetryAfterSeconds(tc.wait))
-		})
-	}
-}

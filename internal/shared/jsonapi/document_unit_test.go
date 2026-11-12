@@ -428,3 +428,41 @@ func TestPaginationLinks_U(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteErrors_RetryAfter_U(t *testing.T) {
+	testCases := []struct {
+		name string
+		errs []*apperror.AppError
+		want string // "" = no Retry-After header
+	}{
+		{
+			name: "a 429 with a wait sends Retry-After in whole seconds, rounded up",
+			errs: []*apperror.AppError{apperror.New(apperror.CodeTooManyRequests, "Too many.", nil).WithRetryAfter(2500 * time.Millisecond)},
+			want: "3",
+		},
+		{
+			name: "an error without a wait sends no Retry-After",
+			errs: []*apperror.AppError{apperror.New(apperror.CodeNotFound, "Missing.", nil)},
+		},
+		{
+			name: "a 429 without a wait sends no Retry-After",
+			errs: []*apperror.AppError{apperror.New(apperror.CodeTooManyRequests, "Too many.", nil)},
+		},
+		{
+			name: "several errors: the longest wait wins",
+			errs: []*apperror.AppError{
+				apperror.New(apperror.CodeTooManyRequests, "Too many.", nil).WithRetryAfter(time.Minute),
+				apperror.New(apperror.CodeTooManyRequests, "Too many.", nil).WithRetryAfter(3 * time.Minute),
+			},
+			want: "180",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			WriteErrors(w, tc.errs...)
+			require.Equal(t, tc.want, w.Header().Get(apperror.RetryAfterHeader))
+			require.Equal(t, tc.errs[0].Code.Status(), w.Code)
+		})
+	}
+}

@@ -248,6 +248,7 @@ func TestService_Login_FailureLimit_U(t *testing.T) {
 				require.Equal(t, a.wantCode, appErr.Code, "attempt %d", i)
 				if a.wantCode == apperror.CodeTooManyRequests {
 					require.Equal(t, tooManyFailuresMessage, appErr.Message)
+					require.Positive(t, appErr.RetryAfter, "attempt %d: the 429 says how long to wait", i)
 				}
 			}
 		})
@@ -354,14 +355,14 @@ func TestService_Login_LimiterOutcomes_U(t *testing.T) {
 		{name: "an IP limiter that fails is a 500 before the email is counted or the DB read",
 			email: &stubLimiter{}, ip: &stubLimiter{takeErr: storeDown}, password: "wrong",
 			wantCode: apperror.CodeInternal, wantErr: storeDown, wantIP: []string{"Take " + ipKey}},
-		{name: "an IP limiter that refuses is a 429 that leaves the email's budget alone, the right password too",
+		{name: "an IP limiter that refuses is a 429 with the limiter's wait that leaves the email's budget alone, the right password too",
 			email: &stubLimiter{}, ip: &stubLimiter{refuse: true}, password: "Passw0rd!",
 			wantCode: apperror.CodeTooManyRequests, wantIP: []string{"Take " + ipKey}},
 		{name: "an email limiter that fails is a 500 before the DB read, and the IP gets its token back",
 			email: &stubLimiter{takeErr: storeDown}, ip: &stubLimiter{}, password: "wrong",
 			wantCode: apperror.CodeInternal, wantErr: storeDown,
 			wantEmail: []string{"Take " + emailKey}, wantIP: []string{"Take " + ipKey, "Return " + ipKey}},
-		{name: "an email limiter that refuses is a 429 before the DB read, the right password too, and the IP gets its token back",
+		{name: "an email limiter that refuses is a 429 with the limiter's wait before the DB read, the right password too, and the IP gets its token back",
 			email: &stubLimiter{refuse: true}, ip: &stubLimiter{}, password: "Passw0rd!",
 			wantCode:  apperror.CodeTooManyRequests,
 			wantEmail: []string{"Take " + emailKey}, wantIP: []string{"Take " + ipKey, "Return " + ipKey}},
@@ -427,6 +428,9 @@ func TestService_Login_LimiterOutcomes_U(t *testing.T) {
 			require.Equal(t, tc.wantCode, appErr.Code)
 			if tc.wantCode == apperror.CodeTooManyRequests {
 				require.Equal(t, tooManyFailuresMessage, appErr.Message)
+				require.Equal(t, time.Minute, appErr.RetryAfter, "the 429 carries the limiter's wait (Retry-After)")
+			} else {
+				require.Zero(t, appErr.RetryAfter, "only a 429 carries a wait")
 			}
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
@@ -545,6 +549,7 @@ func TestService_Login_IPFailureLimit_U(t *testing.T) {
 				require.Equal(t, a.wantCode, appErr.Code, "attempt %d", i)
 				if a.wantCode == apperror.CodeTooManyRequests {
 					require.Equal(t, tooManyFailuresMessage, appErr.Message, "attempt %d", i)
+					require.Positive(t, appErr.RetryAfter, "attempt %d: the 429 says how long to wait", i)
 				}
 			}
 		})

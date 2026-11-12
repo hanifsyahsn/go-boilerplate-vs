@@ -2,9 +2,12 @@ package apperror
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 )
@@ -96,7 +99,14 @@ type AppError struct {
 	// a body member, a query parameter or a header. nil when it's the request
 	// as a whole.
 	Source *Source
+	// RetryAfter, when > 0, is how long the client should wait: the error
+	// writer sends it as a Retry-After header (whole seconds, rounded up). Set
+	// it on every 429 a rate limit refuses (WithRetryAfter).
+	RetryAfter time.Duration
 }
+
+// RetryAfterHeader is the response header a refused request's wait goes in.
+const RetryAfterHeader = "Retry-After"
 
 // Source is a JSON:API error object's "source" member. Set exactly one field.
 type Source struct {
@@ -167,6 +177,20 @@ func (e *AppError) WithParameter(parameter string) *AppError {
 func (e *AppError) WithHeader(header string) *AppError {
 	e.Source = &Source{Header: header}
 	return e
+}
+
+// WithRetryAfter sets how long the client should wait before trying again
+// (a limiter's Decision.RetryAfter) and returns e. The error writer turns it
+// into a Retry-After header.
+func (e *AppError) WithRetryAfter(d time.Duration) *AppError {
+	e.RetryAfter = d
+	return e
+}
+
+// RetryAfterSeconds is a Retry-After header value: whole seconds, rounded up,
+// at least 1.
+func RetryAfterSeconds(d time.Duration) string {
+	return strconv.Itoa(max(1, int(math.Ceil(d.Seconds()))))
 }
 
 func fieldLabel(obj interface{}, namespace string) string {

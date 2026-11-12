@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/pagination"
@@ -178,6 +179,14 @@ func WriteErrorsContext(ctx context.Context, w http.ResponseWriter, errs ...*app
 	if status == 0 {
 		// defensive: callers always pass at least one error
 		status = http.StatusInternalServerError
+	}
+	// The longest wait any error asks for (a rate limit's 429).
+	var retryAfter time.Duration
+	for _, e := range errs {
+		retryAfter = max(retryAfter, e.RetryAfter)
+	}
+	if retryAfter > 0 {
+		w.Header().Set(apperror.RetryAfterHeader, apperror.RetryAfterSeconds(retryAfter))
 	}
 
 	WriteJSON(w, status, ErrorDocument{JSONAPI: versionObject, Errors: objects})

@@ -183,21 +183,23 @@ dev), scoped to `COOKIE_DOMAIN` when set. A browser client never reads them: it 
 
 All `/api/auth/*` endpoints are **public** (no access token).
 
-**Rate limits** (in memory, per server instance; token buckets — the full allowance is available at once, then
-it comes back evenly over the period):
+**Rate limits** (token buckets — the full allowance is available at once, then it comes back evenly over the
+period; counted across every server instance when the deployment shares them through Redis, else per instance).
+**Every `429` carries a `Retry-After` header**: the whole seconds, rounded up, until the next try is allowed:
 
 | Limit | Applies to | Past it |
 | --- | --- | --- |
 | 300 requests / 1 min **per client IP** (IPv6: per /64) | every public route except refresh and logout (a flood guard; refresh and logout are never IP-limited, every open tab calls them) | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
 | 300 requests / 15 min **per client IP** (IPv6: per /64) | register, login, forgot password, reset password and email verification together, on top of the one above | `429` `too_many_requests` — `Too many attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) |
-| 5 **failed** logins / 15 min **per email** (then one more every 3 min) | login: an unknown email and a wrong password both count; a successful login resets it | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login for that email, the right password too, until a try comes back |
-| 100 **failed** logins / 6 h **per client IP**, across every email (IPv6: per /64; then one more every 3.6 min) | login: an unknown email and a wrong password both count; a successful login doesn't count (but doesn't clear the IP's earlier failures); a login refused for its email doesn't count either | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — every login from that IP, the right password too, until a try comes back |
+| 5 **failed** logins / 15 min **per email** (then one more every 3 min) | login: an unknown email and a wrong password both count; a successful login resets it | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) — every login for that email, the right password too, until a try comes back |
+| 100 **failed** logins / 6 h **per client IP**, across every email (IPv6: per /64; then one more every 3.6 min) | login: an unknown email and a wrong password both count; a successful login doesn't count (but doesn't clear the IP's earlier failures); a login refused for its email doesn't count either | `429` `too_many_requests` — `Too many wrong attempts. Please wait a few minutes and try again.` — with a `Retry-After` header (seconds) — every login from that IP, the right password too, until a try comes back |
 
 Forgot password also sends at most **3 emails / 1 h per address**; past it the answer is the same `202` and
 nothing is sent (so the endpoint can't flood an inbox).
 
 The client IP is the connection's address; `X-Forwarded-For` / `X-Real-IP` count only from a proxy listed in
-`TRUSTED_PROXIES`. On a 429, show the message and don't retry automatically.
+`TRUSTED_PROXIES`. On a 429, show the message (and, if you like, the wait from `Retry-After`) and don't retry
+automatically before that wait is over.
 
 ### `POST /api/auth/register`
 
@@ -440,7 +442,7 @@ curl -s -X POST "$BASE/api/auth/password-changes" -H "$CT" -H "Authorization: Be
 | --- | --- | --- |
 | 422 | `wrong_password` | `The current password is incorrect.` — `source.pointer` `/data/attributes/current_password` |
 | 422 | `invalid_request_body` | a password missing, the new one under 8 characters, either over 72 bytes |
-| 429 | `too_many_requests` | `Too many wrong attempts. Please wait a few minutes and try again.` — 5 wrong current passwords / 15 min per account (then one more every 3 min), the right one too until a try comes back |
+| 429 | `too_many_requests` | `Too many wrong attempts. Please wait a few minutes and try again.` — 5 wrong current passwords / 15 min per account (then one more every 3 min), the right one too until a try comes back; with a `Retry-After` header (seconds) |
 
 ### `POST /api/auth/email-verifications`
 
@@ -474,7 +476,7 @@ Emails the caller a new verification link (the earlier ones stop working). No bo
 | Status | `code` | When |
 | --- | --- | --- |
 | 409 | `email_already_verified` | `Your email is already verified.` |
-| 429 | `too_many_requests` | `Too many attempts. Please wait a few minutes and try again.` — 3 links / 1 h per account |
+| 429 | `too_many_requests` | `Too many attempts. Please wait a few minutes and try again.` — 3 links / 1 h per account; with a `Retry-After` header (seconds) |
 
 ### `GET /api/me`
 
@@ -726,7 +728,7 @@ The links keep the request's other parameters (filters, sort, fields) — follow
 | `conflict` | 409 | Email already registered; wrong resource `type`; body `id` ≠ URL id; an admin deactivating themselves |
 | `unsupported_media_type` | 415 | See [Content negotiation](#content-negotiation) |
 | `unprocessable_entity` | 422 | A field failed validation / has the wrong JSON type |
-| `too_many_requests` | 429 | Register / login rate limit (per IP, or failed logins per email / per IP) |
+| `too_many_requests` | 429 | A rate limit (per IP, failed logins per email / per IP, wrong current passwords, verification links); always with a `Retry-After` header (seconds) |
 | `internal_error` | 500 | Unexpected server error (`Something went wrong, please try again.`) — also a panic |
 
 ---

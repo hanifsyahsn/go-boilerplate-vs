@@ -169,8 +169,8 @@ Added 2026-11-09 as the boilerplate's base security.
 - **Per IP** (`middleware.RateLimitByIP(limiter, "auth")`, `Security.AuthIPLimit`, **required** — `NewRouter`
   refuses nil): register and login share one bucket, 300 / 15 min per IP (`authIPRate` in `main.go`; generous
   because an office NAT shares one IP). Past it → 429 `too_many_requests` with `Retry-After` (whole seconds,
-  rounded up — `middleware.RetryAfterSeconds`), detail `middleware.TooManyRequestsMessage`, the handler never
-  runs. A limiter error is a 500 (the limiter owns surviving its store — decision 0003). **Refresh and logout are not IP-limited**: they run
+  rounded up — `apperror.RetryAfterSeconds`, set from the error's `WithRetryAfter`), detail
+  `middleware.TooManyRequestsMessage`, the handler never runs. A limiter error is a 500 (the limiter owns surviving its store — decision 0003). **Refresh and logout are not IP-limited**: they run
   off the refresh cookie on every open tab.
 - **General per IP** (`middleware.RateLimitByIP(limiter, "public")`, `Security.PublicIPLimit`, **required** —
   `NewRouter` refuses nil): every public route **except refresh and logout** (router group `guarded`; `limited`
@@ -185,7 +185,8 @@ Added 2026-11-09 as the boilerplate's base security.
   password `Reset`s the bucket — a deactivated account included, it isn't a guess — so in effect only failures
   count. Once empty, every attempt for that email is a 429, the right password too, until a token comes back
   (3 min). A limiter error is a 500 and a refused key (empty bucket, or a full bucket map) a 429 — fail closed,
-  never an uncounted guess; a failed `Reset` after the right password is only logged. The login 429 carries no `Retry-After` yet. Known trade-off: anyone can keep an email locked out
+  never an uncounted guess; a failed `Reset` after the right password is only logged. The 429 carries the
+limiter's wait (`WithRetryAfter(d.RetryAfter)` → `Retry-After`). Known trade-off: anyone can keep an email locked out
   by spending a token every 3 min.
 - **Per IP, failed logins across emails** (`login` service, `Limiters.IP`, 100 / 6 h — `loginIPFailureRate`): key
   `loginip:` + `ratelimit.IPKey(c.ClientIP())` (the handler passes `login.Client{IP, UserAgent}`). Credential
@@ -198,6 +199,12 @@ Added 2026-11-09 as the boilerplate's base security.
   `login: give back failure count failed`, `limiter` = `email` / `ip`). No IP allowlist (an office NAT only
   reaches it with 100 wrong passwords). Tests: `TestService_Login_IPFailureLimit_U`,
   `TestService_Login_LimiterOutcomes_U`, `TestService_Login_ParallelGuesses_U` (20 emails from one IP).
+- **Every 429 says how long to wait** (decision 0003, Q18 2026-11-12): a rate-limit refusal is
+  `apperror.New(apperror.CodeTooManyRequests, msg, err).WithRetryAfter(d.RetryAfter)` (the limiter's `Decision`),
+  in a service as in `RateLimitByIP`. `jsonapi.WriteErrorsContext` turns it into a `Retry-After` header (whole
+  seconds, rounded up, at least 1; the longest wait of several errors), and CORS exposes it. A service limit
+  that answers 429 without it is a bug. Tests: `TestWriteErrors_RetryAfter_U`, `TestWriteError_U`, and each
+  service's 429 case asserts `RetryAfter`.
 - **A new public endpoint** (no access token) goes into the `guarded` group in `router.go` (the general per-IP
   limit), or its `limited` child when it touches credentials or sends email; only one that runs automatically per
   tab, like refresh, goes straight into `public`. **One that sends email** (verify link, password reset) also needs a

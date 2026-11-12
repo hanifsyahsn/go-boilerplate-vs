@@ -54,7 +54,7 @@ func TestService_Request_U(t *testing.T) {
 			calls: 1, wantCode: CodeEmailAlreadyVerified, wantMsg: "Your email is already verified.",
 		},
 		{
-			name: "the 4th link in an hour is a 429",
+			name: "the 4th link in an hour is a 429 with the wait until the next link",
 			stub: func(q *sqlc.MockQuerier, tq *MockQuerier) {
 				q.EXPECT().GetUserForVerification(gomock.Any(), int64(7)).Return(unverified, nil).Times(4)
 				tq.EXPECT().SpendUnusedAuthTokens(gomock.Any(), gomock.Any()).Return(nil).Times(3)
@@ -114,6 +114,13 @@ func TestService_Request_U(t *testing.T) {
 				require.Equal(t, tc.wantCode, appErr.Code)
 				if tc.wantMsg != "" {
 					require.Equal(t, tc.wantMsg, appErr.Message)
+				}
+				if tc.wantCode == apperror.CodeTooManyRequests {
+					// 3 per hour = one link back every 20 min: the 429 says when.
+					require.Positive(t, appErr.RetryAfter, "the 429 carries the wait (Retry-After)")
+					require.LessOrEqual(t, appErr.RetryAfter, 20*time.Minute)
+				} else {
+					require.Zero(t, appErr.RetryAfter, "only a 429 carries a wait")
 				}
 				return
 			}

@@ -168,7 +168,7 @@ func TestService_Change_FailureLimit_U(t *testing.T) {
 		attempts []Request
 		want     []apperror.Code
 	}{
-		{name: "the 6th attempt in 15 min after 5 wrong ones is a 429, even with the right password",
+		{name: "the 6th attempt in 15 min after 5 wrong ones is a 429 with the wait until the next try, even with the right password",
 			attempts: []Request{wrong, wrong, wrong, wrong, wrong, right},
 			want: []apperror.Code{CodeWrongPassword, CodeWrongPassword, CodeWrongPassword, CodeWrongPassword, CodeWrongPassword,
 				apperror.CodeTooManyRequests}},
@@ -204,6 +204,13 @@ func TestService_Change_FailureLimit_U(t *testing.T) {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr, "attempt %d", i+1)
 				require.Equal(t, tc.want[i], appErr.Code, "attempt %d", i+1)
+				if tc.want[i] == apperror.CodeTooManyRequests {
+					// 5 per 15 min = one token back every 3 min: the 429 says when.
+					require.Positive(t, appErr.RetryAfter, "attempt %d: the 429 carries the wait (Retry-After)", i+1)
+					require.LessOrEqual(t, appErr.RetryAfter, 3*time.Minute, "attempt %d", i+1)
+				} else {
+					require.Zero(t, appErr.RetryAfter, "attempt %d: only a 429 carries a wait", i+1)
+				}
 			}
 		})
 	}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -587,6 +588,41 @@ func TestValidatorError_RequiredWithout_U(t *testing.T) {
 			got := ValidatorError(ve, tc.in)
 			require.Len(t, got, 1)
 			require.Equal(t, tc.wantErr, got[0].Detail)
+		})
+	}
+}
+
+func TestRetryAfterSeconds_U(t *testing.T) {
+	testCases := []struct {
+		name string
+		wait time.Duration
+		want string
+	}{
+		{name: "whole seconds stay as they are", wait: 30 * time.Second, want: "30"},
+		{name: "a part of a second rounds up", wait: 2500 * time.Millisecond, want: "3"},
+		{name: "never less than one second", wait: 0, want: "1"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, RetryAfterSeconds(tc.wait))
+		})
+	}
+}
+
+func TestAppError_WithRetryAfter_U(t *testing.T) {
+	testCases := []struct {
+		name string
+		wait time.Duration
+	}{
+		{name: "the wait is kept on the error, the rest untouched", wait: 3 * time.Minute},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := New(CodeTooManyRequests, "Too many.", nil).WithPointer("/data/attributes/email")
+			require.Same(t, e, e.WithRetryAfter(tc.wait))
+			require.Equal(t, tc.wait, e.RetryAfter)
+			require.Equal(t, "/data/attributes/email", e.Source.Pointer)
 		})
 	}
 }

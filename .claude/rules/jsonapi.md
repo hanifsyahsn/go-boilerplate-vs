@@ -52,7 +52,8 @@ auth.md (`AccessTokenMiddleware`, the auth documents). What applies everywhere i
    real signal, since lib/pq reports a cancelled query as a Postgres error. `context.DeadlineExceeded` stays an
    error (our timeout). `request_id` comes from ctx, else from the response header. `WriteErrors` is the
    `context.Background()` variant. `AppError.Unwrap()` returns `Err`, so `errors.Is` sees through it; the cause
-   never reaches the response body.
+   never reaches the response body. An error with `RetryAfter` (`WithRetryAfter`, every rate-limit 429) adds a
+   `Retry-After` header.
 
 ### JSON:API
 

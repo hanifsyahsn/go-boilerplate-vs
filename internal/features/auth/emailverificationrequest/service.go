@@ -65,7 +65,7 @@ func (s *service) Request(ctx context.Context, userID int64) error {
 	}
 	if !d.Allowed {
 		return apperror.New(apperror.CodeTooManyRequests, tooManyMessage,
-			fmt.Errorf("(%s): verification links exceeded for user %d", feature, userID))
+			fmt.Errorf("(%s): verification links exceeded for user %d", feature, userID)).WithRetryAfter(d.RetryAfter)
 	}
 
 	var plain string

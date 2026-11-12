@@ -70,7 +70,7 @@ func (s *service) Change(ctx context.Context, userID int64, sessionID uuid.UUID,
 	}
 	if !d.Allowed {
 		return apperror.New(apperror.CodeTooManyRequests, tooManyFailuresMessage,
-			fmt.Errorf("(%s): wrong current passwords exceeded for user %d", feature, userID))
+			fmt.Errorf("(%s): wrong current passwords exceeded for user %d", feature, userID)).WithRetryAfter(d.RetryAfter)
 	}
 
 	current, err := s.querier.GetUserPassword(ctx, userID)
