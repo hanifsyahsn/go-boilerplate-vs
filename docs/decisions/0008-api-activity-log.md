@@ -1,14 +1,14 @@
 # 0008 — API activity log
 
-Status: built (2026-11-11). Source: the most complete of the derivatives' implementations.
+Status: built (2026-11-11).
 
 ## Decision
 One row per API request (who, which endpoint, when, outcome, request id). A middleware hands it to a recorder
 that queues and writes in batches off the request path and flushes on shutdown; rows past
-`ACTIVITY_LOG_RETENTION` are deleted by 0005. Derivatives with their own version move to this one.
+`ACTIVITY_LOG_RETENTION` are deleted by 0005. A service with its own version moves to this one.
 
 ## Why
-Several derivatives built it separately; one shared version instead. The shutdown flush must be tested.
+Every service needs it; one shared, tested version instead of one per service. The shutdown flush must be tested.
 
 ## As built
 - Table `api_activity_logs` (when, request id, user / session — NULL when anonymous, no FK —, method, matched

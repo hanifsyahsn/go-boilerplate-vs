@@ -1,4 +1,4 @@
-# 0012 — Derivative patterns into `slice-patterns.md`
+# 0012 — Recurring patterns into `slice-patterns.md`
 
 Status: accepted (2026-11-10), not built.
 

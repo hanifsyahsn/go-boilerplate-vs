@@ -1,6 +1,6 @@
 # 0011 — Ops notifier
 
-Status: built (2026-11-11). Source: implementations in derivatives.
+Status: built (2026-11-11).
 
 ## Decision
 A `Notifier` interface for operational alerts (background failures, panics), Telegram as the first

@@ -1,6 +1,6 @@
 # 0004 — CSRF `OriginGuard`
 
-Status: built (2026-11-11). Source: an implementation in a derivative.
+Status: built (2026-11-11).
 
 ## Decision
 A state-changing request (not GET / HEAD / OPTIONS) that carries an `Origin` header must come from an allowed

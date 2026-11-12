@@ -1,6 +1,6 @@
 # 0007 — Forgot / change password, email verification, `Mailer`
 
-Status: built (2026-11-11). Source: an implementation in a derivative.
+Status: built (2026-11-11).
 
 ## Decision
 - Forgot password: email a one-time link (1 h), then set a new password (revokes the user's sessions).

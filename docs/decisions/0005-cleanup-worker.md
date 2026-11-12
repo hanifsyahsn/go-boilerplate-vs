@@ -1,6 +1,6 @@
 # 0005 — Cleanup worker
 
-Status: built (2026-11-11). Source: implementations in derivatives.
+Status: built (2026-11-11).
 
 ## Decision
 A background worker (no endpoint) that once a day deletes rows of no further use: expired / revoked refresh

@@ -1,6 +1,6 @@
 # 0006 — Signed-in devices and remote sign-out
 
-Status: built (2026-11-11). Source: an implementation in a derivative.
+Status: built (2026-11-11).
 
 ## Decision
 The caller can list the devices (sessions) they're signed in on and sign any of them out; signing out the
