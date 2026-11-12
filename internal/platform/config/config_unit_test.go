@@ -173,7 +173,9 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			wantErr: `ALLOWED_ORIGINS entry "https://example.com#top"`},
 		{name: "an allowed origin with user info is refused", override: map[string]string{"ALLOWED_ORIGINS": "https://user:pw@example.com"},
 			wantErr: `ALLOWED_ORIGINS entry "https://user:pw@example.com"`},
-		{name: "an allowed origin that isn't http or https is refused", override: map[string]string{"ALLOWED_ORIGINS": "ftp://example.com"},
+		{name: "an allowed origin with an empty port is refused (no browser sends one)", override: map[string]string{"ALLOWED_ORIGINS": "https://app.example.com:"},
+			wantErr: `ALLOWED_ORIGINS entry "https://app.example.com:"`},
+		{name: "an allowed origin with a scheme outside the allowlist is refused", override: map[string]string{"ALLOWED_ORIGINS": "ftp://example.com"},
 			wantErr: `ALLOWED_ORIGINS entry "ftp://example.com"`},
 		{
 			name:     "a hybrid app's own origin (Capacitor / Ionic WebView on iOS) is accepted, normalised",

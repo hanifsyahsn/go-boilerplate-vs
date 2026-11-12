@@ -22,7 +22,8 @@ func TestCORS_U(t *testing.T) {
 		allowed   []string
 		method    string
 		origin    string
-		preflight bool // sets Access-Control-Request-Method
+		origins   []string // several Origin headers (overrides origin)
+		preflight bool     // sets Access-Control-Request-Method
 		// withMediaType mounts JSONAPIMediaType after CORS, as on /api.
 		withMediaType bool
 		wantCode      int
@@ -71,6 +72,14 @@ func TestCORS_U(t *testing.T) {
 		{name: "an unlisted origin's preflight is a 403 pointing at the Origin header", allowed: listed,
 			method: http.MethodOptions, origin: "https://evil.example", preflight: true, wantCode: http.StatusForbidden,
 			wantVary: []string{"Origin"}, wantBody: forbidden},
+		{name: "two Origin headers get no CORS header, even when the first is listed", allowed: listed,
+			method: http.MethodGet, origins: []string{"https://app.example.com", "https://evil.example"},
+			wantCode: http.StatusTeapot, wantHandler: true, wantVary: []string{"Origin"}},
+		{name: "two Origin headers on a preflight are a 403, even when the first is listed", allowed: listed,
+			method: http.MethodOptions, origins: []string{"https://app.example.com", "https://evil.example"}, preflight: true,
+			wantCode: http.StatusForbidden, wantVary: []string{"Origin"}, wantBody: forbidden},
+		{name: "an empty Origin header's preflight is a 403", allowed: listed, method: http.MethodOptions,
+			origins: []string{""}, preflight: true, wantCode: http.StatusForbidden, wantVary: []string{"Origin"}, wantBody: forbidden},
 		{name: "Vary keeps Accept", allowed: listed, method: http.MethodGet, origin: "https://app.example.com",
 			withMediaType: true, wantCode: http.StatusTeapot, wantHandler: true, wantVary: []string{"Origin", "Accept"},
 			wantHeaders: map[string]string{"Access-Control-Allow-Origin": "https://app.example.com"}},
@@ -90,6 +99,9 @@ func TestCORS_U(t *testing.T) {
 			req := httptest.NewRequest(tc.method, "/", nil)
 			if tc.origin != "" {
 				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.origins != nil {
+				req.Header["Origin"] = tc.origins
 			}
 			if tc.preflight {
 				req.Header.Set("Access-Control-Request-Method", http.MethodPost)

@@ -94,9 +94,9 @@ List the one your app sends.
 
 | Request | Answer |
 | --- | --- |
-| `Origin` listed | `Access-Control-Allow-Origin: <that origin>` (never `*`), `Access-Control-Allow-Credentials: true` (the auth cookies), `Access-Control-Expose-Headers: Location, Retry-After, X-Request-ID` |
+| `Origin` listed (exactly one `Origin` header) | `Access-Control-Allow-Origin: <that origin>` (never `*`), `Access-Control-Allow-Credentials: true` (the auth cookies), `Access-Control-Expose-Headers: Location, Retry-After, X-Request-ID` |
 | Preflight (`OPTIONS` + `Access-Control-Request-Method`) from a listed origin | **204** with `Access-Control-Allow-Methods: GET, POST, PATCH, DELETE`, `Access-Control-Allow-Headers: Accept, Authorization, Content-Type, X-Request-ID`, `Access-Control-Max-Age: 600` |
-| Preflight from an unlisted origin | **403** `forbidden`, `detail` `This origin isn't allowed.`, `source.header` `Origin` |
+| Preflight from an unlisted origin (an empty `Origin`, or two `Origin` headers, included) | **403** `forbidden`, `detail` `This origin isn't allowed.`, `source.header` `Origin` |
 | Any other request from an unlisted origin | no CORS header (the browser won't let the page read the answer) |
 
 With the list set, every response carries `Vary: Origin` (next to `Vary: Accept` on `/api`).

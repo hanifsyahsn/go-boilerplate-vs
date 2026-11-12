@@ -28,8 +28,8 @@ auth.md (`AccessTokenMiddleware`, the auth documents). What applies everywhere i
    handler once auth has put the caller on the request context): warn with `cancelled=true` when the client went away (request context cancelled), else error
    for a 5xx, info for the rest.
    `CORS(ALLOWED_ORIGINS)` is on the engine (not `/api`) so a browser preflight, an `OPTIONS` no route declares,
-   gets its 204 / 403 instead of the 405: a listed origin is echoed with credentials (never `*`), an unlisted
-   one gets no CORS header (its preflight a 403 on `source.header` `Origin`); empty list = off. `Vary` is added
+   gets its 204 / 403 instead of the 405: exactly one listed origin is echoed with credentials (never `*`), an
+   unlisted one (empty, two `Origin` headers) gets no CORS header (its preflight a 403 on `source.header` `Origin`); empty list = off. `Vary` is added
    to, never set, so `Origin` and `Accept` both stay.
 1. `middleware.OriginGuard(ALLOWED_ORIGINS)` runs first on `/api`: a method other than GET / HEAD / OPTIONS whose
    `Origin` header is present and not exactly one listed origin (`null` and an empty one included) is a 403 on
