@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,6 +112,12 @@ func TestLoadConfig_Env_U(t *testing.T) {
 		{name: "the same key under two names is refused without echoing it (the client name would depend on map order)",
 			override: map[string]string{"API_KEYS": "billing:kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk,reporting:kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"},
 			wantErr:  "config: API_KEYS entry 2 repeats the key of entry 1", wantNot: "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"},
+		{name: "an API client name over 100 characters is refused without echoing it (the activity log keeps 100)",
+			override: map[string]string{"API_KEYS": strings.Repeat("n", 101) + ":kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"},
+			wantErr:  "config: API_KEYS entry 1 has a name longer than 100 characters", wantNot: strings.Repeat("n", 101)},
+		{name: "an API client name of 100 characters (multibyte) passes",
+			override:  map[string]string{"API_KEYS": strings.Repeat("ß", 100) + ":kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"},
+			wantCheck: func(t *testing.T, c Config) { require.Contains(t, c.APIKeys, strings.Repeat("ß", 100)) }},
 		{name: "the key length is counted in bytes: 17 two-byte letters (34 bytes) pass",
 			override:  map[string]string{"API_KEYS": "billing:ééééééééééééééééé"},
 			wantCheck: func(t *testing.T, c Config) { require.Len(t, c.APIKeys["billing"], 34) }},

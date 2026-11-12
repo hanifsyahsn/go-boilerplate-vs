@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	"github.com/redis/go-redis/v9"
@@ -89,9 +90,16 @@ type Config struct {
 	RedisURL string `mapstructure:"REDIS_URL"`
 	// APIKeys (API_KEYS, "name:key,name:key") are the machine callers' keys
 	// for middleware.APIKey, name → key. Optional; each key at least
-	// MinAPIKeyLength bytes, names and keys unique. Secrets: never logged.
+	// MinAPIKeyLength bytes, names ≤ MaxAPIClientNameLength characters, names
+	// and keys unique. Secrets: never logged.
 	APIKeys map[string]string `mapstructure:"API_KEYS"`
 }
+
+// MaxAPIClientNameLength is the longest API client name accepted, in
+// characters: the activity log's api_client column (middleware
+// apiClientMaxRunes) keeps that many, and two longer names could read the same
+// there.
+const MaxAPIClientNameLength = 100
 
 // MinAPIKeyLength is the shortest API key accepted, in bytes (what an
 // attacker has to guess; openssl rand -hex 32 gives 64).
@@ -403,6 +411,8 @@ func parseAPIKeys(entries []string) (map[string]string, error) {
 		switch {
 		case !ok || name == "" || key == "":
 			errs = append(errs, fmt.Errorf("config: API_KEYS entry %d is not name:key", i+1))
+		case utf8.RuneCountInString(name) > MaxAPIClientNameLength:
+			errs = append(errs, fmt.Errorf("config: API_KEYS entry %d has a name longer than %d characters", i+1, MaxAPIClientNameLength))
 		case len(key) < MinAPIKeyLength:
 			errs = append(errs, fmt.Errorf("config: API_KEYS entry %d has a key shorter than %d bytes", i+1, MinAPIKeyLength))
 		case entryOf[name] != 0:

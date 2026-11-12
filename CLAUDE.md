@@ -222,7 +222,7 @@ needs `SMTP_FROM` too), `SMTP_PORT` defaults to `587`
 `ACTIVITY_LOG_RETENTION` (optional, default `17520h` = 2 years, `0` = keep forever; the cleanup worker applies it).
 `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (optional, both or neither: ops alerts, see logging.md *Ops alerts*).
 `REDIS_URL` (optional, `redis://` / `rediss://`, checked with `redis.ParseURL` without echoing it: the rate limits
-in Redis, see *Gotchas*). `API_KEYS` (optional, `name:key,…`, keys ≥ 32 bytes, names and keys unique; errors never
+in Redis, see *Gotchas*). `API_KEYS` (optional, `name:key,…`, keys ≥ 32 bytes, names ≤ 100 characters, names and keys unique; errors never
 echo a key) for `middleware.APIKey`.
 Durations are Go duration strings (`15m`).
 See `.env.example`.

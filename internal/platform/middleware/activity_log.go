@@ -41,7 +41,7 @@ const (
 	pathMaxRunes      = 2048
 	clientIPMaxRunes  = 64
 	userAgentMaxRunes = 512
-	apiClientMaxRunes = 100
+	apiClientMaxRunes = 100 // config.MaxAPIClientNameLength refuses longer names
 )
 
 // healthzPath is the liveness probe, polled too often to be worth a row.
