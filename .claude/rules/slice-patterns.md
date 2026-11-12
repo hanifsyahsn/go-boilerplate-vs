@@ -175,10 +175,13 @@ Used by: `note/update`, `note/delete`. Also (token rows, not an owned resource) 
 (lock the caller's live session, then revoke), `admin/user` (deactivate + revoke the user's sessions),
 `auth/passwordreset` (an atomic consume is the lock), `auth/passwordresetrequest` (issue a token),
 `auth/passwordchange` (new hash + revoke the other sessions), `auth/register` (insert + issue a verify token),
-`auth/emailverification`, `auth/emailverificationrequest`.
+`auth/emailverification`, `auth/emailverificationrequest`, `auth/logout` (lock the session, then revoke).
 
 Every update / delete / state transition of an existing row starts with the `FOR UPDATE` lock **inside** the
-tx, then writes, then (update) reads back in the same tx. `store.go`:
+tx, then writes, then (update) reads back in the same tx. **Rows of two tables that more than one path locks
+(a parent and its children) are locked in one fixed order everywhere**, parent first, each in its own
+statement before the write. Two paths that lock them in opposite orders deadlock under load. Example:
+`auth_sessions` before `refresh_tokens` (auth.md *Lock order*). `store.go`:
 
 ```go
 // Querier is what the transaction runs: the slice's queries plus the domain-shared ones, on one *sql.Tx.

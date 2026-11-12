@@ -5,10 +5,21 @@ SELECT id, name, email, role, is_active
 FROM users
 WHERE id = $1;
 
+-- name: LockSessionOfToken :exec
+-- Locks the presented token's session row first (the lock order every path
+-- follows: session, then tokens — see authshared.EndSession), so a refresh
+-- waits for a revoke in flight instead of deadlocking with it. A token with no
+-- session locks nothing; LockRefreshToken then reports it not live.
+SELECT s.family_id
+FROM auth_sessions s
+         JOIN refresh_tokens rt ON rt.family_id = s.family_id
+WHERE rt.jti = $1
+FOR UPDATE OF s;
+
 -- name: LockRefreshToken :one
 -- The presented token's row, locked so two concurrent refreshes of the same
 -- token can't both rotate it, with its session's state (session_live false =
--- signed out, or a family without a session).
+-- signed out, or a family without a session). Run after LockSessionOfToken.
 SELECT rt.jti,
        rt.user_id,
        rt.family_id,

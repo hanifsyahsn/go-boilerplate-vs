@@ -9,6 +9,7 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+	uuid "github.com/google/uuid"
 	sqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordreset/sqlc"
 	sqlc0 "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 )
@@ -77,6 +78,34 @@ func (m *MockQuerier) InsertRefreshToken(ctx context.Context, arg sqlc0.InsertRe
 func (mr *MockQuerierMockRecorder) InsertRefreshToken(ctx, arg interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertRefreshToken", reflect.TypeOf((*MockQuerier)(nil).InsertRefreshToken), ctx, arg)
+}
+
+// LockSession mocks base method.
+func (m *MockQuerier) LockSession(ctx context.Context, familyID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockSession", ctx, familyID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// LockSession indicates an expected call of LockSession.
+func (mr *MockQuerierMockRecorder) LockSession(ctx, familyID interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockSession", reflect.TypeOf((*MockQuerier)(nil).LockSession), ctx, familyID)
+}
+
+// LockUserSessions mocks base method.
+func (m *MockQuerier) LockUserSessions(ctx context.Context, arg sqlc0.LockUserSessionsParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockUserSessions", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// LockUserSessions indicates an expected call of LockUserSessions.
+func (mr *MockQuerierMockRecorder) LockUserSessions(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockUserSessions", reflect.TypeOf((*MockQuerier)(nil).LockUserSessions), ctx, arg)
 }
 
 // RevokeSession mocks base method.

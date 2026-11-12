@@ -28,12 +28,13 @@ func TestService_Reset_U(t *testing.T) {
 		wantNotice  bool
 	}{
 		{
-			name: "a valid token: consumed, the new password set (email verified), every session ended, then the notice sent",
+			name: "a valid token: consumed, the new password set (email verified), the session rows locked, then every session ended, then the notice sent",
 			stub: func(q *MockQuerier) {
 				gomock.InOrder(
 					q.EXPECT().ConsumeAuthToken(gomock.Any(), consume).Return(int64(7), nil),
 					q.EXPECT().SetPasswordAfterReset(gomock.Any(), sqlc.SetPasswordAfterResetParams{ID: 7, PasswordHash: "hashed"}).
 						Return("jane@example.com", nil),
+					q.EXPECT().LockUserSessions(gomock.Any(), authsharedsqlc.LockUserSessionsParams{UserID: 7}).Return(nil),
 					q.EXPECT().RevokeUserSessions(gomock.Any(), authsharedsqlc.RevokeUserSessionsParams{
 						UserID: 7, Reason: authshared.RevokeReasonPasswordReset,
 					}).Return(int64(2), nil),
@@ -70,6 +71,7 @@ func TestService_Reset_U(t *testing.T) {
 			stub: func(q *MockQuerier) {
 				q.EXPECT().ConsumeAuthToken(gomock.Any(), gomock.Any()).Return(int64(7), nil)
 				q.EXPECT().SetPasswordAfterReset(gomock.Any(), gomock.Any()).Return("jane@example.com", nil)
+				q.EXPECT().LockUserSessions(gomock.Any(), gomock.Any()).Return(nil)
 				q.EXPECT().RevokeUserSessions(gomock.Any(), gomock.Any()).Return(int64(0), sql.ErrConnDone)
 			},
 			wantCode: apperror.CodeInternal,

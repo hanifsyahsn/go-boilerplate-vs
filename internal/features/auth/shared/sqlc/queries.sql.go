@@ -85,6 +85,44 @@ func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshToken
 	return err
 }
 
+const lockSession = `-- name: LockSession :exec
+SELECT family_id
+FROM auth_sessions
+WHERE family_id = $1
+FOR UPDATE
+`
+
+// Locks a session row before its tokens are revoked (EndSession). Every path
+// that touches a session and its tokens locks the session row first, so a
+// refresh and a revoke never wait on each other in opposite orders.
+func (q *Queries) LockSession(ctx context.Context, familyID uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, lockSession, familyID)
+	return err
+}
+
+const lockUserSessions = `-- name: LockUserSessions :exec
+SELECT family_id
+FROM auth_sessions
+WHERE user_id = $1::bigint
+  AND revoked_at IS NULL
+  AND ($2::uuid IS NULL OR family_id <> $2::uuid)
+ORDER BY family_id
+FOR UPDATE
+`
+
+type LockUserSessionsParams struct {
+	UserID       int64         `json:"user_id"`
+	KeepFamilyID uuid.NullUUID `json:"keep_family_id"`
+}
+
+// Locks a user's live session rows, except keep_family_id (NULL = all), in
+// family_id order (two revokers never cross), before EndUserSessions revokes
+// them.
+func (q *Queries) LockUserSessions(ctx context.Context, arg LockUserSessionsParams) error {
+	_, err := q.db.ExecContext(ctx, lockUserSessions, arg.UserID, arg.KeepFamilyID)
+	return err
+}
+
 const revokeSession = `-- name: RevokeSession :execrows
 WITH tokens AS (
     UPDATE refresh_tokens
@@ -105,7 +143,8 @@ type RevokeSessionParams struct {
 }
 
 // Ends one session: revokes its family's live refresh tokens and marks the
-// session revoked with the reason, in one statement. The row count is the
+// session revoked with the reason, in one statement. Run it after the session
+// row is locked (EndSession, or a slice's own lock), never alone. The row count is the
 // sessions revoked (0 = it was already revoked or doesn't exist).
 func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, revokeSession, arg.Reason, arg.FamilyID)
@@ -139,6 +178,7 @@ type RevokeUserSessionsParams struct {
 
 // Ends every live session of a user except keep_family_id (NULL = all): a
 // password change keeps the caller's own, a reset or a deactivation none.
+// Run it after LockUserSessions (EndUserSessions), never alone.
 // The row count is the sessions revoked.
 func (q *Queries) RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, revokeUserSessions, arg.Reason, arg.UserID, arg.KeepFamilyID)

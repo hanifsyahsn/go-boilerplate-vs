@@ -74,6 +74,15 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   `uuid.UUID`). Ending sessions goes through two shared queries only, each revoking the tokens **and** the
   session row in one statement: `RevokeSession(family_id, reason)` and `RevokeUserSessions(user_id, reason,
   keep_family_id NULL = all)`; reasons are the `authshared.RevokeReason*` constants (the column's CHECK).
+- **Lock order: the session row, then its token rows — everywhere** (review fix 2026-11-12). Refresh runs
+  `LockSessionOfToken` before `LockRefreshToken`. A revoke never runs `RevokeSession` / `RevokeUserSessions`
+  alone: it goes through `authshared.EndSession` / `EndUserSessions` (lock the session row(s) — many in
+  `family_id` order — then revoke, in a transaction), or a slice's own session lock first (`session/revoke`'s
+  `LockLiveSession`; refresh's reuse path already holds it). The opposite orders deadlocked (Postgres aborts one
+  → a 500). The revoke is a later statement than the lock, so it also sees a token a concurrent refresh
+  rotated in. Logout has a transaction for this. A new path that touches a session and its tokens follows the
+  same order. Tests: `TestService_Refresh_RevokeInFlight_I`, `TestEndSessions_RefreshInFlight_I`,
+  `TestService_Logout_RefreshInFlight_I` (`testhelper.BeginRotation` / `LockSessionRow` hold the locks).
 - Logout revokes the presented token's session (`logout`) and clears the cookies; a missing / invalid /
   unknown token is still a 204. The session's access tokens stop working at once.
 - **Signed-in devices** (slices `session/list`, `session/revoke`, resource type `sessions`, shared in

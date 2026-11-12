@@ -64,7 +64,7 @@ func TestService_Update_I(t *testing.T) {
 		// wantSessionsRevoked: the target's two sessions end (deactivated).
 		wantSessionsRevoked bool
 	}{
-		{name: "deactivate: every session of the user ends as deactivated, another user's kept", before: true,
+		{name: "deactivate: every session of the user ends as deactivated, with its refresh tokens; another user's kept", before: true,
 			isActive: testhelper.BoolPtr(false), want: false, wantSessionsRevoked: true},
 		{name: "activate: no session touched", before: false, isActive: testhelper.BoolPtr(true), want: true},
 		{name: "no attribute: unchanged", before: false, isActive: nil, want: false},
@@ -76,8 +76,9 @@ func TestService_Update_I(t *testing.T) {
 			admin := testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Role: "admin"})
 			target := testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{IsActive: testhelper.BoolPtr(tc.before)})
 
-			laptop := testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: uuid.New(), UserID: target})
-			phone := testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: uuid.New(), UserID: target})
+			laptopToken, phoneToken := uuid.New(), uuid.New()
+			laptop := testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: laptopToken, UserID: target})
+			phone := testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: phoneToken, UserID: target})
 			adminToken := uuid.New()
 			adminSession := testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: adminToken, UserID: admin})
 
@@ -92,6 +93,10 @@ func TestService_Update_I(t *testing.T) {
 				if tc.wantSessionsRevoked {
 					require.Equal(t, authshared.RevokeReasonDeactivated, session.RevokeReason.String)
 				}
+			}
+			for _, token := range []uuid.UUID{laptopToken, phoneToken} {
+				require.Equal(t, tc.wantSessionsRevoked, testhelper.GetRefreshToken(t, testDB, token).RevokedAt.Valid,
+					"the sessions' refresh tokens are revoked with them")
 			}
 			require.False(t, testhelper.GetSession(t, testDB, adminSession).RevokedAt.Valid, "another user's session is never touched")
 			require.False(t, testhelper.GetRefreshToken(t, testDB, adminToken).RevokedAt.Valid)

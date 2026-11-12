@@ -46,13 +46,16 @@ func TestService_Change_U(t *testing.T) {
 		wantNotice  bool
 	}{
 		{
-			name: "the right current password: the new one set and every other session ended, the caller's kept, a notice sent",
+			name: "the right current password: the new one set, the other session rows locked, then every other session ended, the caller's kept, a notice sent",
 			req:  right,
 			stub: func(q *sqlc.MockQuerier, tq *MockQuerier) {
 				q.EXPECT().GetUserPassword(gomock.Any(), int64(7)).Return("hash-of:Passw0rd!", nil)
 				gomock.InOrder(
 					tq.EXPECT().SetPassword(gomock.Any(), sqlc.SetPasswordParams{ID: 7, PasswordHash: "hash-of:N3w-Passw0rd"}).
 						Return("jane@example.com", nil),
+					tq.EXPECT().LockUserSessions(gomock.Any(), authsharedsqlc.LockUserSessionsParams{
+						UserID: 7, KeepFamilyID: uuid.NullUUID{UUID: current, Valid: true},
+					}).Return(nil),
 					tq.EXPECT().RevokeUserSessions(gomock.Any(), authsharedsqlc.RevokeUserSessionsParams{
 						UserID: 7, Reason: authshared.RevokeReasonPasswordChanged, KeepFamilyID: uuid.NullUUID{UUID: current, Valid: true},
 					}).Return(int64(2), nil),
@@ -73,6 +76,7 @@ func TestService_Change_U(t *testing.T) {
 			stub: func(q *sqlc.MockQuerier, tq *MockQuerier) {
 				q.EXPECT().GetUserPassword(gomock.Any(), gomock.Any()).Return("hash-of:Passw0rd!", nil)
 				tq.EXPECT().SetPassword(gomock.Any(), gomock.Any()).Return("jane@example.com", nil)
+				tq.EXPECT().LockUserSessions(gomock.Any(), gomock.Any()).Return(nil)
 				tq.EXPECT().RevokeUserSessions(gomock.Any(), gomock.Any()).Return(int64(0), nil)
 			},
 			wantNotice: true,
@@ -108,6 +112,7 @@ func TestService_Change_U(t *testing.T) {
 			stub: func(q *sqlc.MockQuerier, tq *MockQuerier) {
 				q.EXPECT().GetUserPassword(gomock.Any(), gomock.Any()).Return("hash-of:Passw0rd!", nil)
 				tq.EXPECT().SetPassword(gomock.Any(), gomock.Any()).Return("jane@example.com", nil)
+				tq.EXPECT().LockUserSessions(gomock.Any(), gomock.Any()).Return(nil)
 				tq.EXPECT().RevokeUserSessions(gomock.Any(), gomock.Any()).Return(int64(0), sql.ErrConnDone)
 			},
 			wantCode: apperror.CodeInternal,
@@ -180,6 +185,7 @@ func TestService_Change_FailureLimit_U(t *testing.T) {
 			q.EXPECT().GetUserPassword(gomock.Any(), gomock.Any()).Return("hash-of:Passw0rd!", nil).AnyTimes()
 			tq := NewMockQuerier(ctrl)
 			tq.EXPECT().SetPassword(gomock.Any(), gomock.Any()).Return("jane@example.com", nil).AnyTimes()
+			tq.EXPECT().LockUserSessions(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 			tq.EXPECT().RevokeUserSessions(gomock.Any(), gomock.Any()).Return(int64(0), nil).AnyTimes()
 			store := NewMockStoreI(ctrl)
 			store.EXPECT().RunInTx(gomock.Any(), gomock.Any()).DoAndReturn(

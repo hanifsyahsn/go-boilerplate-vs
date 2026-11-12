@@ -30,12 +30,15 @@ func TestService_Logout_U(t *testing.T) {
 		wantCode apperror.Code
 	}{
 		{
-			name:  "a valid token: its session revoked as logout",
+			name:  "a valid token: its session row locked first, then revoked as logout",
 			token: "ref",
 			stub: func(q *sqlc.MockQuerier, sq *authsharedsqlc.MockQuerier, m *jwttoken.MockM) {
 				m.EXPECT().VerifyRefreshToken("ref").Return(claims, nil)
 				q.EXPECT().GetRefreshTokenFamily(gomock.Any(), jti).Return(familyID, nil)
-				sq.EXPECT().RevokeSession(gomock.Any(), revoke).Return(int64(1), nil)
+				gomock.InOrder(
+					sq.EXPECT().LockSession(gomock.Any(), familyID).Return(nil),
+					sq.EXPECT().RevokeSession(gomock.Any(), revoke).Return(int64(1), nil),
+				)
 			},
 		},
 		{
@@ -44,6 +47,7 @@ func TestService_Logout_U(t *testing.T) {
 			stub: func(q *sqlc.MockQuerier, sq *authsharedsqlc.MockQuerier, m *jwttoken.MockM) {
 				m.EXPECT().VerifyRefreshToken("ref").Return(claims, nil)
 				q.EXPECT().GetRefreshTokenFamily(gomock.Any(), jti).Return(familyID, nil)
+				sq.EXPECT().LockSession(gomock.Any(), familyID).Return(nil)
 				sq.EXPECT().RevokeSession(gomock.Any(), revoke).Return(int64(0), nil)
 			},
 		},
@@ -80,11 +84,22 @@ func TestService_Logout_U(t *testing.T) {
 			wantCode: apperror.CodeInternal,
 		},
 		{
+			name:  "a lock error is a 500 and nothing is revoked",
+			token: "ref",
+			stub: func(q *sqlc.MockQuerier, sq *authsharedsqlc.MockQuerier, m *jwttoken.MockM) {
+				m.EXPECT().VerifyRefreshToken("ref").Return(claims, nil)
+				q.EXPECT().GetRefreshTokenFamily(gomock.Any(), jti).Return(familyID, nil)
+				sq.EXPECT().LockSession(gomock.Any(), familyID).Return(sql.ErrConnDone)
+			},
+			wantCode: apperror.CodeInternal,
+		},
+		{
 			name:  "a revoke error is a 500",
 			token: "ref",
 			stub: func(q *sqlc.MockQuerier, sq *authsharedsqlc.MockQuerier, m *jwttoken.MockM) {
 				m.EXPECT().VerifyRefreshToken("ref").Return(claims, nil)
 				q.EXPECT().GetRefreshTokenFamily(gomock.Any(), jti).Return(familyID, nil)
+				sq.EXPECT().LockSession(gomock.Any(), familyID).Return(nil)
 				sq.EXPECT().RevokeSession(gomock.Any(), revoke).Return(int64(0), sql.ErrConnDone)
 			},
 			wantCode: apperror.CodeInternal,
@@ -98,8 +113,11 @@ func TestService_Logout_U(t *testing.T) {
 			sq := authsharedsqlc.NewMockQuerier(ctrl)
 			m := jwttoken.NewMockM(ctrl)
 			tc.stub(q, sq, m)
+			store := NewMockStoreI(ctrl)
+			store.EXPECT().RunInTx(gomock.Any(), gomock.Any()).DoAndReturn(
+				func(_ context.Context, fn func(authsharedsqlc.Querier) error) error { return fn(sq) }).AnyTimes()
 
-			err := NewService(q, sq, m).Logout(context.Background(), tc.token)
+			err := NewService(q, store, m).Logout(context.Background(), tc.token)
 			if !tc.wantCode.IsZero() {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)

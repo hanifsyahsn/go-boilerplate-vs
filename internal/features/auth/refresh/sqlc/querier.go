@@ -16,8 +16,13 @@ type Querier interface {
 	GetUserForRefresh(ctx context.Context, id int64) (GetUserForRefreshRow, error)
 	// The presented token's row, locked so two concurrent refreshes of the same
 	// token can't both rotate it, with its session's state (session_live false =
-	// signed out, or a family without a session).
+	// signed out, or a family without a session). Run after LockSessionOfToken.
 	LockRefreshToken(ctx context.Context, jti uuid.UUID) (LockRefreshTokenRow, error)
+	// Locks the presented token's session row first (the lock order every path
+	// follows: session, then tokens — see authshared.EndSession), so a refresh
+	// waits for a revoke in flight instead of deadlocking with it. A token with no
+	// session locks nothing; LockRefreshToken then reports it not live.
+	LockSessionOfToken(ctx context.Context, jti uuid.UUID) error
 	// Revokes the presented token and points it at its successor.
 	RotateRefreshToken(ctx context.Context, arg RotateRefreshTokenParams) error
 	// Records the session's latest use: when, from which browser and IP.

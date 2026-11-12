@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordchange/sqlc"
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
-	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/password"
@@ -98,11 +97,9 @@ func (s *service) Change(ctx context.Context, userID int64, sessionID uuid.UUID,
 		if email, err = q.SetPassword(ctx, sqlc.SetPasswordParams{ID: userID, PasswordHash: hash}); err != nil {
 			return internal(fmt.Errorf("SetPassword(%d) (%s): %w", userID, feature, err))
 		}
-		if _, err = q.RevokeUserSessions(ctx, authsharedsqlc.RevokeUserSessionsParams{
-			UserID: userID, Reason: authshared.RevokeReasonPasswordChanged,
-			KeepFamilyID: uuid.NullUUID{UUID: sessionID, Valid: true},
-		}); err != nil {
-			return internal(fmt.Errorf("RevokeUserSessions(%d) (%s): %w", userID, feature, err))
+		if _, err = authshared.EndUserSessions(ctx, q, userID, uuid.NullUUID{UUID: sessionID, Valid: true},
+			authshared.RevokeReasonPasswordChanged); err != nil {
+			return internal(fmt.Errorf("(%s): %w", feature, err))
 		}
 		return nil
 	})

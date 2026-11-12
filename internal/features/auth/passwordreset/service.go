@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 
+	uuid "github.com/google/uuid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordreset/sqlc"
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
@@ -67,11 +68,9 @@ func (s *service) Reset(ctx context.Context, req Request) error {
 			return apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
 				fmt.Errorf("SetPasswordAfterReset(%d) (%s): %w", userID, feature, err))
 		}
-		if _, err = q.RevokeUserSessions(ctx, authsharedsqlc.RevokeUserSessionsParams{
-			UserID: userID, Reason: authshared.RevokeReasonPasswordReset,
-		}); err != nil {
+		if _, err = authshared.EndUserSessions(ctx, q, userID, uuid.NullUUID{}, authshared.RevokeReasonPasswordReset); err != nil {
 			return apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
-				fmt.Errorf("RevokeUserSessions(%d) (%s): %w", userID, feature, err))
+				fmt.Errorf("(%s): %w", feature, err))
 		}
 		return nil
 	})

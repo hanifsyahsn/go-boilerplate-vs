@@ -67,7 +67,7 @@ type LockRefreshTokenRow struct {
 
 // The presented token's row, locked so two concurrent refreshes of the same
 // token can't both rotate it, with its session's state (session_live false =
-// signed out, or a family without a session).
+// signed out, or a family without a session). Run after LockSessionOfToken.
 func (q *Queries) LockRefreshToken(ctx context.Context, jti uuid.UUID) (LockRefreshTokenRow, error) {
 	row := q.db.QueryRowContext(ctx, lockRefreshToken, jti)
 	var i LockRefreshTokenRow
@@ -81,6 +81,23 @@ func (q *Queries) LockRefreshToken(ctx context.Context, jti uuid.UUID) (LockRefr
 		&i.SessionLive,
 	)
 	return i, err
+}
+
+const lockSessionOfToken = `-- name: LockSessionOfToken :exec
+SELECT s.family_id
+FROM auth_sessions s
+         JOIN refresh_tokens rt ON rt.family_id = s.family_id
+WHERE rt.jti = $1
+FOR UPDATE OF s
+`
+
+// Locks the presented token's session row first (the lock order every path
+// follows: session, then tokens — see authshared.EndSession), so a refresh
+// waits for a revoke in flight instead of deadlocking with it. A token with no
+// session locks nothing; LockRefreshToken then reports it not live.
+func (q *Queries) LockSessionOfToken(ctx context.Context, jti uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, lockSessionOfToken, jti)
+	return err
 }
 
 const rotateRefreshToken = `-- name: RotateRefreshToken :exec

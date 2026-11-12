@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	uuid "github.com/google/uuid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user/sqlc"
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
-	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/pagination"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/utility"
@@ -90,12 +90,10 @@ func (s *service) Update(ctx context.Context, userID int64, req UpdateRequest, a
 			return userError(err, "SetUserActive", userID, "We couldn't update the user.")
 		}
 		if !*req.IsActive {
-			if _, err = q.RevokeUserSessions(ctx, authsharedsqlc.RevokeUserSessionsParams{
-				UserID: userID, Reason: authshared.RevokeReasonDeactivated,
-			}); err != nil {
+			if _, err = authshared.EndUserSessions(ctx, q, userID, uuid.NullUUID{}, authshared.RevokeReasonDeactivated); err != nil {
 				return apperror.New(apperror.CodeInternal,
 					"We couldn't update the user. Please try again, and contact support if the problem continues.",
-					fmt.Errorf("RevokeUserSessions(%d) (%s): %w", userID, feature, err))
+					fmt.Errorf("(%s): %w", feature, err))
 			}
 		}
 		out = fromRow(sqlc.GetUserRow(r))

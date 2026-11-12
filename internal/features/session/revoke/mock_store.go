@@ -95,6 +95,34 @@ func (mr *MockQuerierMockRecorder) LockLiveSession(ctx, arg interface{}) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockLiveSession", reflect.TypeOf((*MockQuerier)(nil).LockLiveSession), ctx, arg)
 }
 
+// LockSession mocks base method.
+func (m *MockQuerier) LockSession(ctx context.Context, familyID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockSession", ctx, familyID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// LockSession indicates an expected call of LockSession.
+func (mr *MockQuerierMockRecorder) LockSession(ctx, familyID interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockSession", reflect.TypeOf((*MockQuerier)(nil).LockSession), ctx, familyID)
+}
+
+// LockUserSessions mocks base method.
+func (m *MockQuerier) LockUserSessions(ctx context.Context, arg sqlc.LockUserSessionsParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockUserSessions", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// LockUserSessions indicates an expected call of LockUserSessions.
+func (mr *MockQuerierMockRecorder) LockUserSessions(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockUserSessions", reflect.TypeOf((*MockQuerier)(nil).LockUserSessions), ctx, arg)
+}
+
 // RevokeSession mocks base method.
 func (m *MockQuerier) RevokeSession(ctx context.Context, arg sqlc.RevokeSessionParams) (int64, error) {
 	m.ctrl.T.Helper()

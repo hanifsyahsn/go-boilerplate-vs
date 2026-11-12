@@ -219,7 +219,7 @@ func main() {
 		PasswordChange: authpasswordchangesvc.NewHandler(authpasswordchangesvc.NewService(authpasswordchangesqlc.New(conn),
 			authpasswordchangesvc.NewStore(conn), limits.passwordChange, emailer)),
 		PasswordReset: authpasswordresetsvc.NewHandler(authpasswordresetsvc.NewService(authpasswordresetsvc.NewStore(conn), emailer)),
-		Logout:        authlogoutsvc.NewHandler(authlogoutsvc.NewService(authlogoutsqlc.New(conn), authSharedQuerier, tokenMaker), cookies),
+		Logout:        authlogoutsvc.NewHandler(authlogoutsvc.NewService(authlogoutsqlc.New(conn), authlogoutsvc.NewStore(conn), tokenMaker), cookies),
 
 		Me: mesvc.NewHandler(mesvc.NewService(mesqlc.New(conn))),
 

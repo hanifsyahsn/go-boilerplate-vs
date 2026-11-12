@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
+	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	platformconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
@@ -193,6 +194,58 @@ func TestService_Refresh_I(t *testing.T) {
 			} else {
 				require.False(t, next.SessionExpiresAt.Valid)
 			}
+		})
+	}
+}
+
+func TestService_Refresh_RevokeInFlight_I(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	maker := jwttoken.NewTokenMakerES256(key, &key.PublicKey, "client", "issuer")
+
+	testCases := []struct {
+		name string
+	}{
+		{name: "a refresh while a revoke holds the session waits for it, then is refused as 'session ended' with nothing issued (no deadlock)"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer testhelper.Truncate(t, testDB)
+			userID := testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{})
+			familyID := uuid.New()
+			pair, err := maker.CreateToken(internalshareddto.User{ID: userID, Role: enum.RoleUser}, familyID, time.Minute, time.Hour)
+			require.NoError(t, err)
+			testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: pair.RefreshTokenID, UserID: userID, FamilyID: familyID})
+
+			// A revoke has locked the session row (the order every revoke follows).
+			revoker := testhelper.LockSessionRow(t, testDB, familyID)
+
+			done := testhelper.Async(func() error {
+				_, err := NewService(NewStore(testDB), maker, time.Minute, time.Hour).
+					Refresh(context.Background(), pair.RefreshToken, authshared.SessionClient{})
+				return err
+			})
+			testhelper.RequireBlocked(t, done, 300*time.Millisecond)
+
+			_, err = authsharedsqlc.New(testDB).WithTx(revoker).RevokeSession(context.Background(), authsharedsqlc.RevokeSessionParams{
+				FamilyID: familyID, Reason: authshared.RevokeReasonSignedOutRemotely,
+			})
+			require.NoError(t, err, "the revoke never waits on the refresh")
+			require.NoError(t, revoker.Commit())
+
+			var appErr *apperror.AppError
+			require.ErrorAs(t, testhelper.Await(t, done), &appErr)
+			require.Equal(t, apperror.CodeUnauthorized, appErr.Code)
+			require.Equal(t, middleware.SessionEndedMessage, appErr.Message)
+
+			var tokens int
+			require.NoError(t, testDB.QueryRow(`SELECT count(*) FROM refresh_tokens WHERE family_id = $1`, familyID).Scan(&tokens))
+			require.Equal(t, 1, tokens, "no successor was issued")
+			require.False(t, testhelper.GetRefreshToken(t, testDB, pair.RefreshTokenID).ReplacedBy.Valid)
 		})
 	}
 }

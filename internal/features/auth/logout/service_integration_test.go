@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/logout/sqlc"
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
-	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	internalshareddto "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/dto"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/testhelper"
@@ -58,7 +57,7 @@ func TestService_Logout_I(t *testing.T) {
 			if tc.presentOwn {
 				token = pair.RefreshToken
 			}
-			require.NoError(t, NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), maker).Logout(context.Background(), token))
+			require.NoError(t, NewService(sqlc.New(testDB), NewStore(testDB), maker).Logout(context.Background(), token))
 
 			require.Equal(t, tc.wantFamilyRevoked, testhelper.GetRefreshToken(t, testDB, pair.RefreshTokenID).RevokedAt.Valid)
 			require.Equal(t, tc.wantFamilyRevoked, testhelper.GetRefreshToken(t, testDB, sibling).RevokedAt.Valid)
@@ -70,6 +69,45 @@ func TestService_Logout_I(t *testing.T) {
 				require.Equal(t, authshared.RevokeReasonLogout, session.RevokeReason.String)
 			}
 			require.False(t, testhelper.GetSession(t, testDB, otherFamily).RevokedAt.Valid)
+		})
+	}
+}
+
+func TestService_Logout_RefreshInFlight_I(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	maker := jwttoken.NewTokenMakerES256(key, &key.PublicKey, "client", "issuer")
+
+	testCases := []struct {
+		name string
+	}{
+		{name: "a logout while a refresh of the same session is in flight waits for it, then revokes the token it rotated in too"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer testhelper.Truncate(t, testDB)
+			userID := testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{})
+			familyID := uuid.New()
+			pair, err := maker.CreateToken(internalshareddto.User{ID: userID}, familyID, time.Minute, time.Hour)
+			require.NoError(t, err)
+			testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: pair.RefreshTokenID, UserID: userID, FamilyID: familyID})
+
+			rotation := testhelper.BeginRotation(t, testDB, familyID, pair.RefreshTokenID, userID)
+			done := testhelper.Async(func() error {
+				return NewService(sqlc.New(testDB), NewStore(testDB), maker).Logout(context.Background(), pair.RefreshToken)
+			})
+			testhelper.RequireBlocked(t, done, 300*time.Millisecond)
+			rotation.Commit(t)
+			require.NoError(t, testhelper.Await(t, done))
+
+			session := testhelper.GetSession(t, testDB, familyID)
+			require.True(t, session.RevokedAt.Valid)
+			require.Equal(t, authshared.RevokeReasonLogout, session.RevokeReason.String)
+			require.True(t, testhelper.GetRefreshToken(t, testDB, rotation.NewJTI).RevokedAt.Valid)
 		})
 	}
 }

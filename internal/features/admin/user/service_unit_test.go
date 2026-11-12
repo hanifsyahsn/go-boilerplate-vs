@@ -108,11 +108,12 @@ func TestService_Update_U(t *testing.T) {
 			wantCode: apperror.CodeInternal,
 		},
 		{
-			name: "deactivate another user: every session of theirs ends (deactivated) in the same transaction", userID: 3, isActive: &no,
+			name: "deactivate another user: their session rows locked, then every session ends (deactivated), in the same transaction", userID: 3, isActive: &no,
 			stub: func(q *sqlc.MockQuerier, tq *MockQuerier) {
 				gomock.InOrder(
 					tq.EXPECT().SetUserActive(gomock.Any(), sqlc.SetUserActiveParams{ID: 3, IsActive: false}).
 						Return(sqlc.SetUserActiveRow{ID: 3, Name: "Jane", IsActive: false}, nil),
+					tq.EXPECT().LockUserSessions(gomock.Any(), authsharedsqlc.LockUserSessionsParams{UserID: 3}).Return(nil),
 					tq.EXPECT().RevokeUserSessions(gomock.Any(), authsharedsqlc.RevokeUserSessionsParams{
 						UserID: 3, Reason: authshared.RevokeReasonDeactivated,
 					}).Return(int64(2), nil),
@@ -147,6 +148,7 @@ func TestService_Update_U(t *testing.T) {
 			name: "a session revoke error is a 500 (the transaction rolls the deactivation back)", userID: 3, isActive: &no,
 			stub: func(q *sqlc.MockQuerier, tq *MockQuerier) {
 				tq.EXPECT().SetUserActive(gomock.Any(), gomock.Any()).Return(sqlc.SetUserActiveRow{ID: 3}, nil)
+				tq.EXPECT().LockUserSessions(gomock.Any(), gomock.Any()).Return(nil)
 				tq.EXPECT().RevokeUserSessions(gomock.Any(), gomock.Any()).Return(int64(0), sql.ErrConnDone)
 			},
 			wantCode: apperror.CodeInternal,

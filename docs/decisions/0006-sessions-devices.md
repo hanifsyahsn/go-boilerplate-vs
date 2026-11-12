@@ -26,3 +26,11 @@ The natural continuation of the session model; needed by any service with its ow
   not a UUID / someone else's / not live → 404 "That session doesn't exist."; the current one also clears the
   cookies.
 - An admin deactivating a user revokes all their sessions (`deactivated`) in the same transaction.
+
+## Lock order (added 2026-11-12, review fix)
+Every path that touches a session and its tokens locks the **session row first, then the token rows**: refresh
+locks the session before the token; every revoke (logout, remote sign-out, password change / reset,
+deactivation, reuse) locks the session row(s) and then revokes in a later statement, in one transaction. The
+opposite orders deadlocked a refresh with a concurrent revoke (a 500). They could also leave a token, rotated in
+by that refresh, live under a revoked session. That token granted nothing, since the session row decides, but
+it was still drift. A derivative with sessions applies the same order.

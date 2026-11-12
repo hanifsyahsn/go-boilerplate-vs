@@ -26,13 +26,13 @@ type S interface {
 }
 
 type service struct {
-	querier           sqlc.Querier
-	authSharedQuerier authsharedsqlc.Querier
-	tokenMaker        jwttoken.M
+	querier    sqlc.Querier
+	store      StoreI
+	tokenMaker jwttoken.M
 }
 
-func NewService(querier sqlc.Querier, authSharedQuerier authsharedsqlc.Querier, tokenMaker jwttoken.M) S {
-	return &service{querier: querier, authSharedQuerier: authSharedQuerier, tokenMaker: tokenMaker}
+func NewService(querier sqlc.Querier, store StoreI, tokenMaker jwttoken.M) S {
+	return &service{querier: querier, store: store, tokenMaker: tokenMaker}
 }
 
 func (s *service) Logout(ctx context.Context, refreshToken string) error {
@@ -59,11 +59,15 @@ func (s *service) Logout(ctx context.Context, refreshToken string) error {
 			fmt.Errorf("GetRefreshTokenFamily(%s) (%s): %w", jti, feature, err))
 	}
 
-	if _, err = s.authSharedQuerier.RevokeSession(ctx, authsharedsqlc.RevokeSessionParams{
-		FamilyID: familyID, Reason: authshared.RevokeReasonLogout,
+	// Session row locked first, then revoked (authshared.EndSession): a
+	// refresh in flight finishes first, and the token it rotated in is revoked
+	// with the rest.
+	if err = s.store.RunInTx(ctx, func(q authsharedsqlc.Querier) error {
+		_, err := authshared.EndSession(ctx, q, familyID, authshared.RevokeReasonLogout)
+		return err
 	}); err != nil {
 		return apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
-			fmt.Errorf("RevokeSession(%s) (%s): %w", familyID, feature, err))
+			fmt.Errorf("(%s): %w", feature, err))
 	}
 	return nil
 }

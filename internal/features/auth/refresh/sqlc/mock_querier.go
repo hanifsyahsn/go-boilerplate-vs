@@ -65,6 +65,20 @@ func (mr *MockQuerierMockRecorder) LockRefreshToken(ctx, jti interface{}) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockRefreshToken", reflect.TypeOf((*MockQuerier)(nil).LockRefreshToken), ctx, jti)
 }
 
+// LockSessionOfToken mocks base method.
+func (m *MockQuerier) LockSessionOfToken(ctx context.Context, jti uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockSessionOfToken", ctx, jti)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// LockSessionOfToken indicates an expected call of LockSessionOfToken.
+func (mr *MockQuerierMockRecorder) LockSessionOfToken(ctx, jti interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockSessionOfToken", reflect.TypeOf((*MockQuerier)(nil).LockSessionOfToken), ctx, jti)
+}
+
 // RotateRefreshToken mocks base method.
 func (m *MockQuerier) RotateRefreshToken(ctx context.Context, arg RotateRefreshTokenParams) error {
 	m.ctrl.T.Helper()

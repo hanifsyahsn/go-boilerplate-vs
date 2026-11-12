@@ -61,6 +61,14 @@ func TestService_Revoke_I(t *testing.T) {
 			},
 			wantCode: apperror.CodeNotFound,
 		},
+		{
+			name: "an untrusted session past its cap is a 404 (not live, as the list shows it)",
+			arrange: func(t *testing.T, me, _ int64) (uuid.UUID, uuid.UUID) {
+				token := uuid.New()
+				return testhelper.SeedRefreshToken(t, testDB, testhelper.SeedRefreshTokenParams{Jti: token, UserID: me, SessionExpiresAt: &hourAgo}), token
+			},
+			wantCode: apperror.CodeNotFound,
+		},
 	}
 
 	for _, tc := range testCases {

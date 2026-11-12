@@ -105,6 +105,11 @@ func (s *service) Refresh(ctx context.Context, refreshToken string, client auths
 		reused bool
 	)
 	err = s.store.RunInTx(ctx, func(q Querier) error {
+		// Session row first, then the token row: the order every revoke
+		// follows too (authshared.EndSession), so they never deadlock.
+		if err := q.LockSessionOfToken(ctx, jti); err != nil {
+			return internalError(fmt.Errorf("LockSessionOfToken(%s) (%s): %w", jti, feature, err))
+		}
 		token, err := q.LockRefreshToken(ctx, jti)
 		if errors.Is(err, sql.ErrNoRows) {
 			return sessionExpired(fmt.Errorf("LockRefreshToken(%s) (%s): unknown token", jti, feature))

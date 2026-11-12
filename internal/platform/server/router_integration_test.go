@@ -105,7 +105,7 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) (*gin.Engine, *mailer.Fake, 
 		PasswordChange: authpasswordchange.NewHandler(authpasswordchange.NewService(authpasswordchangesqlc.New(db),
 			authpasswordchange.NewStore(db), ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}), emailer)),
 		PasswordReset: authpasswordreset.NewHandler(authpasswordreset.NewService(authpasswordreset.NewStore(db), emailer)),
-		Logout:        authlogout.NewHandler(authlogout.NewService(authlogoutsqlc.New(db), authSharedQuerier, tokenMaker), cookies),
+		Logout:        authlogout.NewHandler(authlogout.NewService(authlogoutsqlc.New(db), authlogout.NewStore(db), tokenMaker), cookies),
 
 		Me: me.NewHandler(me.NewService(mesqlc.New(db))),
 

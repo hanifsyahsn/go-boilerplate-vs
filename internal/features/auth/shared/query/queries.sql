@@ -17,9 +17,31 @@ VALUES (sqlc.arg(jti)::uuid, sqlc.arg(user_id)::bigint, sqlc.arg(family_id)::uui
 INSERT INTO refresh_tokens (jti, user_id, family_id, expires_at, session_expires_at)
 VALUES ($1, $2, $3, $4, $5);
 
+-- name: LockSession :exec
+-- Locks a session row before its tokens are revoked (EndSession). Every path
+-- that touches a session and its tokens locks the session row first, so a
+-- refresh and a revoke never wait on each other in opposite orders.
+SELECT family_id
+FROM auth_sessions
+WHERE family_id = $1
+FOR UPDATE;
+
+-- name: LockUserSessions :exec
+-- Locks a user's live session rows, except keep_family_id (NULL = all), in
+-- family_id order (two revokers never cross), before EndUserSessions revokes
+-- them.
+SELECT family_id
+FROM auth_sessions
+WHERE user_id = sqlc.arg(user_id)::bigint
+  AND revoked_at IS NULL
+  AND (sqlc.narg(keep_family_id)::uuid IS NULL OR family_id <> sqlc.narg(keep_family_id)::uuid)
+ORDER BY family_id
+FOR UPDATE;
+
 -- name: RevokeSession :execrows
 -- Ends one session: revokes its family's live refresh tokens and marks the
--- session revoked with the reason, in one statement. The row count is the
+-- session revoked with the reason, in one statement. Run it after the session
+-- row is locked (EndSession, or a slice's own lock), never alone. The row count is the
 -- sessions revoked (0 = it was already revoked or doesn't exist).
 WITH tokens AS (
     UPDATE refresh_tokens
@@ -36,6 +58,7 @@ WHERE family_id = sqlc.arg(family_id)::uuid
 -- name: RevokeUserSessions :execrows
 -- Ends every live session of a user except keep_family_id (NULL = all): a
 -- password change keeps the caller's own, a reset or a deactivation none.
+-- Run it after LockUserSessions (EndUserSessions), never alone.
 -- The row count is the sessions revoked.
 WITH tokens AS (
     UPDATE refresh_tokens

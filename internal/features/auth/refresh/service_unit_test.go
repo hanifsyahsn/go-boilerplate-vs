@@ -67,7 +67,10 @@ func TestService_Refresh_U(t *testing.T) {
 	// verified stubs a valid token up to its locked row.
 	verified := func(q *MockQuerier, m *jwttoken.MockM, row sqlc.LockRefreshTokenRow) {
 		m.EXPECT().VerifyRefreshToken("ref").Return(claims, nil)
-		q.EXPECT().LockRefreshToken(gomock.Any(), jti).Return(row, nil)
+		gomock.InOrder( // the session row is locked before the token row (the revokes' order)
+			q.EXPECT().LockSessionOfToken(gomock.Any(), jti).Return(nil),
+			q.EXPECT().LockRefreshToken(gomock.Any(), jti).Return(row, nil),
+		)
 	}
 
 	testCases := []struct {
@@ -165,15 +168,26 @@ func TestService_Refresh_U(t *testing.T) {
 			token: "ref",
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				m.EXPECT().VerifyRefreshToken("ref").Return(claims, nil)
+				q.EXPECT().LockSessionOfToken(gomock.Any(), jti).Return(nil)
 				q.EXPECT().LockRefreshToken(gomock.Any(), jti).Return(sqlc.LockRefreshTokenRow{}, sql.ErrNoRows)
 			},
 			wantCode: apperror.CodeUnauthorized,
 		},
 		{
-			name:  "a lock error is a 500",
+			name:  "a session lock error is a 500 and the token isn't touched",
 			token: "ref",
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				m.EXPECT().VerifyRefreshToken("ref").Return(claims, nil)
+				q.EXPECT().LockSessionOfToken(gomock.Any(), jti).Return(sql.ErrConnDone)
+			},
+			wantCode: apperror.CodeInternal,
+		},
+		{
+			name:  "a token lock error is a 500",
+			token: "ref",
+			stub: func(q *MockQuerier, m *jwttoken.MockM) {
+				m.EXPECT().VerifyRefreshToken("ref").Return(claims, nil)
+				q.EXPECT().LockSessionOfToken(gomock.Any(), jti).Return(nil)
 				q.EXPECT().LockRefreshToken(gomock.Any(), jti).Return(sqlc.LockRefreshTokenRow{}, sql.ErrConnDone)
 			},
 			wantCode: apperror.CodeInternal,

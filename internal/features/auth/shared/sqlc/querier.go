@@ -6,6 +6,8 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
 type Querier interface {
@@ -16,12 +18,22 @@ type Querier interface {
 	// Records a refresh token of an existing family (refresh continues it).
 	// session_expires_at is NULL for a trusted device (no cap).
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
+	// Locks a session row before its tokens are revoked (EndSession). Every path
+	// that touches a session and its tokens locks the session row first, so a
+	// refresh and a revoke never wait on each other in opposite orders.
+	LockSession(ctx context.Context, familyID uuid.UUID) error
+	// Locks a user's live session rows, except keep_family_id (NULL = all), in
+	// family_id order (two revokers never cross), before EndUserSessions revokes
+	// them.
+	LockUserSessions(ctx context.Context, arg LockUserSessionsParams) error
 	// Ends one session: revokes its family's live refresh tokens and marks the
-	// session revoked with the reason, in one statement. The row count is the
+	// session revoked with the reason, in one statement. Run it after the session
+	// row is locked (EndSession, or a slice's own lock), never alone. The row count is the
 	// sessions revoked (0 = it was already revoked or doesn't exist).
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) (int64, error)
 	// Ends every live session of a user except keep_family_id (NULL = all): a
 	// password change keeps the caller's own, a reset or a deactivation none.
+	// Run it after LockUserSessions (EndUserSessions), never alone.
 	// The row count is the sessions revoked.
 	RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) (int64, error)
 	// Spends the user's unused tokens of a purpose before a new one is issued:
