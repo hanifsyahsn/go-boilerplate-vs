@@ -134,11 +134,16 @@ func main() {
 	var bg utility.Group
 
 	// Ops alerts (decision 0011): Telegram when configured, else none. Every
-	// recovered panic (a request's or a background goroutine's) is one.
+	// recovered panic (a request's or a background goroutine's) is one. The
+	// sender has its own ctx and group, stopped after bg (stopBackground): a
+	// job still finishing, e.g. a failed last activity-log flush, can alert.
+	alertCtx, stopAlerts := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopAlerts()
+	var alertSender utility.Group
 	var alerts notifier.Notifier = notifier.NewNoop()
 	if conf.TelegramBotToken != "" {
 		telegram := notifier.NewTelegram(conf.TelegramBotToken, conf.TelegramChatID, conf.Environment, "go_boilerplate_vs")
-		bg.Go(bgCtx, telegram.Run)
+		alertSender.Go(alertCtx, telegram.Run)
 		alerts = telegram
 	}
 	utility.SetPanicHook(func(ctx context.Context, recovered any) {
@@ -251,14 +256,24 @@ func main() {
 	// Only now: a request that finished during the drain has queued its
 	// background work, which gets the cancel and flushes before the DB pool
 	// (deferred above) closes.
-	stopBg()
-	bg.Wait()
+	stopBackground(stopBg, &bg, stopAlerts, &alertSender)
 	if rdb != nil {
 		_ = rdb.Close() // after every request and background job is done with it
 	}
 	if runErr != nil {
 		logging.Fatal("server run failed", "err", runErr)
 	}
+}
+
+// stopBackground ends the background work once the server has drained: the
+// jobs first (they flush what the last requests queued, and a failure there
+// may raise an alert), then the alert sender, which sends what is queued
+// before it returns, so those last alerts still go out.
+func stopBackground(stopJobs context.CancelFunc, jobs *utility.Group, stopAlerts context.CancelFunc, alertSender *utility.Group) {
+	stopJobs()
+	jobs.Wait()
+	stopAlerts()
+	alertSender.Wait()
 }
 
 // limiters are every rate limit of the API.

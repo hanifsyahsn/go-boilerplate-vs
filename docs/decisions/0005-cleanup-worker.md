@@ -11,10 +11,12 @@ tokens, spent email tokens (0007), activity-log rows past retention (0008). It l
 Closes the *Gotcha* "`refresh_tokens` grows by one row per refresh and nothing prunes it".
 
 ## As built (part 1: background group + shutdown order)
-- `utility.Group` (`Go(ctx, fn)` through `SafeGoContext`, `Wait()`) and `utility.GoFunc` (what a service that
+- `utility.Group` (`Go(ctx, fn)`, recovered like `SafeGoContext` and counted done only after a panic was logged and
+  reported; `Wait()`) and `utility.GoFunc` (what a service that
   works off the request path takes; main passes `bg.Go`).
 - `main`: `bgCtx, stopBg := context.WithCancel(context.WithoutCancel(ctx))`; after `srv.Run` returned (requests
-  drained) → `stopBg()` → `bg.Wait()` → the deferred DB close. A `srv.Run` error is reported only after that, so
+  drained) → `stopBackground`: `stopBg()` → `bg.Wait()` → the alert sender's own ctx and group (so an alert a job
+  raises while finishing still goes out) → the deferred DB close. A `srv.Run` error is reported only after that, so
   it never skips the flush.
 
 ## As built (part 2: the worker)

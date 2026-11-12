@@ -38,9 +38,11 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (*Request
   `c.Request` is nil (`gin.CreateTestContext`).
 - Startup failures: `logging.Fatal("load config failed", "err", err)`. A `TestMain` may use `log.Fatalf`.
 - **Work that must finish before shutdown** (a worker, an email send, the activity recorder) runs in main's
-  `utility.Group` (`bg.Go(ctx, fn)` — `SafeGoContext` underneath), never a bare `SafeGoContext`. `main` cancels
-  `bgCtx` only **after** `srv.Run` returned (requests drained), then `bg.Wait()`, then the DB pool closes — so the
-  last requests' work is flushed, not lost. A service that starts such work takes a `utility.GoFunc` (main passes
+  `utility.Group` (`bg.Go(ctx, fn)` — recovered like `SafeGoContext`, counted done only **after** a panic was
+  logged and reported, so `Wait` never returns ahead of that record), never a bare `SafeGoContext`. `main` cancels
+  `bgCtx` only **after** `srv.Run` returned (requests drained), then `bg.Wait()`, then stops the **alert sender**
+  (its own ctx and group, `stopBackground` in `main.go`: a job finishing late can still alert), then the DB pool
+  closes — so the last requests' work is flushed, not lost (`TestStopBackground_U`, `TestGroup_U`). A service that starts such work takes a `utility.GoFunc` (main passes
   `bg.Go`; tests pass one that runs `fn` inline) and hands it `requestid.Detach(ctx)`. A worker returns when its
   ctx is done, after flushing.
 - A goroutine that outlives the request: `utility.SafeGoContext(requestid.Detach(ctx), fn)` — `Detach` keeps
@@ -71,8 +73,8 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (*Request
 
 - **`internal/platform/notifier`** (decision 0011): `Notifier.Notify(ctx, Alert{Level, Title, Text, RequestID})`
   never blocks and never errors. `NewTelegram(token, chatID, environment, service)` when `TELEGRAM_BOT_TOKEN` +
-  `TELEGRAM_CHAT_ID` are set (both or neither), else `NewNoop()`. Telegram: a 100-alert queue sent by `Run` in
-  main's background group (full → dropped, warn `notifier: queue full, alert dropped`); **one alert per `Title`
+  `TELEGRAM_CHAT_ID` are set (both or neither), else `NewNoop()`. Telegram: a 100-alert queue sent by `Run` on its own ctx + group in
+  main, stopped after the background group so a job's last alert still goes out (full → dropped, warn `notifier: queue full, alert dropped`); **one alert per `Title`
   per 5 min**, the held-back ones counted into the next ("(N more since)"); plain text `"[env] service — LEVEL:
   Title\nText"` (+ `request_id`), no link preview, 5 s timeout. **The bot token never reaches a log**: a send
   failure is `notifier: send failed` with `status` and the error with the token replaced by `***` (a

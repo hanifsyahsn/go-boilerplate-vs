@@ -36,13 +36,17 @@ func SafeGo(fn func()) {
 // requestid.Detach(ctx): the request's own context is cancelled — and a
 // *gin.Context reused — once the response is written.
 func SafeGoContext(ctx context.Context, fn func(ctx context.Context)) {
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.ErrorContext(ctx, "panic recovered", "panic", r, "stack", string(debug.Stack()))
-				ReportPanic(ctx, r)
-			}
-		}()
-		fn(ctx)
+	go runRecovered(ctx, fn)
+}
+
+// runRecovered runs fn(ctx) and turns a panic into a log record and a
+// ReportPanic; it returns only after both.
+func runRecovered(ctx context.Context, fn func(ctx context.Context)) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.ErrorContext(ctx, "panic recovered", "panic", r, "stack", string(debug.Stack()))
+			ReportPanic(ctx, r)
+		}
 	}()
+	fn(ctx)
 }

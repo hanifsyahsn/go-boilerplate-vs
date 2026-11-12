@@ -50,6 +50,33 @@ func TestGroup_U(t *testing.T) {
 			require.Eventually(t, func() bool { return bytes.Contains([]byte(logs.String()), []byte("panic recovered")) },
 				time.Second, 5*time.Millisecond, "the panic is logged")
 		}},
+		{name: "Wait returns only after a panic was logged and reported (main may exit right after)", run: func(t *testing.T, g *Group) {
+			var logs syncBuffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			defer slog.SetDefault(prev)
+			release := make(chan struct{})
+			var reported atomic.Bool
+			SetPanicHook(func(context.Context, any) { <-release; reported.Store(true) })
+			defer panicHook.Store(nil)
+
+			g.Go(context.Background(), func(context.Context) { panic("boom") })
+			done := make(chan struct{})
+			go func() { g.Wait(); close(done) }()
+			select {
+			case <-done:
+				t.Fatal("Wait returned while the panic was still being reported")
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(release)
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("Wait never returned")
+			}
+			require.True(t, reported.Load(), "the hook ran before Wait returned")
+			require.Contains(t, logs.String(), "panic recovered", "logged before Wait returned")
+		}},
 		{name: "the ctx passed in is the one fn receives", run: func(t *testing.T, g *Group) {
 			ctx := context.WithValue(context.Background(), ctxKey{}, "mine")
 			var got any
