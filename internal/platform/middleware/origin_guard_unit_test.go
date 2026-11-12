@@ -1,11 +1,14 @@
 package middleware
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	"github.com/stretchr/testify/require"
 )
 
@@ -76,6 +79,48 @@ func TestOriginGuard_U(t *testing.T) {
 			if tc.wantCode == http.StatusForbidden {
 				require.JSONEq(t, forbidden, w.Body.String())
 			}
+		})
+	}
+}
+
+// TestOriginRefusal_Log_U: a refusal for two Origin headers says so in the
+// log; quoting only the first (which may be listed) reads as a config bug.
+func TestOriginRefusal_Log_U(t *testing.T) {
+	listed := []string{"https://app.example.com"}
+	testCases := []struct {
+		name      string
+		mw        gin.HandlerFunc
+		method    string
+		preflight bool
+	}{
+		{name: "the guard logs two Origin headers as such", mw: OriginGuard(listed), method: http.MethodPost},
+		{name: "CORS logs two Origin headers on a preflight as such", mw: CORS(listed), method: http.MethodOptions, preflight: true},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			l, err := logging.New(&buf, logging.FormatJSON, "debug")
+			require.NoError(t, err)
+			prev := slog.Default()
+			slog.SetDefault(l)
+			defer slog.SetDefault(prev)
+
+			gin.SetMode(gin.TestMode)
+			r := gin.New()
+			r.Use(tc.mw)
+			r.Handle(tc.method, "/x", func(c *gin.Context) { c.Status(http.StatusTeapot) })
+			req := httptest.NewRequest(tc.method, "/x", nil)
+			req.Header.Add("Origin", "https://app.example.com")
+			req.Header.Add("Origin", "https://evil.example")
+			if tc.preflight {
+				req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusForbidden, w.Code)
+			require.Contains(t, buf.String(), "2 Origin headers")
+			require.NotContains(t, buf.String(), `\"https://app.example.com\" not`, "not logged as if the listed origin were refused")
 		})
 	}
 }

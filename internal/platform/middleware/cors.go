@@ -40,21 +40,20 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 		}
 		c.Writer.Header().Add("Vary", "Origin")
 
-		origins := c.Request.Header.Values("Origin")
-		if len(origins) == 0 {
+		origin, count := singleHeader(c.Request.Header, "Origin")
+		if count == 0 {
 			c.Next()
 			return
 		}
-		origin := origins[0]
 		preflight := c.Request.Method == http.MethodOptions && c.GetHeader("Access-Control-Request-Method") != ""
 
 		// Exactly one listed origin, as OriginGuard requires: two Origin
 		// headers (or an empty one) are no origin a browser sends.
-		if _, ok := allowed[normalizeOrigin(origin)]; !ok || len(origins) != 1 {
+		if _, ok := allowed[normalizeOrigin(origin)]; !ok || count != 1 {
 			if preflight {
 				jsonapi.WriteErrorsContext(handlerutil.RequestContext(c), c.Writer,
 					apperror.New(apperror.CodeForbidden, OriginNotAllowedMessage,
-						fmt.Errorf("origin %q not in ALLOWED_ORIGINS", origin)).WithHeader("Origin"))
+						fmt.Errorf("%s not in ALLOWED_ORIGINS", describeOrigin(origin, count))).WithHeader("Origin"))
 				c.Abort()
 				return
 			}

@@ -41,10 +41,9 @@ func APIKey(keys map[string]string) gin.HandlerFunc {
 		hashed = append(hashed, apiKey{name: name, hash: sha256.Sum256([]byte(key))})
 	}
 	return func(c *gin.Context) {
-		values := c.Request.Header.Values(APIKeyHeader)
-		var given string
-		if len(values) == 1 {
-			given = values[0]
+		given, count := singleHeader(c.Request.Header, APIKeyHeader)
+		if count != 1 {
+			given = "" // two keys are ambiguous: none is tried
 		}
 		givenHash := sha256.Sum256([]byte(given))
 		matched, ok := "", false

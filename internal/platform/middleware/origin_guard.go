@@ -35,22 +35,18 @@ func OriginGuard(allowedOrigins []string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		origins, sent := c.Request.Header["Origin"]
-		if !sent {
+		value, count := singleHeader(c.Request.Header, "Origin")
+		if count == 0 {
 			c.Next()
 			return
 		}
-		value := ""
-		if len(origins) > 0 {
-			value = origins[0]
-		}
-		if _, ok := allowed[normalizeOrigin(value)]; ok && len(origins) == 1 {
+		if _, ok := allowed[normalizeOrigin(value)]; ok && count == 1 {
 			c.Next()
 			return
 		}
 		jsonapi.WriteErrorsContext(handlerutil.RequestContext(c), c.Writer,
 			apperror.New(apperror.CodeForbidden, OriginNotAllowedForWriteMessage,
-				fmt.Errorf("origin %q not allowed for %s %s", value, c.Request.Method, c.Request.URL.Path)).WithHeader("Origin"))
+				fmt.Errorf("%s not allowed for %s %s", describeOrigin(value, count), c.Request.Method, c.Request.URL.Path)).WithHeader("Origin"))
 		c.Abort()
 	}
 }
