@@ -18,6 +18,13 @@ func TestMaxBytes_U(t *testing.T) {
 	type negativeParam struct {
 		Value string `validate:"maxbytes=-1"`
 	}
+	type byteSlice struct {
+		Value []byte `validate:"maxbytes=72"`
+	}
+	type pointer struct {
+		Value *string `validate:"omitempty,maxbytes=72"`
+	}
+	short, long := "short", strings.Repeat("é", 37)
 
 	v := validator.New()
 	require.NoError(t, v.RegisterValidation("maxbytes", MaxBytes))
@@ -36,6 +43,9 @@ func TestMaxBytes_U(t *testing.T) {
 		{name: "19 emoji (76 bytes) fail", value: limited{strings.Repeat("😀", 19)}, wantErr: true},
 		{name: "a param that isn't a number fails every value", value: badParam{"a"}, wantErr: true},
 		{name: "a negative param fails every value", value: negativeParam{""}, wantErr: true},
+		{name: "a field that isn't a string ([]byte) fails every value, never passes by accident", value: byteSlice{[]byte("a")}, wantErr: true},
+		{name: "a *string is checked through the pointer: short passes", value: pointer{&short}},
+		{name: "a *string is checked through the pointer: over 72 bytes fails", value: pointer{&long}, wantErr: true},
 	}
 
 	for _, tc := range testCases {

@@ -55,6 +55,23 @@ func TestHandler_Register_U(t *testing.T) {
 			wantInBody: []string{"Password must be at least 8 characters long."},
 		},
 		{
+			name:     "5 accented letters (10 bytes, only 5 characters) are still too short: min=8 counts characters, not bytes",
+			body:     doc(`{"name":"Jane","email":"jane@example.com","password":"` + strings.Repeat("é", 5) + `"}`),
+			stub:     func(s *MockS) {},
+			wantCode: http.StatusUnprocessableEntity,
+			wantInBody: []string{"Password must be at least 8 characters long.",
+				`"pointer":"/data/attributes/password"`},
+		},
+		{
+			name: "8 accented letters (8 characters, 16 bytes) are long enough",
+			body: doc(`{"name":"Jane","email":"jane@example.com","password":"` + strings.Repeat("é", 8) + `"}`),
+			stub: func(s *MockS) {
+				s.EXPECT().Register(gomock.Any(), Request{Name: "Jane", Email: "jane@example.com", Password: strings.Repeat("é", 8)}).
+					Return(authshared.UserResource{ID: "1", Name: "Jane", Email: "jane@example.com", Role: "user"}, nil)
+			},
+			wantCode: http.StatusCreated,
+		},
+		{
 			name: "a 72-byte password (72 plain letters) is accepted",
 			body: doc(`{"name":"Jane","email":"jane@example.com","password":"` + strings.Repeat("a", 72) + `"}`),
 			stub: func(s *MockS) {

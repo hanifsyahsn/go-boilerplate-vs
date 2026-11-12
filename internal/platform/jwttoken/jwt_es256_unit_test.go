@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -277,6 +278,11 @@ func TestSubjectID_U(t *testing.T) {
 		{name: "missing", claims: jwt.MapClaims{}, wantErr: true},
 		{name: "zero", claims: jwt.MapClaims{"sub": float64(0)}, wantErr: true},
 		{name: "a string", claims: jwt.MapClaims{"sub": "7"}, wantErr: true},
+		{name: "negative", claims: jwt.MapClaims{"sub": float64(-1)}, wantErr: true},
+		{name: "a fraction is refused, never rounded down to another user (1.9 isn't user 1)", claims: jwt.MapClaims{"sub": 1.9}, wantErr: true},
+		{name: "2^63 and past (no int64 holds it) is refused", claims: jwt.MapClaims{"sub": float64(math.MaxInt64)}, wantErr: true},
+		{name: "the largest float below 2^63 is a valid id", claims: jwt.MapClaims{"sub": math.Nextafter(float64(math.MaxInt64), 0)},
+			want: int64(math.Nextafter(float64(math.MaxInt64), 0))},
 	}
 
 	for _, tc := range testCases {

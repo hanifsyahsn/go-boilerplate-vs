@@ -245,6 +245,9 @@ func TestNewMemory_U(t *testing.T) {
 		{name: "a positive burst and period make a limiter", rate: Rate{Burst: 5, Per: time.Minute}},
 		{name: "a zero burst is refused", rate: Rate{Burst: 0, Per: time.Minute}, wantPanic: true},
 		{name: "a zero period is refused", rate: Rate{Burst: 5}, wantPanic: true},
+		{name: "a period shorter than Burst nanoseconds (a zero token interval: refill would divide by zero) is refused",
+			rate: Rate{Burst: 1000, Per: 999 * time.Nanosecond}, wantPanic: true},
+		{name: "the shortest usable interval, 1 ns per token, makes a limiter", rate: Rate{Burst: 1000, Per: 1000 * time.Nanosecond}},
 	}
 
 	for _, tc := range testCases {

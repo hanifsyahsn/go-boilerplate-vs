@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 
 	"github.com/gin-gonic/gin"
 	adminuser "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/admin/user"
@@ -124,10 +125,10 @@ func GinMode(environment string) string {
 // It fails on a Security it can't apply: a TrustedProxies entry gin rejects,
 // or no AuthIPLimit / PublicIPLimit.
 func NewRouter(version string, tokenMaker jwttoken.M, accessStatus middleware.AccessStatusReader, h Handlers, sec Security) (*gin.Engine, error) {
-	if sec.AuthIPLimit == nil {
+	if isNil(sec.AuthIPLimit) {
 		return nil, errors.New("server.NewRouter(): Security.AuthIPLimit is required")
 	}
-	if sec.PublicIPLimit == nil {
+	if isNil(sec.PublicIPLimit) {
 		return nil, errors.New("server.NewRouter(): Security.PublicIPLimit is required")
 	}
 
@@ -142,7 +143,7 @@ func NewRouter(version string, tokenMaker jwttoken.M, accessStatus middleware.Ac
 		return nil, fmt.Errorf("server.NewRouter(): trusted proxies: %w", err)
 	}
 	r.Use(middleware.RequestID(), middleware.AccessLog())
-	if sec.ActivityRecorder != nil {
+	if !isNil(sec.ActivityRecorder) {
 		// Outside recovery, so a panic is recorded as the 500 it became.
 		r.Use(middleware.ActivityLog(sec.ActivityRecorder))
 	}
@@ -218,4 +219,20 @@ func NewRouter(version string, tokenMaker jwttoken.M, accessStatus middleware.Ac
 	}
 
 	return r, nil
+}
+
+// isNil reports whether v is nil, a nil pointer (or map, slice, func, chan)
+// stored in an interface included: a typed nil (`var m *ratelimit.Memory`)
+// passes `== nil` and would panic on first use.
+func isNil(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
+		return rv.IsNil()
+	default:
+		return false
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -144,7 +145,10 @@ func (maker *MakerES256) verify(tokenString, wantType string) (jwt.MapClaims, er
 // float64, so that's what a parsed token holds.
 func SubjectID(claims jwt.MapClaims) (int64, error) {
 	sub, ok := claims[platformconstant.SubKey].(float64)
-	if !ok || sub <= 0 {
+	// A user id is a positive whole number that fits int64: a fraction (1.9
+	// would read as user 1) or a value past int64 (its conversion is
+	// implementation-defined) is refused.
+	if !ok || sub <= 0 || sub != math.Trunc(sub) || sub >= math.MaxInt64 {
 		return 0, errors.New("token has no valid sub claim")
 	}
 	return int64(sub), nil

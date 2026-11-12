@@ -161,13 +161,14 @@ Added 2026-11-09 as the boilerplate's base security.
   unavailable` (`limiter`, `mode`) at most once per 30 s. One behaviour table runs against both implementations
   (`runLimiterContract`: `TestMemory_Contract_U`, `TestRedis_Contract_I`), plus `TestRedis_Take_Parallel_I`.
   `ratelimit.NewMemory(rate)` is the in-process one (never errors; one instance only, see *Gotchas* in
-  CLAUDE.md). It keeps only buckets still refilling (a full one is dropped; swept once per `Per`, and while the
+  CLAUDE.md; like `NewRedis` it panics on a rate whose token interval `Per / Burst` is zero). It keeps only buckets still refilling (a full one is dropped; swept once per `Per`, and while the
   map is full once per token interval — not on every request, which a flood could use to burn CPU) and at most `DefaultMaxKeys` (100,000) of them: when all are still refilling, a **new** key is
   refused (warn `rate limit: bucket map full, new key refused`) rather than an old one forgotten — forgetting
   would let a flood of fresh keys wipe a victim's count. Keys of a client IP go through `ratelimit.IPKey`: IPv4
   as is, **IPv6 per /64** (one subscriber gets a whole /64).
 - **Per IP** (`middleware.RateLimitByIP(limiter, "auth")`, `Security.AuthIPLimit`, **required** — `NewRouter`
-  refuses nil): register and login share one bucket, 300 / 15 min per IP (`authIPRate` in `main.go`; generous
+  refuses nil, a typed nil such as a nil `*ratelimit.Memory` included): register and login share one bucket,
+  300 / 15 min per IP (`authIPRate` in `main.go`; generous
   because an office NAT shares one IP). Past it → 429 `too_many_requests` with `Retry-After` (whole seconds,
   rounded up — `apperror.RetryAfterSeconds`, set from the error's `WithRetryAfter`), detail
   `middleware.TooManyRequestsMessage`, the handler never runs. A limiter error is a 500 (the limiter owns surviving its store — decision 0003). **Refresh and logout are not IP-limited**: they run

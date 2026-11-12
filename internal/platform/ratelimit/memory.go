@@ -43,10 +43,11 @@ type bucket struct {
 var _ Limiter = (*Memory)(nil)
 
 // NewMemory returns an in-process limiter of rate per key. It panics on a rate
-// without a positive Burst and Per: the limits are constants in main.
+// without a positive Burst and Per, or one whose token interval (Per / Burst)
+// rounds to zero: refill would divide by it. The limits are constants in main.
 func NewMemory(rate Rate) *Memory {
-	if rate.Burst <= 0 || rate.Per <= 0 {
-		panic(fmt.Sprintf("ratelimit.NewMemory(): Burst and Per must be > 0, got %+v", rate))
+	if rate.Burst <= 0 || rate.Per <= 0 || rate.interval() <= 0 {
+		panic(fmt.Sprintf("ratelimit.NewMemory(): Burst and Per must be > 0 with a token interval above zero, got %+v", rate))
 	}
 	now := time.Now
 	return &Memory{rate: rate, maxKeys: DefaultMaxKeys, now: now, buckets: map[string]*bucket{}, lastSweep: now()}

@@ -30,6 +30,7 @@ import (
 	sessionlist "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/list"
 	sessionrevoke "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/revoke"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
 	middlewaresqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/jsonapi"
@@ -370,6 +371,12 @@ func TestNewRouter_SecurityErrors_U(t *testing.T) {
 				PublicIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute})}, wantErr: "trusted proxies"},
 		{name: "no general IP limit: refused, the public routes must never run unlimited",
 			sec: Security{AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute})}, wantErr: "PublicIPLimit is required"},
+		{name: "a typed-nil auth IP limit (a nil *Memory in the interface) is refused like a missing one, not a panic later",
+			sec:     Security{AuthIPLimit: (*ratelimit.Memory)(nil), PublicIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute})},
+			wantErr: "AuthIPLimit is required"},
+		{name: "a typed-nil general IP limit is refused like a missing one",
+			sec:     Security{AuthIPLimit: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute}), PublicIPLimit: (*ratelimit.Memory)(nil)},
+			wantErr: "PublicIPLimit is required"},
 	}
 
 	for _, tc := range testCases {
@@ -488,6 +495,65 @@ func TestNewRouter_PanicHook_U(t *testing.T) {
 			rep := <-got
 			require.Equal(t, "boom", rep.recovered)
 			require.Equal(t, "req-42", rep.requestID)
+		})
+	}
+}
+
+// countingRecorder is an ActivityRecorder that counts rows; its nil pointer
+// panics if used.
+type countingRecorder struct{ rows int }
+
+func (r *countingRecorder) Record(middleware.Activity) { r.rows++ }
+
+func TestNewRouter_ActivityRecorder_U(t *testing.T) {
+	live := &countingRecorder{}
+	testCases := []struct {
+		name     string
+		recorder middleware.ActivityRecorder
+		wantRows int
+	}{
+		{name: "a recorder set: every request is recorded", recorder: live, wantRows: 1},
+		{name: "a typed-nil recorder reads as none: the router serves requests without an activity log, no panic",
+			recorder: (*countingRecorder)(nil)},
+		{name: "no recorder: no activity log", recorder: nil},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			limit := ratelimit.NewMemory(ratelimit.Rate{Burst: 10, Per: time.Minute})
+			r, err := NewRouter("v", jwttoken.NewMockM(ctrl), middlewaresqlc.NewMockQuerier(ctrl), newMocks(ctrl).handlers(),
+				Security{AuthIPLimit: limit, PublicIPLimit: limit, ActivityRecorder: tc.recorder})
+			require.NoError(t, err)
+
+			w := httptest.NewRecorder()
+			require.NotPanics(t, func() { r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/nowhere", nil)) })
+			require.Equal(t, http.StatusNotFound, w.Code)
+			if rec, ok := tc.recorder.(*countingRecorder); ok && rec != nil {
+				require.Equal(t, tc.wantRows, rec.rows)
+			}
+		})
+	}
+}
+
+func TestIsNil_U(t *testing.T) {
+	var nilMemory *ratelimit.Memory
+	var nilMap map[string]int
+	var nilFunc func()
+	testCases := []struct {
+		name string
+		v    any
+		want bool
+	}{
+		{name: "untyped nil", v: nil, want: true},
+		{name: "a nil pointer in an interface (typed nil)", v: nilMemory, want: true},
+		{name: "a nil map", v: nilMap, want: true},
+		{name: "a nil func", v: nilFunc, want: true},
+		{name: "a live pointer", v: ratelimit.NewMemory(ratelimit.Rate{Burst: 1, Per: time.Minute}), want: false},
+		{name: "a struct value (a kind that can't be nil)", v: struct{}{}, want: false},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, isNil(tc.v))
 		})
 	}
 }
