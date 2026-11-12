@@ -14,6 +14,7 @@ import (
 
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest/sqlc"
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
+	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
 )
@@ -41,20 +42,22 @@ type S interface {
 
 type service struct {
 	querier   sqlc.Querier
+	shared    authsharedsqlc.Querier
 	store     StoreI
 	recipient ratelimit.Limiter
 	emailer   authshared.Emailer
 	now       func() time.Time
 }
 
-func NewService(querier sqlc.Querier, store StoreI, recipient ratelimit.Limiter, emailer authshared.Emailer) S {
-	return &service{querier: querier, store: store, recipient: recipient, emailer: emailer, now: time.Now}
+func NewService(querier sqlc.Querier, shared authsharedsqlc.Querier, store StoreI, recipient ratelimit.Limiter, emailer authshared.Emailer) S {
+	return &service{querier: querier, shared: shared, store: store, recipient: recipient, emailer: emailer, now: time.Now}
 }
 
-// recipientKey is the limiter's key: the email trimmed and lowercased, the
-// way the lookup matches it.
-func recipientKey(email string) string {
-	return "reset:" + strings.ToLower(strings.TrimSpace(email))
+// recipientKey is the limiter's key for an email already folded by Postgres
+// (FoldEmail), the way the lookup matches it: every spelling the database
+// treats as one account shares one count.
+func recipientKey(folded string) string {
+	return "reset:" + folded
 }
 
 func (s *service) Request(ctx context.Context, req Request) {
@@ -66,7 +69,13 @@ func (s *service) Request(ctx context.Context, req Request) {
 // reset is the work behind a request, off the request path. Logs never carry
 // the address (or the link).
 func (s *service) reset(ctx context.Context, email string) {
-	d, err := s.recipient.Take(ctx, recipientKey(email))
+	// Folded by Postgres, like the lookup (see authshared FoldEmail).
+	folded, err := s.shared.FoldEmail(ctx, email)
+	if err != nil {
+		slog.ErrorContext(ctx, "password reset: fold email failed", "err", err)
+		return
+	}
+	d, err := s.recipient.Take(ctx, recipientKey(folded))
 	if err != nil {
 		slog.ErrorContext(ctx, "password reset: recipient limit failed", "err", err)
 		return

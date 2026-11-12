@@ -58,6 +58,13 @@ Token buckets are the common choice; small services shouldn't have to run Redis.
   general per-IP limit; the "store unavailable" warning at most once per 30 s per limiter.
 - The same behaviour table runs against both implementations; 50 parallel takes on a burst of 10 allow exactly 10.
 
+## Per-email keys are folded by the database (added 2026-11-12)
+A per-email limit key (failed logins, reset emails) is the email folded by Postgres, `lower()` in a tiny
+`SELECT`, the same function the account lookup uses. It is never folded by Go's `strings.ToLower`. The two
+Unicode tables differ for a few letters (glibc's Unicode 16 lowers U+A7DC to U+019B, Go's tables don't). With
+Go's fold, two spellings reached one account but counted apart, which doubled an attacker's guesses. The price
+is one round trip per attempt, without touching a table.
+
 ## Every 429 carries Retry-After (added 2026-11-12)
 Point 5's "429 + `Retry-After`" holds for **every** limit, not only the per-IP middleware. A service-level limit
 (per-email / per-IP failed logins, wrong current passwords, verification links) answers its 429 with

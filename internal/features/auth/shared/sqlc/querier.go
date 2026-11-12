@@ -13,6 +13,12 @@ import (
 type Querier interface {
 	// Atomic single use: two parallel requests with one token → one row, the other gets no rows.
 	ConsumeAuthToken(ctx context.Context, arg ConsumeAuthTokenParams) (int64, error)
+	// An email folded to lowercase by Postgres, the way the lookups match it
+	// (lower(email) = lower($1)): a per-email rate-limit key built from this and
+	// the lookup always agree. Go's strings.ToLower doesn't: its Unicode tables
+	// can differ from the database's (U+A7DC lowers to U+019B in glibc's, not in
+	// Go's), which would split one account's count across two keys.
+	FoldEmail(ctx context.Context, email string) (string, error)
 	// Records an issued one-time token (its hash only).
 	InsertAuthToken(ctx context.Context, arg InsertAuthTokenParams) error
 	// Records a refresh token of an existing family (refresh continues it).

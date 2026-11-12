@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/golang/mock/gomock"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest/sqlc"
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
+	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/mailer"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
@@ -120,7 +122,7 @@ func TestService_Request_U(t *testing.T) {
 			emailer := authshared.Emailer{Mailer: fake, AppBaseURL: "https://app.example.com",
 				Go: func(ctx context.Context, fn func(context.Context)) { fn(ctx) }}
 
-			svc := NewService(q, store, tc.limiter, emailer)
+			svc := NewService(q, foldingQuerier(ctrl), store, tc.limiter, emailer)
 			svc.(*service).now = func() time.Time { return time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC) }
 			svc.Request(context.Background(), Request{Email: "  Jane@Example.com "})
 
@@ -193,7 +195,7 @@ func TestService_Request_AnswersBeforeWork_U(t *testing.T) {
 				}}
 
 			reqCtx, cancel := context.WithCancel(requestid.With(context.Background(), "req-1"))
-			NewService(q, store, limiter, emailer).Request(reqCtx, Request{Email: "jane@example.com"})
+			NewService(q, foldingQuerier(ctrl), store, limiter, emailer).Request(reqCtx, Request{Email: "jane@example.com"})
 			cancel() // the request is over
 
 			// Answered: no limit taken, no lookup, no write, nothing sent (the
@@ -214,6 +216,60 @@ func TestService_Request_AnswersBeforeWork_U(t *testing.T) {
 			}
 			require.Equal(t, []string{"reset:jane@example.com"}, limiter.keys)
 			require.Len(t, fake.Sent(), map[bool]int{true: 1, false: 0}[tc.wantEmail])
+		})
+	}
+}
+
+// foldingQuerier is the auth-shared mock with FoldEmail answering like
+// Postgres for ASCII (lowercase).
+func foldingQuerier(ctrl *gomock.Controller) *authsharedsqlc.MockQuerier {
+	sq := authsharedsqlc.NewMockQuerier(ctrl)
+	sq.EXPECT().FoldEmail(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, email string) (string, error) { return strings.ToLower(email), nil }).AnyTimes()
+	return sq
+}
+
+func TestService_Request_FoldEmail_U(t *testing.T) {
+	testCases := []struct {
+		name    string
+		folded  string
+		foldErr error
+		wantKey []string
+		wantLog string
+	}{
+		{name: "the recipient key is the email as Postgres folds it (the lookup's fold)",
+			folded: "ƛjane@example.com", wantKey: []string{"reset:ƛjane@example.com"}},
+		{name: "a fold error: nothing counted, looked up or sent, logged without the address",
+			foldErr: sql.ErrConnDone, wantLog: "password reset: fold email failed"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			l, err := logging.New(&buf, logging.FormatJSON, "debug")
+			require.NoError(t, err)
+			prev := slog.Default()
+			slog.SetDefault(l)
+			defer slog.SetDefault(prev)
+
+			ctrl := gomock.NewController(t)
+			q := sqlc.NewMockQuerier(ctrl)
+			sq := authsharedsqlc.NewMockQuerier(ctrl)
+			sq.EXPECT().FoldEmail(gomock.Any(), "ꟜJane@example.com").Return(tc.folded, tc.foldErr)
+			if tc.foldErr == nil {
+				q.EXPECT().GetUserForPasswordReset(gomock.Any(), gomock.Any()).Return(sqlc.GetUserForPasswordResetRow{}, sql.ErrNoRows)
+			}
+			limiter := &stubLimiter{allowed: true}
+			fake := &mailer.Fake{}
+			emailer := authshared.Emailer{Mailer: fake, Go: func(ctx context.Context, fn func(context.Context)) { fn(ctx) }}
+
+			NewService(q, sq, NewMockStoreI(ctrl), limiter, emailer).Request(context.Background(), Request{Email: " ꟜJane@example.com "})
+
+			require.Equal(t, tc.wantKey, limiter.keys)
+			require.Empty(t, fake.Sent())
+			if tc.wantLog != "" {
+				require.Contains(t, buf.String(), `"msg":"`+tc.wantLog+`"`)
+				require.NotContains(t, buf.String(), "example.com")
+			}
 		})
 	}
 }

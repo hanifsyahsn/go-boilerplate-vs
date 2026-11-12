@@ -52,6 +52,21 @@ func (mr *MockQuerierMockRecorder) ConsumeAuthToken(ctx, arg interface{}) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumeAuthToken", reflect.TypeOf((*MockQuerier)(nil).ConsumeAuthToken), ctx, arg)
 }
 
+// FoldEmail mocks base method.
+func (m *MockQuerier) FoldEmail(ctx context.Context, email string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FoldEmail", ctx, email)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FoldEmail indicates an expected call of FoldEmail.
+func (mr *MockQuerierMockRecorder) FoldEmail(ctx, email interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FoldEmail", reflect.TypeOf((*MockQuerier)(nil).FoldEmail), ctx, email)
+}
+
 // GetUserForVerification mocks base method.
 func (m *MockQuerier) GetUserForVerification(ctx context.Context, id int64) (sqlc.GetUserForVerificationRow, error) {
 	m.ctrl.T.Helper()

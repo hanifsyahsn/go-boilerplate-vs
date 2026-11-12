@@ -109,7 +109,7 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   one meta message, **answered before any work** (Q16, 2026-11-12): `Request` only hands the work to main's
   background group (`emailer.Go`, `requestid.Detach`) and returns nothing, so a known and an unknown email take
   the same time (a lookup or token write before answering told them apart). In the background: the
-  per-recipient limit (3 / h, key `reset:` + trimmed lowercase email, taken **before** the lookup; refused or
+  per-recipient limit (3 / h, key `reset:` + the trimmed email folded by Postgres (`FoldEmail`), taken **before** the lookup; refused or
   failing → nothing sent), the lookup, a `RESET_PASSWORD` token (1 h) for an active account, the email. Every
   failure (`password reset: recipient limit failed` / `lookup failed` / `issue token failed`) is only logged,
   never with the address; there is no 500. Tests: `TestService_Request_AnswersBeforeWork_U`,
@@ -185,7 +185,11 @@ Added 2026-11-09 as the boilerplate's base security.
   limits are what stop guessing. Refresh / logout stay out (every open tab calls them; a forged token fails the
   signature check before the DB). Authenticated routes aren't IP-limited. Same 429 + `Retry-After` as the auth one.
 - **Per email, failed logins** (`login` service, its own limiter, 5 / 15 min — `loginFailureRate`): key
-  `login:` + trimmed, lowercased email (as `GetUserForLogin` matches it). Every attempt `Take`s a token
+  `login:` + the trimmed email **folded by Postgres** (`authshared` query `FoldEmail`, `SELECT lower($1)`), exactly
+  as `GetUserForLogin` matches it. Never Go's `strings.ToLower` for a key a SQL `lower()` lookup must agree with:
+  their Unicode tables differ (glibc lowers U+A7DC to `ƛ`, Go doesn't), so one account got two counts
+  (`TestService_Login_FoldedLikeTheLookup_I`). The fold runs before either limiter; its error is a 500. Every
+  attempt `Take`s a token
   **before the DB read** (so parallel guesses can't outrun the count — `TestService_Login_ParallelGuesses_U`);
   an unknown email and a wrong password keep it (so a 429 doesn't reveal whether the email exists); the right
   password `Reset`s the bucket — a deactivated account included, it isn't a guess — so in effect only failures

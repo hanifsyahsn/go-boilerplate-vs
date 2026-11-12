@@ -71,7 +71,7 @@ func TestService_Request_I(t *testing.T) {
 			fake := &mailer.Fake{}
 			emailer := authshared.Emailer{Mailer: fake, AppBaseURL: "https://app.example.com",
 				Go: func(ctx context.Context, fn func(context.Context)) { fn(ctx) }}
-			svc := NewService(sqlc.New(testDB), NewStore(testDB), ratelimit.NewMemory(ratelimit.Rate{Burst: 3, Per: time.Hour}), emailer)
+			svc := NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), NewStore(testDB), ratelimit.NewMemory(ratelimit.Rate{Burst: 3, Per: time.Hour}), emailer)
 			tc.run(t, svc, fake, userID)
 		})
 	}
@@ -98,13 +98,46 @@ func TestService_Request_BackgroundGroup_I(t *testing.T) {
 			fake := &mailer.Fake{}
 			var bg utility.Group
 			emailer := authshared.Emailer{Mailer: fake, AppBaseURL: "https://app.example.com", Go: bg.Go}
-			svc := NewService(sqlc.New(testDB), NewStore(testDB), ratelimit.NewMemory(ratelimit.Rate{Burst: 3, Per: time.Hour}), emailer)
+			svc := NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), NewStore(testDB), ratelimit.NewMemory(ratelimit.Rate{Burst: 3, Per: time.Hour}), emailer)
 
 			svc.Request(context.Background(), Request{Email: "jane@example.com"})
 			bg.Wait()
 
 			require.Len(t, testhelper.GetAuthTokens(t, testDB, userID), 1)
 			require.Len(t, fake.Sent(), 1)
+		})
+	}
+}
+
+// TestService_Request_FoldedLikeTheLookup_I: two spellings Postgres folds to
+// one account (U+A7DC → U+019B, which Go's ToLower leaves) share the 3 / h
+// recipient limit, so alternating them can't send a 4th email to one inbox.
+func TestService_Request_FoldedLikeTheLookup_I(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	testCases := []struct {
+		name      string
+		spellings []string
+	}{
+		{name: "alternating two spellings of one account: 4 requests, 3 emails",
+			spellings: []string{"ƛjane@example.com", "Ƛjane@example.com"}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer testhelper.Truncate(t, testDB)
+			testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "ƛjane@example.com"})
+			fake := &mailer.Fake{}
+			emailer := authshared.Emailer{Mailer: fake, AppBaseURL: "https://app.example.com",
+				Go: func(ctx context.Context, fn func(context.Context)) { fn(ctx) }}
+			svc := NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), NewStore(testDB),
+				ratelimit.NewMemory(ratelimit.Rate{Burst: 3, Per: time.Hour}), emailer)
+
+			for i := range 4 {
+				svc.Request(context.Background(), Request{Email: tc.spellings[i%len(tc.spellings)]})
+			}
+			require.Len(t, fake.Sent(), 3)
 		})
 	}
 }

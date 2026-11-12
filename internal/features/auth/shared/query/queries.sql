@@ -17,6 +17,14 @@ VALUES (sqlc.arg(jti)::uuid, sqlc.arg(user_id)::bigint, sqlc.arg(family_id)::uui
 INSERT INTO refresh_tokens (jti, user_id, family_id, expires_at, session_expires_at)
 VALUES ($1, $2, $3, $4, $5);
 
+-- name: FoldEmail :one
+-- An email folded to lowercase by Postgres, the way the lookups match it
+-- (lower(email) = lower($1)): a per-email rate-limit key built from this and
+-- the lookup always agree. Go's strings.ToLower doesn't: its Unicode tables
+-- can differ from the database's (U+A7DC lowers to U+019B in glibc's, not in
+-- Go's), which would split one account's count across two keys.
+SELECT lower(sqlc.arg(email)::varchar)::varchar AS folded;
+
 -- name: LockSession :exec
 -- Locks a session row before its tokens are revoked (EndSession). Every path
 -- that touches a session and its tokens locks the session row first, so a

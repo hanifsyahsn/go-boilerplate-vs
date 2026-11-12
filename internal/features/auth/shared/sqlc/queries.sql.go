@@ -36,6 +36,22 @@ func (q *Queries) ConsumeAuthToken(ctx context.Context, arg ConsumeAuthTokenPara
 	return user_id, err
 }
 
+const foldEmail = `-- name: FoldEmail :one
+SELECT lower($1::varchar)::varchar AS folded
+`
+
+// An email folded to lowercase by Postgres, the way the lookups match it
+// (lower(email) = lower($1)): a per-email rate-limit key built from this and
+// the lookup always agree. Go's strings.ToLower doesn't: its Unicode tables
+// can differ from the database's (U+A7DC lowers to U+019B in glibc's, not in
+// Go's), which would split one account's count across two keys.
+func (q *Queries) FoldEmail(ctx context.Context, email string) (string, error) {
+	row := q.db.QueryRowContext(ctx, foldEmail, email)
+	var folded string
+	err := row.Scan(&folded)
+	return folded, err
+}
+
 const insertAuthToken = `-- name: InsertAuthToken :exec
 INSERT INTO auth_tokens (purpose, user_id, token_hash, expires_at)
 VALUES ($1, $2, $3, $4)

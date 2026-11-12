@@ -108,3 +108,51 @@ func TestService_Login_I(t *testing.T) {
 		})
 	}
 }
+
+// TestService_Login_FoldedLikeTheLookup_I: Postgres (glibc, Unicode 16) lowers
+// U+A7DC to U+019B ("ƛ"); Go's strings.ToLower leaves it. Both spellings reach
+// the same account, so they must share one failure count, or an attacker gets
+// twice the guesses by alternating them.
+func TestService_Login_FoldedLikeTheLookup_I(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	maker := jwttoken.NewTokenMakerES256(key, &key.PublicKey, "client", "issuer")
+
+	testCases := []struct {
+		name      string
+		spellings []string // used in turn for the wrong guesses
+	}{
+		{name: "two spellings the database folds to one account share one count: the 6th wrong guess is a 429",
+			spellings: []string{"ƛjane@example.com", "Ƛjane@example.com"}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer testhelper.Truncate(t, testDB)
+			testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "ƛjane@example.com"})
+
+			var folded string
+			require.NoError(t, testDB.QueryRow(`SELECT lower($1::varchar)`, "Ƛjane@example.com").Scan(&folded))
+			require.Equal(t, "ƛjane@example.com", folded, "precondition: this database folds U+A7DC to U+019B")
+
+			svc := NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), maker, time.Minute, time.Hour, time.Hour,
+				Limiters{
+					Email: ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: 15 * time.Minute}),
+					IP:    ratelimit.NewMemory(ratelimit.Rate{Burst: 100, Per: time.Hour}),
+				})
+			for i := range 6 {
+				email := tc.spellings[i%len(tc.spellings)]
+				_, err := svc.Login(context.Background(), Request{Email: email, Password: "wrong-password"}, Client{IP: "203.0.113.7"})
+				var appErr *apperror.AppError
+				require.ErrorAs(t, err, &appErr, "attempt %d", i+1)
+				want := apperror.CodeUnauthorized
+				if i == 5 {
+					want = apperror.CodeTooManyRequests
+				}
+				require.Equal(t, want, appErr.Code, "attempt %d (%q)", i+1, email)
+			}
+		})
+	}
+}

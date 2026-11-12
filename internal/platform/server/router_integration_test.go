@@ -96,7 +96,7 @@ func newIntegrationRouter(t *testing.T, db *sql.DB) (*gin.Engine, *mailer.Fake, 
 			cookies,
 		),
 		PasswordResetRequest: authpasswordresetrequest.NewHandler(authpasswordresetrequest.NewService(
-			authpasswordresetrequestsqlc.New(db), authpasswordresetrequest.NewStore(db),
+			authpasswordresetrequestsqlc.New(db), authSharedQuerier, authpasswordresetrequest.NewStore(db),
 			ratelimit.NewMemory(ratelimit.Rate{Burst: testLimit, Per: time.Minute}), emailer)),
 		EmailVerification: authemailverification.NewHandler(authemailverification.NewService(authemailverification.NewStore(db))),
 		EmailVerificationRequest: authemailverificationrequest.NewHandler(authemailverificationrequest.NewService(

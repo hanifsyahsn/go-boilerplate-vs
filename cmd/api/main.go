@@ -210,7 +210,7 @@ func main() {
 			cookies,
 		),
 		PasswordResetRequest: authpasswordresetrequestsvc.NewHandler(authpasswordresetrequestsvc.NewService(
-			authpasswordresetrequestsqlc.New(conn), authpasswordresetrequestsvc.NewStore(conn),
+			authpasswordresetrequestsqlc.New(conn), authSharedQuerier, authpasswordresetrequestsvc.NewStore(conn),
 			limits.resetRecipient, emailer)),
 		EmailVerification: authemailverificationsvc.NewHandler(authemailverificationsvc.NewService(authemailverificationsvc.NewStore(conn))),
 		EmailVerificationRequest: authemailverificationrequestsvc.NewHandler(authemailverificationrequestsvc.NewService(

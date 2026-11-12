@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -141,7 +142,7 @@ func TestService_Login_U(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
-			sq := authsharedsqlc.NewMockQuerier(ctrl)
+			sq := foldingQuerier(ctrl)
 			m := jwttoken.NewMockM(ctrl)
 			tc.stub(q, sq, m)
 
@@ -220,7 +221,7 @@ func TestService_Login_FailureLimit_U(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
-			sq := authsharedsqlc.NewMockQuerier(ctrl)
+			sq := foldingQuerier(ctrl)
 			m := jwttoken.NewMockM(ctrl)
 			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour,
 				Limiters{Email: ratelimit.NewMemory(ratelimit.Rate{Burst: 2, Per: time.Minute}), IP: wideLimits().IP})
@@ -279,7 +280,7 @@ func TestService_Login_TimingEqualized_U(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
 			q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(tc.row, tc.readErr)
-			svc := NewService(q, authsharedsqlc.NewMockQuerier(ctrl), jwttoken.NewMockM(ctrl),
+			svc := NewService(q, foldingQuerier(ctrl), jwttoken.NewMockM(ctrl),
 				15*time.Minute, 24*time.Hour, 12*time.Hour, wideLimits())
 
 			var calls [][]string
@@ -399,7 +400,7 @@ func TestService_Login_LimiterOutcomes_U(t *testing.T) {
 
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
-			sq := authsharedsqlc.NewMockQuerier(ctrl)
+			sq := foldingQuerier(ctrl)
 			m := jwttoken.NewMockM(ctrl)
 			if tc.readsUser {
 				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil)
@@ -519,7 +520,7 @@ func TestService_Login_IPFailureLimit_U(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
-			sq := authsharedsqlc.NewMockQuerier(ctrl)
+			sq := foldingQuerier(ctrl)
 			m := jwttoken.NewMockM(ctrl)
 			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, Limiters{
 				Email: ratelimit.NewMemory(ratelimit.Rate{Burst: tc.emailBurst, Per: time.Hour}),
@@ -584,7 +585,7 @@ func TestService_Login_ParallelGuesses_U(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
 			q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil).AnyTimes()
-			svc := NewService(q, authsharedsqlc.NewMockQuerier(ctrl), jwttoken.NewMockM(ctrl),
+			svc := NewService(q, foldingQuerier(ctrl), jwttoken.NewMockM(ctrl),
 				15*time.Minute, 24*time.Hour, 12*time.Hour, Limiters{
 					Email: ratelimit.NewMemory(ratelimit.Rate{Burst: tc.emailBurst, Per: time.Hour}),
 					IP:    ratelimit.NewMemory(ratelimit.Rate{Burst: tc.ipBurst, Per: time.Hour}),
@@ -627,6 +628,55 @@ func TestService_Login_ParallelGuesses_U(t *testing.T) {
 			require.Equal(t, tc.wantCompared, compared.Load())
 			require.Equal(t, tc.wantCompared, unauthorized.Load())
 			require.Equal(t, int32(tc.parallel)-tc.wantCompared, tooMany.Load())
+		})
+	}
+}
+
+// foldingQuerier is the auth-shared mock with FoldEmail answering like
+// Postgres for ASCII (lowercase), so the per-email key is "login:" + it.
+func foldingQuerier(ctrl *gomock.Controller) *authsharedsqlc.MockQuerier {
+	sq := authsharedsqlc.NewMockQuerier(ctrl)
+	sq.EXPECT().FoldEmail(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, email string) (string, error) { return strings.ToLower(email), nil }).AnyTimes()
+	return sq
+}
+
+func TestService_Login_FoldEmail_U(t *testing.T) {
+	testCases := []struct {
+		name      string
+		folded    string
+		foldErr   error
+		wantKey   string // the email limiter's key ("" = never asked)
+		wantCode  apperror.Code
+		wantNoIPs bool
+	}{
+		{name: "the per-email key is the email as Postgres folds it (the lookup's fold), not Go's ToLower",
+			folded: "ƛjane@example.com", wantKey: "login:ƛjane@example.com", wantCode: apperror.CodeUnauthorized},
+		{name: "a fold error is a 500 before either limiter is touched",
+			foldErr: sql.ErrConnDone, wantCode: apperror.CodeInternal, wantNoIPs: true},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			q := sqlc.NewMockQuerier(ctrl)
+			sq := authsharedsqlc.NewMockQuerier(ctrl)
+			sq.EXPECT().FoldEmail(gomock.Any(), "ꟜJane@example.com").Return(tc.folded, tc.foldErr) // trimmed first
+			if tc.foldErr == nil {
+				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(sqlc.GetUserForLoginRow{}, sql.ErrNoRows)
+			}
+			email, ip := &stubLimiter{}, &stubLimiter{}
+			svc := NewService(q, sq, jwttoken.NewMockM(ctrl), 15*time.Minute, 24*time.Hour, 12*time.Hour, Limiters{Email: email, IP: ip})
+
+			_, err := svc.Login(context.Background(), Request{Email: "  ꟜJane@example.com ", Password: "Passw0rd!"}, testClient)
+			var appErr *apperror.AppError
+			require.ErrorAs(t, err, &appErr)
+			require.Equal(t, tc.wantCode, appErr.Code)
+			if tc.wantNoIPs {
+				require.Empty(t, email.calls)
+				require.Empty(t, ip.calls)
+				return
+			}
+			require.Equal(t, []string{"Take " + tc.wantKey}, email.calls)
 		})
 	}
 }

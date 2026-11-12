@@ -109,11 +109,12 @@ func NewService(
 	}
 }
 
-// failureKey is the failures limiter's key for an email: trimmed and
-// lowercased, the way GetUserForLogin matches it, so "Jane@x.com " and
-// "jane@x.com" share one count.
-func failureKey(email string) string {
-	return "login:" + strings.ToLower(strings.TrimSpace(email))
+// failureKey is the failures limiter's key for an email already folded by
+// Postgres (FoldEmail), the way GetUserForLogin matches it, so "Jane@x.com "
+// and "jane@x.com" share one count, and so does every spelling the database
+// treats as the same account.
+func failureKey(folded string) string {
+	return "login:" + folded
 }
 
 // ipFailureKey is the IP limiter's key: an IPv6 client is counted per /64.
@@ -122,11 +123,21 @@ func ipFailureKey(ip string) string {
 }
 
 func (s *service) Login(ctx context.Context, req Request, client Client) (Result, error) {
-	emailKey, ipKey := failureKey(req.Email), ipFailureKey(client.IP)
+	// Fold the email where the lookup folds it (Postgres), not with Go's
+	// strings.ToLower: their Unicode tables differ for a few letters, and a
+	// key that differs from the lookup would give one account two counts.
+	// Before any limiter, so a failure here touches neither.
+	folded, err := s.authSharedQuerier.FoldEmail(ctx, strings.TrimSpace(req.Email))
+	if err != nil {
+		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
+			fmt.Errorf("FoldEmail() (%s): %w", feature, err))
+	}
+	emailKey, ipKey := failureKey(folded), ipFailureKey(client.IP)
 	// Take before anything else (not peek now, count later): the bcrypt
 	// comparison takes ~100ms, and a check-then-count would let N parallel
 	// requests all pass the check before the first one is counted.
-	d, err := s.limits.IP.Take(ctx, ipKey)
+	var d ratelimit.Decision
+	d, err = s.limits.IP.Take(ctx, ipKey)
 	if err != nil {
 		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
 			fmt.Errorf("limits.IP.Take() (%s): %w", feature, err))
