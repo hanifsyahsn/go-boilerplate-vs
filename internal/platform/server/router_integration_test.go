@@ -299,6 +299,7 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 				res = c.do(http.MethodPost, "/api/auth/refresh",
 					`{"data":{"type":"sessions","attributes":{"refresh_token":"`+laptopRefresh+`"}}}`, "")
 				require.Equal(t, http.StatusUnauthorized, res.Code, "the signed-out session can't be refreshed")
+				require.Equal(t, "Your session has ended. Please sign in again.", errorDetail(t, res))
 			},
 		},
 		{
@@ -362,7 +363,7 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 			},
 		},
 		{
-			name: "an admin deactivating a user ends every session of theirs; reactivating doesn't bring them back",
+			name: "an admin deactivating a user ends every session of theirs (refresh: no longer active); reactivating doesn't bring them back (refresh: session ended)",
 			run: func(t *testing.T, c apiClient) {
 				userID := testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "jane@example.com"})
 				testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "admin@example.com", Role: "admin"})
@@ -373,12 +374,20 @@ func TestRouter_EndToEnd_I(t *testing.T) {
 					return `{"data":{"type":"users","id":"` + strconv.FormatInt(userID, 10) + `","attributes":{"is_active":` + strconv.FormatBool(active) + `}}}`
 				}
 
-				require.Equal(t, http.StatusOK, c.do(http.MethodPatch, path, doc(false), admin).Code)
-				require.Equal(t, http.StatusOK, c.do(http.MethodPatch, path, doc(true), admin).Code)
+				refresh := func() apiResponse {
+					return c.do(http.MethodPost, "/api/auth/refresh",
+						`{"data":{"type":"sessions","attributes":{"refresh_token":"`+janeRefresh+`"}}}`, "")
+				}
 
-				res := c.do(http.MethodPost, "/api/auth/refresh",
-					`{"data":{"type":"sessions","attributes":{"refresh_token":"`+janeRefresh+`"}}}`, "")
+				require.Equal(t, http.StatusOK, c.do(http.MethodPatch, path, doc(false), admin).Code)
+				res := refresh()
+				require.Equal(t, http.StatusUnauthorized, res.Code, "a deactivated account can't refresh")
+				require.Equal(t, "Your account is no longer active.", errorDetail(t, res), "the account is named, not the session")
+
+				require.Equal(t, http.StatusOK, c.do(http.MethodPatch, path, doc(true), admin).Code)
+				res = refresh()
 				require.Equal(t, http.StatusUnauthorized, res.Code, "the old device stays signed out after reactivation")
+				require.Equal(t, "Your session has ended. Please sign in again.", errorDetail(t, res))
 			},
 		},
 		{

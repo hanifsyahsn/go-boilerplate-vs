@@ -11,6 +11,7 @@ import (
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	internalshareddto "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/dto"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/enum"
@@ -66,6 +67,14 @@ func sessionExpired(err error) error {
 	return apperror.New(apperror.CodeUnauthorized, sessionExpiredMessage, err)
 }
 
+// accountInactiveMessage is the 401 detail for a missing or deactivated
+// account (the access-token middleware says the same).
+const accountInactiveMessage = "Your account is no longer active."
+
+func accountInactive(err error) error {
+	return apperror.New(apperror.CodeUnauthorized, accountInactiveMessage, err)
+}
+
 func internalError(err error) error {
 	return apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(), err)
 }
@@ -111,7 +120,18 @@ func (s *service) Refresh(ctx context.Context, refreshToken string, client auths
 		if !token.SessionLive {
 			// Signed out (logout, a remote sign-out, a password change): the
 			// tokens were revoked with it, so this isn't a reuse to punish.
-			return sessionExpired(fmt.Errorf("(%s): session %s of token %s is not live", feature, token.FamilyID, jti))
+			// The details match the access-token middleware: an inactive
+			// account first (an admin deactivation also ends its sessions),
+			// else "your session has ended".
+			user, err := q.GetUserForRefresh(ctx, userID)
+			if errors.Is(err, sql.ErrNoRows) || (err == nil && !user.IsActive) {
+				return accountInactive(fmt.Errorf("GetUserForRefresh(%d) (%s): signed out, missing or inactive: %v", userID, feature, err)) //nolint:errorlint // err is nil for an inactive user; %w would print %!w(<nil>)
+			}
+			if err != nil {
+				return internalError(fmt.Errorf("GetUserForRefresh(%d) (%s): %w", userID, feature, err))
+			}
+			return apperror.New(apperror.CodeUnauthorized, middleware.SessionEndedMessage,
+				fmt.Errorf("(%s): session %s of token %s is not live", feature, token.FamilyID, jti))
 		}
 
 		if token.RevokedAt.Valid {
@@ -139,8 +159,7 @@ func (s *service) Refresh(ctx context.Context, refreshToken string, client auths
 
 		user, err := q.GetUserForRefresh(ctx, userID)
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && !user.IsActive) {
-			return apperror.New(apperror.CodeUnauthorized, "Your account is no longer active.",
-				fmt.Errorf("GetUserForRefresh(%d) (%s): missing or inactive: %v", userID, feature, err)) //nolint:errorlint // err is nil for an inactive user; %w would print %!w(<nil>)
+			return accountInactive(fmt.Errorf("GetUserForRefresh(%d) (%s): missing or inactive: %v", userID, feature, err)) //nolint:errorlint // err is nil for an inactive user; %w would print %!w(<nil>)
 		}
 		if err != nil {
 			return internalError(fmt.Errorf("GetUserForRefresh(%d) (%s): %w", userID, feature, err))

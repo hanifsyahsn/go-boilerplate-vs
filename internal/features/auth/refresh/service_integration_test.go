@@ -12,6 +12,7 @@ import (
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	platformconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	internalshareddto "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/dto"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/enum"
@@ -48,6 +49,8 @@ func TestService_Refresh_I(t *testing.T) {
 		// wantCap: the session cap the new token inherits, nil => none.
 		wantCap  *time.Time
 		wantCode apperror.Code
+		// wantDetail, when set, is the error's user-facing message.
+		wantDetail string
 	}{
 		{
 			name:   "a live token: rotated, a new pair in the same family with the role from the DB",
@@ -85,11 +88,21 @@ func TestService_Refresh_I(t *testing.T) {
 			wantCode:          apperror.CodeUnauthorized,
 		},
 		{
-			name:              "a live token of a signed-out session is refused and the session stays as it was",
+			name:              "a live token of a signed-out session is refused with 'your session has ended' and the session stays as it was",
 			stored:            func(uuid.UUID) *testhelper.SeedRefreshTokenParams { return &testhelper.SeedRefreshTokenParams{} },
 			sessionRevokedAs:  authshared.RevokeReasonSignedOutRemotely,
 			wantSessionReason: authshared.RevokeReasonSignedOutRemotely,
 			wantCode:          apperror.CodeUnauthorized,
+			wantDetail:        middleware.SessionEndedMessage,
+		},
+		{
+			name:              "a token of an account an admin deactivated (its session revoked with it) is refused as 'no longer active'",
+			seed:              testhelper.SeedUserParams{IsActive: testhelper.BoolPtr(false)},
+			stored:            func(uuid.UUID) *testhelper.SeedRefreshTokenParams { return &testhelper.SeedRefreshTokenParams{} },
+			sessionRevokedAs:  authshared.RevokeReasonDeactivated,
+			wantSessionReason: authshared.RevokeReasonDeactivated,
+			wantCode:          apperror.CodeUnauthorized,
+			wantDetail:        accountInactiveMessage,
 		},
 		{
 			name:     "a token with no row (unknown) is refused",
@@ -131,6 +144,9 @@ func TestService_Refresh_I(t *testing.T) {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)
+				if tc.wantDetail != "" {
+					require.Equal(t, tc.wantDetail, appErr.Message)
+				}
 
 				if seeded {
 					require.Equal(t, tc.siblingRevoked, testhelper.GetRefreshToken(t, testDB, siblingID).RevokedAt.Valid)

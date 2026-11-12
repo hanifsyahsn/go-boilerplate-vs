@@ -64,7 +64,9 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   one login on one device (`trusted`, `user_agent` cut to 512 runes, `client_ip`, `created_at`,
   `last_used_at`, `revoked_at` + `revoke_reason`). Login starts it together with the first refresh token in
   **one statement** (`authshared` query `StartSession`); refresh requires it live (`LockRefreshToken` joins it:
-  a signed-out session is a 401 and not treated as reuse) and `TouchSession`s it (last use, User-Agent, IP).
+  a signed-out session is a 401 "Your session has ended. Please sign in again." — `middleware.SessionEndedMessage`
+  — or "no longer active" when the account is inactive / gone, checked first: the same details and order as the
+  access-token check; not treated as reuse) and `TouchSession`s it (last use, User-Agent, IP).
   The access token carries `sid` = the family id; `AccessTokenMiddleware` reads user and session in **one**
   query (`GetAccessStatus`) on every request — no / bad `sid` → 401 "not authorized" (tokens from before
   sessions: everyone signs in again once), inactive → "no longer active", session revoked → **"Your session

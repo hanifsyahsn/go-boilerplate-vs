@@ -345,8 +345,9 @@ token is spent:
 
 | Status | `code` | When |
 | --- | --- | --- |
-| 401 | `unauthorized` | `Your session has expired. Please log in again.` — no / invalid / expired token, an access token sent instead, an unknown token, a revoked session, or a **reused** spent token (which also revokes the session — see [How a session works](#how-a-session-works)) |
-| 401 | `unauthorized` | `Your account is no longer active.` |
+| 401 | `unauthorized` | `Your session has expired. Please log in again.` — no / invalid / expired token, an untrusted device past its session cap, an access token sent instead, an unknown token, or a **reused** spent token (which also revokes the session — see [How a session works](#how-a-session-works)) |
+| 401 | `unauthorized` | `Your session has ended. Please sign in again.` — the token's session was signed out (logout, a sign-out from another device, a password change or reset). Not treated as reuse: nothing else is revoked |
+| 401 | `unauthorized` | `Your account is no longer active.` — the account was deactivated or deleted (checked before the session, as on every authenticated call) |
 | 500 | `internal_error` | DB / token signing failure |
 
 → on any `401` here: drop the local state, go to the login screen. **Never retry a refresh in a loop.**

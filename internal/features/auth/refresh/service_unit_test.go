@@ -14,6 +14,7 @@ import (
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	internalshareddto "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/dto"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/enum"
@@ -75,6 +76,8 @@ func TestService_Refresh_U(t *testing.T) {
 		stub     func(q *MockQuerier, m *jwttoken.MockM)
 		want     Result
 		wantCode apperror.Code
+		// wantDetail, when set, is the error's user-facing message.
+		wantDetail string
 	}{
 		{
 			name:  "a live token: a new pair with the live role and the same session as sid, same family, the old token rotated, the session's use recorded",
@@ -141,6 +144,15 @@ func TestService_Refresh_U(t *testing.T) {
 			wantCode: apperror.CodeUnauthorized,
 		},
 		{
+			name:  "claims without a usable sub (defensive): 401 session expired",
+			token: "ref",
+			stub: func(q *MockQuerier, m *jwttoken.MockM) {
+				m.EXPECT().VerifyRefreshToken("ref").Return(jwt.MapClaims{"jti": jti.String()}, nil)
+			},
+			wantCode:   apperror.CodeUnauthorized,
+			wantDetail: sessionExpiredMessage,
+		},
+		{
 			name:  "a jti that isn't a uuid",
 			token: "ref",
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
@@ -194,12 +206,43 @@ func TestService_Refresh_U(t *testing.T) {
 			wantCode: apperror.CodeUnauthorized,
 		},
 		{
-			name:  "a token of a signed-out session: 401, nothing issued or revoked again",
+			name:  "a token of a signed-out session: 401 'your session has ended', nothing issued or revoked again",
 			token: "ref",
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				verified(q, m, signedOut)
+				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(active, nil)
 			},
-			wantCode: apperror.CodeUnauthorized,
+			wantCode:   apperror.CodeUnauthorized,
+			wantDetail: middleware.SessionEndedMessage,
+		},
+		{
+			name:  "a signed-out session of a deactivated account: 401 'no longer active', like the access-token check",
+			token: "ref",
+			stub: func(q *MockQuerier, m *jwttoken.MockM) {
+				verified(q, m, signedOut)
+				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(inactive, nil)
+			},
+			wantCode:   apperror.CodeUnauthorized,
+			wantDetail: accountInactiveMessage,
+		},
+		{
+			name:  "a signed-out session of a deleted account: 401 'no longer active'",
+			token: "ref",
+			stub: func(q *MockQuerier, m *jwttoken.MockM) {
+				verified(q, m, signedOut)
+				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(sqlc.GetUserForRefreshRow{}, sql.ErrNoRows)
+			},
+			wantCode:   apperror.CodeUnauthorized,
+			wantDetail: accountInactiveMessage,
+		},
+		{
+			name:  "a signed-out session whose user read fails: 500",
+			token: "ref",
+			stub: func(q *MockQuerier, m *jwttoken.MockM) {
+				verified(q, m, signedOut)
+				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(sqlc.GetUserForRefreshRow{}, sql.ErrConnDone)
+			},
+			wantCode: apperror.CodeInternal,
 		},
 		{
 			name:  "a revoke error is a 500",
@@ -304,6 +347,9 @@ func TestService_Refresh_U(t *testing.T) {
 				var appErr *apperror.AppError
 				require.ErrorAs(t, err, &appErr)
 				require.Equal(t, tc.wantCode, appErr.Code)
+				if tc.wantDetail != "" {
+					require.Equal(t, tc.wantDetail, appErr.Message)
+				}
 				return
 			}
 			require.NoError(t, err)
