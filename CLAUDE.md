@@ -215,7 +215,8 @@ is checked, see *Rate limits and the client IP*) and `ALLOWED_ORIGINS` (comma-se
 scheme http / https or a hybrid app's `capacitor` / `ionic` (`config.originSchemes`), default none; checked in `Validate`, stored normalised — lowercase, no trailing `/`; one list for CORS and the
 origin guard, empty = both off with a startup warning). `APP_BASE_URL` (the front end, `http(s)://…`, no trailing
 `/`; email links are built on it) is required; `SMTP_HOST`, `SMTP_FROM` (an address) are required except with
-`ENVIRONMENT=development` (an empty `SMTP_HOST` there logs emails instead), `SMTP_PORT` defaults to `587`
+`ENVIRONMENT=development` (an empty `SMTP_HOST` there logs emails instead; a set one, e.g. a local mail sink,
+needs `SMTP_FROM` too), `SMTP_PORT` defaults to `587`
 (465 = implicit TLS, any other port must offer STARTTLS), `SMTP_USERNAME` / `SMTP_PASSWORD` optional.
 `ACTIVITY_LOG_RETENTION` (optional, default `17520h` = 2 years, `0` = keep forever; the cleanup worker applies it).
 `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (optional, both or neither: ops alerts, see logging.md *Ops alerts*).

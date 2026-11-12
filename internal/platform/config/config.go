@@ -307,7 +307,10 @@ func (c Config) Validate() error {
 		{"EC_PUBLIC_KEY_PATH", c.ECPublicKeyPath == ""},
 		{"APP_BASE_URL", c.AppBaseURL == ""},
 		{"SMTP_HOST", c.SMTPHost == "" && c.Environment != EnvironmentDevelopment},
-		{"SMTP_FROM", c.SMTPFrom == "" && c.Environment != EnvironmentDevelopment},
+		// Needed whenever emails really go out: outside development, or in
+		// development with an SMTP host (main then picks the SMTP mailer, and
+		// every send would fail without a sender).
+		{"SMTP_FROM", c.SMTPFrom == "" && (c.Environment != EnvironmentDevelopment || c.SMTPHost != "")},
 	}
 
 	var errs []error

@@ -209,6 +209,11 @@ func TestNewRouter_Security_U(t *testing.T) {
 			{method: http.MethodPost, path: "/api/auth/password-resets", remote: "10.0.0.1", wantCode: http.StatusTeapot},
 			login("10.0.0.1", "", http.StatusTooManyRequests),
 		}},
+		{name: "verifying an email shares the auth per-IP budget with login (it takes a one-time token)", calls: []call{
+			{method: http.MethodPost, path: "/api/auth/email-verifications", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			{method: http.MethodPost, path: "/api/auth/email-verifications", remote: "10.0.0.1", wantCode: http.StatusTeapot},
+			login("10.0.0.1", "", http.StatusTooManyRequests),
+		}},
 		{name: "the general budget is per IP", publicBurst: 1, authBurst: 100, calls: []call{
 			login("10.0.0.1", "", http.StatusTeapot), login("10.0.0.1", "", http.StatusTooManyRequests),
 			login("10.0.0.2", "", http.StatusTeapot),
@@ -263,6 +268,7 @@ func TestNewRouter_Security_U(t *testing.T) {
 			h.logout.EXPECT().Logout(gomock.Any()).Do(ok).AnyTimes()
 			h.resetReq.EXPECT().Request(gomock.Any()).Do(ok).AnyTimes()
 			h.reset.EXPECT().Reset(gomock.Any()).Do(ok).AnyTimes()
+			h.verify.EXPECT().Verify(gomock.Any()).Do(ok).AnyTimes()
 
 			publicBurst, authBurst := tc.publicBurst, tc.authBurst
 			if publicBurst == 0 {
