@@ -3,23 +3,28 @@ export
 
 TEST ?= .*
 PACKAGE ?= ./...
+# Windows only: testcontainers' auto-detection there intermittently fails ("rootless Docker is not supported on
+# Windows"). Elsewhere DOCKER_HOST stays as the environment has it (unset = the default socket); `export` above
+# would otherwise send the npipe value to docker and the tests on Linux / macOS.
+ifeq ($(OS),Windows_NT)
 DOCKER_HOST ?= npipe:////./pipe/docker_engine
+endif
 
 # Tests (integration tests start Postgres through testcontainers; -short skips them)
 test:
-	DOCKER_HOST=$(DOCKER_HOST) go test -count=1 ./...
+	go test -count=1 ./...
 
 test_short:
 	go test -count=1 -short ./...
 
 test_only:
-	DOCKER_HOST=$(DOCKER_HOST) go test -v -run ^$(TEST)$$ $(PACKAGE) -count=1
+	go test -v -run ^$(TEST)$$ $(PACKAGE) -count=1
 
 test_package:
-	DOCKER_HOST=$(DOCKER_HOST) go test -v -count=1 $(PACKAGE)
+	go test -v -count=1 $(PACKAGE)
 
 test_coverage:
-	DOCKER_HOST=$(DOCKER_HOST) go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...
+	go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...
 
 coverage_report_view:
 	go tool cover -html=coverage.out
@@ -137,7 +142,7 @@ check:
 	if [ -n "$$out" ]; then echo "$$out"; echo "not gofmt-ed: run make fmt"; status=1; fi; \
 	echo "== go vet"; go vet ./... || status=1; \
 	echo "== lint"; "$(MAKE)" --no-print-directory lint || status=1; \
-	echo "== go test $(CHECK_TEST_FLAGS)"; DOCKER_HOST=$(DOCKER_HOST) go test -count=1 $(CHECK_TEST_FLAGS) ./... || status=1; \
+	echo "== go test $(CHECK_TEST_FLAGS)"; go test -count=1 $(CHECK_TEST_FLAGS) ./... || status=1; \
 	if [ $$status -ne 0 ]; then echo "== check: FAILED (see above)"; else echo "== check: all clean"; fi; \
 	exit $$status
 
