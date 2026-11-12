@@ -354,10 +354,18 @@ func (c Config) Validate() error {
 	return errors.Join(errs...)
 }
 
-// NormalizeOrigin checks that s is a browser origin, scheme://host[:port]
-// with scheme http or https and nothing after the host but an optional /, and
-// returns it lowercased without the trailing /. "*" is refused: the API sends
-// credentials, which a wildcard origin can't carry.
+// NormalizeOrigin checks that s is an origin, scheme://host[:port] with
+// nothing after the host but an optional /, and returns it lowercased without
+// the trailing /. The scheme is one of originSchemes: http, https, or a
+// hybrid app's own scheme (capacitor://localhost, ionic://localhost: a
+// WebView app on iOS can't serve itself over http(s)). "*" is refused: the
+// API sends credentials, which a wildcard origin can't carry.
+// originSchemes are the schemes an ALLOWED_ORIGINS entry may have: the web,
+// plus the WebView schemes of the hybrid app frameworks (Capacitor, Ionic).
+// Another framework's scheme is added here on purpose; anything else
+// (ftp, file, data, ...) is refused.
+var originSchemes = map[string]bool{"http": true, "https": true, "capacitor": true, "ionic": true}
+
 func NormalizeOrigin(s string) (string, error) {
 	notOrigin := fmt.Errorf("config: ALLOWED_ORIGINS entry %q is not an origin (scheme://host[:port])", s)
 	u, err := url.Parse(s)
@@ -365,7 +373,7 @@ func NormalizeOrigin(s string) (string, error) {
 		return "", notOrigin
 	}
 	scheme := strings.ToLower(u.Scheme)
-	if (scheme != "http" && scheme != "https") || u.Hostname() == "" || u.User != nil ||
+	if !originSchemes[scheme] || u.Hostname() == "" || u.User != nil ||
 		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
 		strings.Contains(s, "#") || u.Opaque != "" {
 		return "", notOrigin

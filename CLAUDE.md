@@ -212,7 +212,7 @@ optional `REFRESH_TOKEN_DURATION` (default `168h`), `UNTRUSTED_SESSION_DURATION`
 `LOG_FORMAT` (default `text`; `json` in production), `LOG_LEVEL` (default `info`) — those two must still
 be values `logging.Check` accepts — and `TRUSTED_PROXIES` (comma-separated IPs / CIDRs, default none; each entry
 is checked, see *Rate limits and the client IP*) and `ALLOWED_ORIGINS` (comma-separated `scheme://host[:port]`,
-default none; checked in `Validate`, stored normalised — lowercase, no trailing `/`; one list for CORS and the
+scheme http / https or a hybrid app's `capacitor` / `ionic` (`config.originSchemes`), default none; checked in `Validate`, stored normalised — lowercase, no trailing `/`; one list for CORS and the
 origin guard, empty = both off with a startup warning). `APP_BASE_URL` (the front end, `http(s)://…`, no trailing
 `/`; email links are built on it) is required; `SMTP_HOST`, `SMTP_FROM` (an address) are required except with
 `ENVIRONMENT=development` (an empty `SMTP_HOST` there logs emails instead), `SMTP_PORT` defaults to `587`

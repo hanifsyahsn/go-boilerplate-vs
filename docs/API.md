@@ -87,6 +87,11 @@ A browser page on another origin may call the API only when its origin is listed
 (`scheme://host[:port]`, compared ignoring case and a trailing `/`). Empty list = CORS is off: no CORS
 header at all, so only same-origin pages can read the answers.
 
+**Mobile apps:** a native app (Kotlin, Swift, Flutter, React Native) sends no `Origin` and needs no entry; it
+uses `Authorization: Bearer` and the tokens in `meta`. A hybrid app (Capacitor / Ionic) runs in a WebView that
+does send one: on Android usually `http://localhost`, on iOS `capacitor://localhost` or `ionic://localhost`.
+List the one your app sends.
+
 | Request | Answer |
 | --- | --- |
 | `Origin` listed | `Access-Control-Allow-Origin: <that origin>` (never `*`), `Access-Control-Allow-Credentials: true` (the auth cookies), `Access-Control-Expose-Headers: Location, Retry-After, X-Request-ID` |

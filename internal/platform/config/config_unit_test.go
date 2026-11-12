@@ -166,6 +166,19 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			wantErr: `ALLOWED_ORIGINS entry "https://user:pw@example.com"`},
 		{name: "an allowed origin that isn't http or https is refused", override: map[string]string{"ALLOWED_ORIGINS": "ftp://example.com"},
 			wantErr: `ALLOWED_ORIGINS entry "ftp://example.com"`},
+		{
+			name:     "a hybrid app's own origin (Capacitor / Ionic WebView on iOS) is accepted, normalised",
+			override: map[string]string{"ALLOWED_ORIGINS": "https://app.example.com,Capacitor://Localhost,ionic://localhost/"},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Equal(t, []string{"https://app.example.com", "capacitor://localhost", "ionic://localhost"}, c.AllowedOrigins)
+			},
+		},
+		{name: "a browser-internal scheme is refused (file:// pages send Origin null)", override: map[string]string{"ALLOWED_ORIGINS": "file://localhost"},
+			wantErr: `ALLOWED_ORIGINS entry "file://localhost"`},
+		{name: "the literal null origin is refused (sandboxed frames, file:// pages)", override: map[string]string{"ALLOWED_ORIGINS": "null"},
+			wantErr: `ALLOWED_ORIGINS entry "null"`},
+		{name: "an app scheme still needs a host", override: map[string]string{"ALLOWED_ORIGINS": "capacitor://"},
+			wantErr: `ALLOWED_ORIGINS entry "capacitor://"`},
 		{name: "an allowed origin without a scheme is refused", override: map[string]string{"ALLOWED_ORIGINS": "example.com"},
 			wantErr: `ALLOWED_ORIGINS entry "example.com"`},
 		{name: "an allowed origin without a host is refused", override: map[string]string{"ALLOWED_ORIGINS": "https://:8080"},

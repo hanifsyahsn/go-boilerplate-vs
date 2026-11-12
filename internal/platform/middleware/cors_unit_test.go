@@ -56,6 +56,13 @@ func TestCORS_U(t *testing.T) {
 				"Access-Control-Allow-Headers":     "Accept, Authorization, Content-Type, X-Request-ID",
 				"Access-Control-Max-Age":           "600",
 			}},
+		{name: "a listed hybrid app origin (capacitor://localhost) gets its preflight 204, echoed with credentials",
+			allowed: []string{"https://app.example.com", "capacitor://localhost"},
+			method:  http.MethodOptions, origin: "capacitor://localhost", preflight: true, wantCode: http.StatusNoContent,
+			wantVary: []string{"Origin"}, wantHeaders: map[string]string{
+				"Access-Control-Allow-Origin":      "capacitor://localhost",
+				"Access-Control-Allow-Credentials": "true",
+			}},
 		{name: "an OPTIONS without Access-Control-Request-Method is not a preflight", allowed: listed,
 			method: http.MethodOptions, origin: "http://localhost:5173", wantCode: http.StatusTeapot, wantHandler: true,
 			wantHeaders: map[string]string{"Access-Control-Allow-Origin": "http://localhost:5173", "Access-Control-Max-Age": ""}},
