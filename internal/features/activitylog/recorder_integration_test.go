@@ -2,6 +2,7 @@ package activitylog
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -108,6 +109,44 @@ func TestRecorder_Columns_I(t *testing.T) {
 			require.Equal(t, tc.a.ClientIP, ip)
 			require.Equal(t, tc.a.UserAgent, ua)
 			require.Equal(t, tc.a.APIClient, apiClient, "\"\" = not a machine call")
+		})
+	}
+}
+
+// TestMigration_LockTimeout_I: a migration that ALTERs api_activity_logs
+// (written on every request) gives up after its lock_timeout instead of
+// waiting behind a running write (a cleanup DELETE) while every recorder
+// INSERT queues behind it.
+func TestMigration_LockTimeout_I(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	testCases := []struct {
+		name string
+		file string
+	}{
+		{name: "000009 gives up on a held table instead of queueing writes behind it",
+			file: "../../platform/db/migration/000009_activity_log_api_client.up.sql"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			up, err := os.ReadFile(tc.file)
+			require.NoError(t, err)
+
+			holder, err := testDB.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			defer func() { _ = holder.Rollback() }()
+			_, err = holder.ExecContext(ctx, `DELETE FROM api_activity_logs WHERE false`) // a write's table lock
+			require.NoError(t, err)
+
+			conn, err := testDB.Conn(ctx)
+			require.NoError(t, err)
+			defer func() { _ = conn.Close() }()
+			start := time.Now()
+			_, err = conn.ExecContext(ctx, string(up))
+			require.ErrorContains(t, err, "lock timeout")
+			require.Less(t, time.Since(start), 15*time.Second)
 		})
 	}
 }
