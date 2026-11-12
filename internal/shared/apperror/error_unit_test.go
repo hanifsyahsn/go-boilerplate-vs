@@ -601,6 +601,7 @@ func TestRetryAfterSeconds_U(t *testing.T) {
 		{name: "whole seconds stay as they are", wait: 30 * time.Second, want: "30"},
 		{name: "a part of a second rounds up", wait: 2500 * time.Millisecond, want: "3"},
 		{name: "never less than one second", wait: 0, want: "1"},
+		{name: "the smallest wait a limiter gives (1ns) is one second", wait: time.Nanosecond, want: "1"},
 	}
 
 	for _, tc := range testCases {

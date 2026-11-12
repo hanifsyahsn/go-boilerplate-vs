@@ -57,6 +57,16 @@ func TestMemory_U(t *testing.T) {
 			},
 		},
 		{
+			name: "a bucket a hair under one token is refused with a wait of at least 1ns, never 0 (its 429 must carry Retry-After)",
+			run: func(t *testing.T, m *Memory, now *time.Time) {
+				take(t, m, "a")
+				take(t, m, "a")
+				m.buckets["a"].tokens = 1 - 1e-12 // float refill noise: 0.03 ns of a 30 s interval short of a token
+				m.buckets["a"].at = *now
+				require.Equal(t, Decision{RetryAfter: time.Nanosecond}, take(t, m, "a"))
+			},
+		},
+		{
 			name: "the wait counts down a partly refilled token",
 			run: func(t *testing.T, m *Memory, now *time.Time) {
 				take(t, m, "a")

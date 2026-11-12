@@ -109,10 +109,12 @@ func (m *Memory) refill(b *bucket, now time.Time) {
 }
 
 // wait is how long b needs for its next whole token, to the nanosecond (the
-// float tokens are rounded, not ceiled, so float noise doesn't add 1ns);
+// float tokens are rounded, not ceiled, so float noise doesn't add 1ns), and
+// never less than 1ns: a refusal always has a wait, so its 429 always carries
+// Retry-After (a bucket a hair under one token would otherwise round to 0);
 // caller holds mu.
 func (m *Memory) wait(b *bucket) time.Duration {
-	return time.Duration(math.Round((1 - b.tokens) * float64(m.rate.interval())))
+	return max(time.Nanosecond, time.Duration(math.Round((1-b.tokens)*float64(m.rate.interval()))))
 }
 
 // sweep drops the buckets that are full again: once per Rate.Per, or, while
