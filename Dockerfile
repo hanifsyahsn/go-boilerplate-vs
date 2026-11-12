@@ -1,6 +1,6 @@
 # Pinned to the go.mod `toolchain` (bump both together): build.sh doesn't pull, so a
 # floating tag would silently reuse whatever golang image is cached on the host.
-FROM golang:1.26.10-alpine AS builder
+FROM golang:1.26.11-alpine AS builder
 LABEL project="go_boilerplate_vs_api_label"
 WORKDIR /app
 COPY go.mod go.sum ./

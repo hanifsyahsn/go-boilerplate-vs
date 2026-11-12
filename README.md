@@ -34,6 +34,7 @@ round per piece (decision 0016).
 ```sh
 make check               # gofmt + go vet + lint + go test ./...
 make lint                # staticcheck + golangci-lint only
+make test_race           # race detector, in Docker (after a change that touches concurrency)
 go test ./... -short     # unit tests only, no Docker
 go test ./...            # + integration tests (testcontainers starts Postgres)
 make sqlc                # regenerate */sqlc after editing query/*.sql or a migration

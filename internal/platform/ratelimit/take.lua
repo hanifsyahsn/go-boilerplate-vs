@@ -22,6 +22,8 @@ if tokens >= 1 then
 else
   wait = math.ceil((1 - tokens) * interval)
 end
-redis.call('HSET', KEYS[1], 'tokens', tostring(tokens), 'ts', tostring(ts))
+-- string.format, not tostring: Lua 5.1's tostring keeps 14 digits, which rounds the µs timestamp (16 digits)
+-- to 100 µs; %.0f keeps it exact (whole µs, < 2^53) and %.17g every bit of the fractional tokens.
+redis.call('HSET', KEYS[1], 'tokens', string.format('%.17g', tokens), 'ts', string.format('%.0f', ts))
 redis.call('PEXPIRE', KEYS[1], ARGV[3])
 return {allowed, wait}

@@ -24,6 +24,13 @@ test_coverage:
 coverage_report_view:
 	go tool cover -html=coverage.out
 
+# Race detector, always in Docker (decision 0017): -race needs cgo on amd64 / arm64, which a local Go may not
+# have. Debian image (it has gcc) at go.mod's toolchain patch version, bumped with it and the Dockerfile; module
+# and build caches in named volumes. Unit tests only (-short): the integration tests would need the Docker socket.
+RACE_IMAGE ?= golang:1.26.11
+test_race:
+	MSYS_NO_PATHCONV=1 docker run --rm -v "$(CURDIR):/src" -w /src 		-v go_boilerplate_vs_gomod:/go/pkg/mod -v go_boilerplate_vs_gobuild:/root/.cache/go-build 		-e GOFLAGS=-buildvcs=false $(RACE_IMAGE) go test -race -short -count=1 $(PACKAGE)
+
 # Codegen
 SOURCE ?= .
 DESTINATION ?= .
@@ -150,4 +157,4 @@ ec_private:
 ec_public:
 	openssl ec -in internal/platform/config/ec-private.pem -pubout -out internal/platform/config/ec-public.pem
 
-.PHONY: check check_short lint fmt lint_installsec sec_install test test_short test_only test_package test_coverage coverage_report_view mock sqlc migrate_create migrate_up migrate_up1 migrate_down migrate_down1 migrate_dirty run ec_private ec_public
+.PHONY: check check_short lint fmt lint_installsec sec_install test test_short test_race test_only test_package test_coverage coverage_report_view mock sqlc migrate_create migrate_up migrate_up1 migrate_down migrate_down1 migrate_dirty run ec_private ec_public

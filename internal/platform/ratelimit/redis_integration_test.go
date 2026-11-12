@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -128,6 +129,46 @@ func TestRedis_Down_I(t *testing.T) {
 			require.ErrorContains(t, l.Reset(context.Background(), "k"), "ratelimit.Redis.Reset")
 			require.ErrorContains(t, l.Return(context.Background(), "k"), "ratelimit.Redis.Return")
 			require.Less(t, time.Since(start), 3*time.Second)
+		})
+	}
+}
+
+func TestRedis_StoredStatePrecision_I(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	c := testRedis(t)
+
+	testCases := []struct {
+		name string
+		take func(l *Redis) error
+	}{
+		{name: "after a take, the bucket's timestamp is stored as whole microseconds, every digit kept", take: func(l *Redis) error {
+			_, err := l.Take(context.Background(), "k")
+			return err
+		}},
+		{name: "after a return, the same", take: func(l *Redis) error {
+			if _, err := l.Take(context.Background(), "k"); err != nil {
+				return err
+			}
+			return l.Return(context.Background(), "k")
+		}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			name := uuid.NewString()
+			l := NewRedis(c, Rate{Burst: 5, Per: time.Minute}, name)
+			require.NoError(t, tc.take(l))
+
+			ts, err := c.HGet(context.Background(), "rl:"+name+":k", "ts").Result()
+			require.NoError(t, err)
+			// Lua 5.1's tostring gave "1.7629434567891e+15": 14 digits, 100 µs.
+			require.Regexp(t, `^\d{16}$`, ts, "a 16-digit µs timestamp, no exponent, no rounding")
+			tm, err := c.Time(context.Background()).Result()
+			require.NoError(t, err)
+			stored, err := strconv.ParseInt(ts, 10, 64)
+			require.NoError(t, err)
+			require.InDelta(t, tm.UnixMicro(), stored, float64(time.Second.Microseconds()), "it is Redis' clock, in µs")
 		})
 	}
 }

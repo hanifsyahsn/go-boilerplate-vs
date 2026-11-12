@@ -1,12 +1,12 @@
 # 0017 — Race detector: `go test -race` inside Docker (`make test_race`)
 
-Status: accepted (2026-11-11), not built
+Status: built (2026-11-12) — `make test_race` (`RACE_IMAGE`, `PACKAGE` to narrow)
 
 ## Decision
 1. Data races are checked with Go's race detector (`go test -race`), and it **always runs inside a Docker
    container**, never with the developer's local Go: `make test_race`.
 2. The container is the Debian `golang` image at the **same Go patch version as `go.mod`'s `toolchain`**
-   (today `golang:1.26.10`), bumped together with it and the Dockerfile builder image (see *Gotchas* in
+   (today `golang:1.26.11`, the Makefile `RACE_IMAGE`), bumped together with it and the Dockerfile builder image (see *Gotchas* in
    `CLAUDE.md`). Debian, not alpine: it ships gcc, which `-race` needs (cgo).
 3. The repo is mounted into the container; the Go module and build caches live in named Docker volumes, so only
    the first run downloads modules.

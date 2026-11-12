@@ -76,6 +76,8 @@ back. `make check_short` (unit tests only) is for iterating; it doesn't replace 
 - Report the result as it is: which step failed and its output. If Docker isn't available, say the integration
   tests didn't run — don't present `check_short` as `check`.
 - Decision 0014 (`docs/decisions/0014-after-coding-check.md`).
+- **A change that touches concurrency** (goroutines, channels, `sync`, state shared between requests, a parallel
+  test) also passes **`make test_race`**: unit tests under `-race`, in Docker (decision 0017).
 
 ### A piece: done checklist, size, review stop (decision 0016)
 
@@ -115,6 +117,7 @@ make sec                       # gosec (medium+, no generated code), semgrep (p/
 
 make check                     # AFTER CODING: gofmt, go vet, lint, go test ./... (full); fails if any step did
 make check_short               # same with go test -short (no Docker) — for iterating, not the final run
+make test_race                 # go test -race -short in Docker (decision 0017); PACKAGE=./internal/... to narrow
 make lint                      # staticcheck (staticcheck.conf) + golangci-lint (.golangci.yml)
 make fmt                       # apply gofmt + goimports
 
@@ -255,8 +258,8 @@ See `.env.example`.
   exclusions: noctx in tests / `testhelper`, testifylint `float-compare` (JSON numbers are float64).
 - **Go files are LF** (`*.go text eol=lf` in `.gitattributes`): with `core.autocrlf=true` a CRLF checkout fails
   gofmt. Writing a file from Python on Windows emits CRLF — use `newline=''` or the editor tools.
-- **Go version = go.mod `toolchain` + the Dockerfile builder image, bumped together** (`go1.26.10` /
-  `golang:1.26.10-alpine`). `GOTOOLCHAIN=auto` makes the local `go` download and use the `toolchain` version for
+- **Go version = go.mod `toolchain` + the Dockerfile builder image + the Makefile `RACE_IMAGE`, bumped together**
+  (`go1.26.11` / `golang:1.26.11-alpine` / `golang:1.26.11`). `GOTOOLCHAIN=auto` makes the local `go` download and use the `toolchain` version for
   this module only; `build.sh` doesn't pull, so the image is pinned rather than a floating `1.26` tag (which
   reuses whatever is cached on the host). Most `govulncheck` hits are stdlib, fixed only by a newer patch release.
 - **The container runs as uid 10001** (non-root, `USER` in the Dockerfile): files mounted into it (the EC keys)
