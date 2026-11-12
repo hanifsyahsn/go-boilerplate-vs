@@ -41,7 +41,8 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (*Request
   `utility.Group` (`bg.Go(ctx, fn)` — recovered like `SafeGoContext`, counted done only **after** a panic was
   logged and reported, so `Wait` never returns ahead of that record), never a bare `SafeGoContext`. `main` cancels
   `bgCtx` only **after** `srv.Run` returned (requests drained), then `bg.Wait()`, then stops the **alert sender**
-  (its own ctx and group, `stopBackground` in `main.go`: a job finishing late can still alert), then the DB pool
+  (its own ctx and group, `stopBackground` in `main.go`: a job finishing late can still alert; at most
+  `alertDrainTimeout` = 10 s, then warn `notifier: alerts not sent before shutdown`), then the DB pool
   closes — so the last requests' work is flushed, not lost (`TestStopBackground_U`, `TestGroup_U`). A service that starts such work takes a `utility.GoFunc` (main passes
   `bg.Go`; tests pass one that runs `fn` inline) and hands it `requestid.Detach(ctx)`. A worker returns when its
   ctx is done, after flushing.

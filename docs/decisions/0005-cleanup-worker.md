@@ -16,7 +16,7 @@ Closes the *Gotcha* "`refresh_tokens` grows by one row per refresh and nothing p
   works off the request path takes; main passes `bg.Go`).
 - `main`: `bgCtx, stopBg := context.WithCancel(context.WithoutCancel(ctx))`; after `srv.Run` returned (requests
   drained) → `stopBackground`: `stopBg()` → `bg.Wait()` → the alert sender's own ctx and group (so an alert a job
-  raises while finishing still goes out) → the deferred DB close. A `srv.Run` error is reported only after that, so
+  raises while finishing still goes out; at most 10 s, inside deploy.sh's 30 s) → the deferred DB close. A `srv.Run` error is reported only after that, so
   it never skips the flush.
 
 ## As built (part 2: the worker)

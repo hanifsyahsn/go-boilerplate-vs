@@ -256,7 +256,7 @@ func main() {
 	// Only now: a request that finished during the drain has queued its
 	// background work, which gets the cancel and flushes before the DB pool
 	// (deferred above) closes.
-	stopBackground(stopBg, &bg, stopAlerts, &alertSender)
+	stopBackground(stopBg, &bg, stopAlerts, &alertSender, alertDrainTimeout)
 	if rdb != nil {
 		_ = rdb.Close() // after every request and background job is done with it
 	}
@@ -265,15 +265,28 @@ func main() {
 	}
 }
 
+// alertDrainTimeout bounds how long shutdown waits for the last alerts: with
+// Telegram down each send takes its 5 s timeout, and up to 100 can be queued.
+// deploy.sh gives 30 s in all (server drain 5 s, the last activity flush 5 s).
+const alertDrainTimeout = 10 * time.Second
+
 // stopBackground ends the background work once the server has drained: the
 // jobs first (they flush what the last requests queued, and a failure there
 // may raise an alert), then the alert sender, which sends what is queued
-// before it returns, so those last alerts still go out.
-func stopBackground(stopJobs context.CancelFunc, jobs *utility.Group, stopAlerts context.CancelFunc, alertSender *utility.Group) {
+// before it returns, so those last alerts still go out — for up to
+// alertDrain; what's left then is given up (warned), not waited for.
+func stopBackground(stopJobs context.CancelFunc, jobs *utility.Group, stopAlerts context.CancelFunc, alertSender *utility.Group,
+	alertDrain time.Duration) {
 	stopJobs()
 	jobs.Wait()
 	stopAlerts()
-	alertSender.Wait()
+	done := make(chan struct{})
+	go func() { alertSender.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(alertDrain):
+		slog.Warn("notifier: alerts not sent before shutdown", "waited", alertDrain.String())
+	}
 }
 
 // limiters are every rate limit of the API.
