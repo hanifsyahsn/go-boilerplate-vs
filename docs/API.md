@@ -376,9 +376,10 @@ Set-Cookie: app-refresh-token=; Path=/api/auth; Max-Age=0; HttpOnly; SameSite=La
 ### `POST /api/auth/password-reset-requests`
 
 "Forgot password": emails a link to `APP_BASE_URL/reset-password?token=…` (valid **1 hour**; asking again makes
-the earlier links stop working). **Always `202`** with the same body — an unknown email, a deactivated account
-and the per-address limit look exactly like a sent link, so the endpoint never tells which emails have an
-account. The email goes out in the background.
+the earlier links stop working). **Always `202`** with the same body, and in the same time: an unknown email,
+a deactivated account, the per-address limit and even a server-side failure look exactly like a sent link, so
+the endpoint never tells which emails have an account. The answer comes before anything is looked up; the
+lookup, the link and the email all happen in the background afterwards.
 
 ```bash
 curl -s -X POST "$BASE/api/auth/password-reset-requests" -H "$CT" \

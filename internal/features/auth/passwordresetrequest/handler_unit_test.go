@@ -1,7 +1,6 @@
 package passwordresetrequest
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,12 +24,13 @@ func TestHandler_Request_U(t *testing.T) {
 		wantCode   int
 		wantBody   string // exact, when set
 		wantInBody string
+		query      string // appended to the path
 	}{
 		{
 			name: "a valid request: 202 with the meta-only answer",
 			body: `{"data":{"type":"password-reset-requests","attributes":{"email":"jane@example.com"}}}`,
 			stub: func(s *MockS) {
-				s.EXPECT().Request(gomock.Any(), Request{Email: "jane@example.com"}).Return(nil)
+				s.EXPECT().Request(gomock.Any(), Request{Email: "jane@example.com"})
 			},
 			wantCode: http.StatusAccepted, wantBody: accepted,
 		},
@@ -43,14 +43,13 @@ func TestHandler_Request_U(t *testing.T) {
 			stub: func(*MockS) {}, wantCode: http.StatusConflict,
 		},
 		{
-			name: "an id is a 403 (no client ids)", body: `{"data":{"type":"password-reset-requests","id":"1","attributes":{"email":"jane@example.com"}}}`,
-			stub: func(*MockS) {}, wantCode: http.StatusForbidden,
+			name: "a query parameter the endpoint doesn't take: 400, nothing started", query: "?sort=email",
+			body: `{"data":{"type":"password-reset-requests","attributes":{"email":"jane@example.com"}}}`,
+			stub: func(*MockS) {}, wantCode: http.StatusBadRequest, wantInBody: `"parameter":"sort"`,
 		},
 		{
-			name:     "a service error is a 500",
-			body:     `{"data":{"type":"password-reset-requests","attributes":{"email":"jane@example.com"}}}`,
-			stub:     func(s *MockS) { s.EXPECT().Request(gomock.Any(), gomock.Any()).Return(errors.New("boom")) },
-			wantCode: http.StatusInternalServerError,
+			name: "an id is a 403 (no client ids)", body: `{"data":{"type":"password-reset-requests","id":"1","attributes":{"email":"jane@example.com"}}}`,
+			stub: func(*MockS) {}, wantCode: http.StatusForbidden,
 		},
 	}
 
@@ -63,7 +62,7 @@ func TestHandler_Request_U(t *testing.T) {
 			r := gin.New()
 			Route(r.Group("/api"), NewHandler(svc))
 
-			req := httptest.NewRequest(http.MethodPost, "/api/auth/password-reset-requests", strings.NewReader(tc.body))
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/password-reset-requests"+tc.query, strings.NewReader(tc.body))
 			req.Header.Set("Content-Type", "application/vnd.api+json")
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)

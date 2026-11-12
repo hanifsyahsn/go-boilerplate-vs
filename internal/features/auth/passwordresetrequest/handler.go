@@ -32,9 +32,6 @@ func (h *handler) Request(c *gin.Context) {
 		return
 	}
 
-	if handlerutil.WriteError(c, h.service.Request(c, req), "Password Reset Request Handler") {
-		return
-	}
-
+	h.service.Request(c, req)
 	handlerutil.WriteMeta(c, http.StatusAccepted, map[string]string{"message": SentMessage})
 }

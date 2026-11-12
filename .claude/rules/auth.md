@@ -106,9 +106,14 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   `PasswordChangedEmail` / `VerifyEmail`.
 - **Forgot password** (slices `auth/passwordresetrequest`, `auth/passwordreset`, both in the `limited` group):
   `POST /api/auth/password-reset-requests` (`password-reset-requests`, attribute `email`) is **always 202** with
-  one meta message — unknown email, inactive account, the per-recipient limit (3 / h, key `reset:` + trimmed
-  lowercase email, taken **before** the lookup; refused or failing → nothing sent, logged without the address)
-  and a failed send all look the same; an active account gets a `RESET_PASSWORD` token (1 h) and the email.
+  one meta message, **answered before any work** (Q16, 2026-11-12): `Request` only hands the work to main's
+  background group (`emailer.Go`, `requestid.Detach`) and returns nothing, so a known and an unknown email take
+  the same time (a lookup or token write before answering told them apart). In the background: the
+  per-recipient limit (3 / h, key `reset:` + trimmed lowercase email, taken **before** the lookup; refused or
+  failing → nothing sent), the lookup, a `RESET_PASSWORD` token (1 h) for an active account, the email. Every
+  failure (`password reset: recipient limit failed` / `lookup failed` / `issue token failed`) is only logged,
+  never with the address; there is no 500. Tests: `TestService_Request_AnswersBeforeWork_U`,
+  `TestService_Request_BackgroundGroup_I`.
   `POST /api/auth/password-resets` (`password-resets`, `token` + `password` `min=8,maxbytes=72`): in one tx
   `ConsumeAuthToken` (none → 422 `invalid_token` on `/data/attributes/token`, `authshared.CodeInvalidToken`), new
   hash + `email_verified_at` (`SetPasswordAfterReset`), `RevokeUserSessions(password_reset)`; bcrypt runs before

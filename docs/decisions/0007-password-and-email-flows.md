@@ -25,6 +25,10 @@ A prerequisite for any service with its own local users.
 - `POST /api/auth/password-reset-requests`: always 202 with one message (unknown email, inactive account, the
   3 / h per-address limit and a failed send look the same); an active account gets a 1 h link by email, earlier
   links spent.
+- **Same time for every email (added 2026-11-12):** the request answers before any work. The limit, the lookup,
+  the token and the email all run in the background group afterwards. A lookup or token write before answering
+  made a known email measurably slower than an unknown one. A DB failure is therefore logged, never a 500: a
+  500 would itself tell the emails apart. A derivative with forgot-password applies the same shape.
 - `POST /api/auth/password-resets`: consumes the token atomically (else 422 `invalid_token` on the token), sets
   the password, marks the email verified and ends every session in one transaction, then emails a notice → 204.
 - Both in the auth per-IP group (`limited`).

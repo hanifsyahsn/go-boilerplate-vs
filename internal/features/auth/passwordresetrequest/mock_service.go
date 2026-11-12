@@ -35,11 +35,9 @@ func (m *MockS) EXPECT() *MockSMockRecorder {
 }
 
 // Request mocks base method.
-func (m *MockS) Request(ctx context.Context, req Request) error {
+func (m *MockS) Request(ctx context.Context, req Request) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Request", ctx, req)
-	ret0, _ := ret[0].(error)
-	return ret0
+	m.ctrl.Call(m, "Request", ctx, req)
 }
 
 // Request indicates an expected call of Request.

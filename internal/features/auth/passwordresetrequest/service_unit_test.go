@@ -16,7 +16,7 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/mailer"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
-	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,7 +41,6 @@ func TestService_Request_U(t *testing.T) {
 		name      string
 		limiter   *stubLimiter
 		stub      func(q *sqlc.MockQuerier, tq *MockQuerier)
-		wantCode  apperror.Code
 		wantEmail bool
 		wantLog   string // a log record with this message
 	}{
@@ -83,21 +82,21 @@ func TestService_Request_U(t *testing.T) {
 			wantLog: "password reset: recipient limit failed",
 		},
 		{
-			name:    "a lookup error is a 500",
+			name:    "a lookup error: nothing sent, logged without the address (the caller already had its 202)",
 			limiter: &stubLimiter{allowed: true},
 			stub: func(q *sqlc.MockQuerier, _ *MockQuerier) {
 				q.EXPECT().GetUserForPasswordReset(gomock.Any(), gomock.Any()).Return(sqlc.GetUserForPasswordResetRow{}, sql.ErrConnDone)
 			},
-			wantCode: apperror.CodeInternal,
+			wantLog: "password reset: lookup failed",
 		},
 		{
-			name:    "an issuing error is a 500 and nothing is sent",
+			name:    "an issuing error: nothing sent, logged with the recipient's id, never the address",
 			limiter: &stubLimiter{allowed: true},
 			stub: func(q *sqlc.MockQuerier, tq *MockQuerier) {
 				q.EXPECT().GetUserForPasswordReset(gomock.Any(), gomock.Any()).Return(active, nil)
 				tq.EXPECT().SpendUnusedAuthTokens(gomock.Any(), gomock.Any()).Return(sql.ErrConnDone)
 			},
-			wantCode: apperror.CodeInternal,
+			wantLog: "password reset: issue token failed",
 		},
 	}
 
@@ -123,17 +122,9 @@ func TestService_Request_U(t *testing.T) {
 
 			svc := NewService(q, store, tc.limiter, emailer)
 			svc.(*service).now = func() time.Time { return time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC) }
-			err = svc.Request(context.Background(), Request{Email: "  Jane@Example.com "})
+			svc.Request(context.Background(), Request{Email: "  Jane@Example.com "})
 
 			require.Equal(t, []string{"reset:jane@example.com"}, tc.limiter.keys, "the limit is taken first, per trimmed lowercase email")
-			if !tc.wantCode.IsZero() {
-				var appErr *apperror.AppError
-				require.ErrorAs(t, err, &appErr)
-				require.Equal(t, tc.wantCode, appErr.Code)
-				require.Empty(t, fake.Sent())
-				return
-			}
-			require.NoError(t, err)
 			if !tc.wantEmail {
 				require.Empty(t, fake.Sent(), "nothing sent")
 			} else {
@@ -149,6 +140,80 @@ func TestService_Request_U(t *testing.T) {
 				require.Equal(t, tc.wantLog, rec["msg"])
 				require.NotContains(t, buf.String(), "example.com", "the address is never logged")
 			}
+		})
+	}
+}
+
+// TestService_Request_AnswersBeforeWork_U: Request returns before the limit,
+// the lookup or the token write run, so a known and an unknown email take the
+// same time to answer. The work runs later, on a context detached from the
+// request (it keeps the request id, outlives its cancellation).
+func TestService_Request_AnswersBeforeWork_U(t *testing.T) {
+	active := sqlc.GetUserForPasswordResetRow{ID: 7, Email: "jane@example.com", IsActive: true}
+
+	testCases := []struct {
+		name      string
+		stub      func(q *sqlc.MockQuerier, tq *MockQuerier)
+		wantEmail bool
+	}{
+		{
+			name: "a known email: nothing is touched before the answer; the link goes out afterwards",
+			stub: func(q *sqlc.MockQuerier, tq *MockQuerier) {
+				q.EXPECT().GetUserForPasswordReset(gomock.Any(), "jane@example.com").Return(active, nil)
+				tq.EXPECT().SpendUnusedAuthTokens(gomock.Any(), gomock.Any()).Return(nil)
+				tq.EXPECT().InsertAuthToken(gomock.Any(), gomock.Any()).Return(nil)
+			},
+			wantEmail: true,
+		},
+		{
+			name: "an unknown email: the same: nothing touched before the answer, nothing sent afterwards",
+			stub: func(q *sqlc.MockQuerier, _ *MockQuerier) {
+				q.EXPECT().GetUserForPasswordReset(gomock.Any(), "jane@example.com").Return(sqlc.GetUserForPasswordResetRow{}, sql.ErrNoRows)
+			},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			q := sqlc.NewMockQuerier(ctrl)
+			tq := NewMockQuerier(ctrl)
+			store := NewMockStoreI(ctrl)
+			limiter := &stubLimiter{allowed: true}
+			fake := &mailer.Fake{}
+
+			// Go holds the work instead of running it, like a busy background group.
+			var held []func()
+			var workCtx context.Context
+			emailer := authshared.Emailer{Mailer: fake, AppBaseURL: "https://app.example.com",
+				Go: func(ctx context.Context, fn func(context.Context)) {
+					if workCtx == nil {
+						workCtx = ctx
+					}
+					held = append(held, func() { fn(ctx) })
+				}}
+
+			reqCtx, cancel := context.WithCancel(requestid.With(context.Background(), "req-1"))
+			NewService(q, store, limiter, emailer).Request(reqCtx, Request{Email: "jane@example.com"})
+			cancel() // the request is over
+
+			// Answered: no limit taken, no lookup, no write, nothing sent (the
+			// mocks have no expectations yet, so any call would fail the test).
+			require.Empty(t, limiter.keys)
+			require.Empty(t, fake.Sent())
+			require.Len(t, held, 1, "the work was handed to the background group")
+			require.Equal(t, "req-1", requestid.FromContext(workCtx), "its logs keep the request id")
+			require.NoError(t, workCtx.Err(), "it outlives the request's cancellation")
+
+			tc.stub(q, tq)
+			store.EXPECT().RunInTx(gomock.Any(), gomock.Any()).DoAndReturn(
+				func(ctx context.Context, fn func(Querier) error) error { return fn(tq) }).AnyTimes()
+			for len(held) > 0 { // the work, then the send it starts
+				next := held[0]
+				held = held[1:]
+				next()
+			}
+			require.Equal(t, []string{"reset:jane@example.com"}, limiter.keys)
+			require.Len(t, fake.Sent(), map[bool]int{true: 1, false: 0}[tc.wantEmail])
 		})
 	}
 }
