@@ -26,6 +26,7 @@ func TestAPIKey_U(t *testing.T) {
 		name       string
 		keys       map[string]string
 		header     string
+		headers    []string // several X-API-Key headers (overrides header)
 		wantCode   int
 		wantClient string
 	}{
@@ -35,6 +36,10 @@ func TestAPIKey_U(t *testing.T) {
 		{name: "a missing key is a 401 on the header", keys: keys, wantCode: http.StatusUnauthorized},
 		{name: "a wrong key is a 401", keys: keys, header: strings.Repeat("x", 32), wantCode: http.StatusUnauthorized},
 		{name: "a key's prefix is a 401", keys: keys, header: strings.Repeat("b", 31), wantCode: http.StatusUnauthorized},
+		{name: "two X-API-Key headers are a 401, even when the first is valid", keys: keys,
+			headers: []string{strings.Repeat("b", 32), "junk"}, wantCode: http.StatusUnauthorized},
+		{name: "an empty X-API-Key before a valid one is a 401", keys: keys,
+			headers: []string{"", strings.Repeat("b", 32)}, wantCode: http.StatusUnauthorized},
 		{name: "no keys configured: nothing gets through, an empty header included", keys: map[string]string{}, header: "",
 			wantCode: http.StatusUnauthorized},
 	}
@@ -50,6 +55,9 @@ func TestAPIKey_U(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/x", nil)
 			if tc.header != "" {
 				req.Header.Set(APIKeyHeader, tc.header)
+			}
+			for _, h := range tc.headers {
+				req.Header.Add(APIKeyHeader, h)
 			}
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)

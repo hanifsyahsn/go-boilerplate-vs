@@ -89,11 +89,12 @@ type Config struct {
 	RedisURL string `mapstructure:"REDIS_URL"`
 	// APIKeys (API_KEYS, "name:key,name:key") are the machine callers' keys
 	// for middleware.APIKey, name → key. Optional; each key at least
-	// MinAPIKeyLength characters, names unique. Secrets: never logged.
+	// MinAPIKeyLength bytes, names and keys unique. Secrets: never logged.
 	APIKeys map[string]string `mapstructure:"API_KEYS"`
 }
 
-// MinAPIKeyLength is the shortest API key accepted.
+// MinAPIKeyLength is the shortest API key accepted, in bytes (what an
+// attacker has to guess; openssl rand -hex 32 gives 64).
 const MinAPIKeyLength = 32
 
 // DefaultActivityLogRetention is ACTIVITY_LOG_RETENTION when unset: 2 years.
@@ -393,7 +394,8 @@ func parseAPIKeys(entries []string) (map[string]string, error) {
 		return nil, nil
 	}
 	keys := make(map[string]string, len(entries))
-	entryOf := make(map[string]int, len(entries)) // name → its entry number
+	entryOf := make(map[string]int, len(entries))    // name → its entry number
+	keyEntryOf := make(map[string]int, len(entries)) // key → its entry number (compared, never printed)
 	var errs []error
 	for i, entry := range entries {
 		name, key, ok := strings.Cut(entry, ":")
@@ -402,12 +404,17 @@ func parseAPIKeys(entries []string) (map[string]string, error) {
 		case !ok || name == "" || key == "":
 			errs = append(errs, fmt.Errorf("config: API_KEYS entry %d is not name:key", i+1))
 		case len(key) < MinAPIKeyLength:
-			errs = append(errs, fmt.Errorf("config: API_KEYS entry %d has a key shorter than %d characters", i+1, MinAPIKeyLength))
+			errs = append(errs, fmt.Errorf("config: API_KEYS entry %d has a key shorter than %d bytes", i+1, MinAPIKeyLength))
 		case entryOf[name] != 0:
 			errs = append(errs, fmt.Errorf("config: API_KEYS entry %d repeats the name of entry %d", i+1, entryOf[name]))
+		case keyEntryOf[key] != 0:
+			// one key, two names: which name a request gets would depend on
+			// map order, so the access log could name the wrong client
+			errs = append(errs, fmt.Errorf("config: API_KEYS entry %d repeats the key of entry %d", i+1, keyEntryOf[key]))
 		default:
 			keys[name] = key
 			entryOf[name] = i + 1
+			keyEntryOf[key] = i + 1
 		}
 	}
 	if err := errors.Join(errs...); err != nil {

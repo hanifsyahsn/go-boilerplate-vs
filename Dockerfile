@@ -1,4 +1,4 @@
-# Pinned to the go.mod `toolchain` (bump both together): build.sh doesn't pull, so a
+# Pinned to the go.mod `toolchain` (bump it, this and the Makefile's RACE_IMAGE together): build.sh doesn't pull, so a
 # floating tag would silently reuse whatever golang image is cached on the host.
 FROM golang:1.26.11-alpine AS builder
 LABEL project="go_boilerplate_vs_api_label"
