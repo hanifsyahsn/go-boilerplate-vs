@@ -24,12 +24,17 @@ func newOriginSet(origins []string) map[string]struct{} {
 // singleHeader reads a header that is accepted only when sent exactly once:
 // its first value and how many values came. OriginGuard, CORS and APIKey read
 // theirs through it, so absent / empty / repeated mean the same everywhere.
+// A key present with no value at all (only another layer can leave one; the
+// HTTP parser can't) counts as one empty value, never as absent.
 func singleHeader(h http.Header, name string) (value string, count int) {
-	values := h.Values(name)
-	if len(values) > 0 {
-		value = values[0]
+	values, present := h[http.CanonicalHeaderKey(name)]
+	if !present {
+		return "", 0
 	}
-	return value, len(values)
+	if len(values) == 0 {
+		return "", 1
+	}
+	return values[0], len(values)
 }
 
 // describeOrigin names a refused Origin for the log: the value, or how many

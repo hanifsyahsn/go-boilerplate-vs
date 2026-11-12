@@ -244,9 +244,11 @@ See `.env.example`.
   need `lower()` to know Unicode 16 (glibc ≥ 2.41). Bump it on purpose and re-run `*_FoldedLikeTheLookup_I`.
 - `sqlc.yaml` has one block per slice with queries — a new one needs its entry, then `make sqlc`.
 - `updated_at` is maintained by the `update_updated_at_column()` trigger on every table that has it.
-- **A migration that ALTERs a table written on every request** (`api_activity_logs`, `refresh_tokens`,
-  `auth_sessions`, `users`) starts with `SET lock_timeout = '5s';` (000009): it gives up instead of waiting behind a
-  running write while every request's write queues behind it. A timed-out run leaves the version dirty →
+- **A migration that ALTERs a table on a hot write path** (every request: `api_activity_logs`; every login /
+  refresh: `refresh_tokens`, `auth_sessions`), up **and** down, runs in its own `BEGIN; SET LOCAL lock_timeout =
+  '5s'; …; COMMIT;` (000009): it gives up instead of waiting behind a running write while those writes queue
+  behind it. `SET LOCAL`, never a plain `SET`: migrate runs a whole run on one connection, so a session setting
+  would reach the later migrations. A timed-out run leaves the version dirty →
   `make migrate_dirty SEQ=<previous>`, then run it again (`TestMigration_LockTimeout_I`).
 - **`make sec` runs only on a developer's machine**, unlocked by `SEC_PASSWORD=imsureitislocal` typed on the
   command line (`$(origin SEC_PASSWORD)` must be `command line`, so a `.env` copied to a server can't carry it).

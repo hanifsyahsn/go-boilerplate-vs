@@ -2,12 +2,14 @@ package activitylog
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/activitylog/sqlc"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/config"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/testhelper"
 	"github.com/stretchr/testify/require"
@@ -116,37 +118,85 @@ func TestRecorder_Columns_I(t *testing.T) {
 // TestMigration_LockTimeout_I: a migration that ALTERs api_activity_logs
 // (written on every request) gives up after its lock_timeout instead of
 // waiting behind a running write (a cleanup DELETE) while every recorder
-// INSERT queues behind it.
+// INSERT queues behind it — and the timeout ends with it: migrate runs every
+// file of a run on one connection, so a session-level SET would reach the
+// later migrations too.
 func TestMigration_LockTimeout_I(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	const dir = "../../platform/db/migration/"
+	up, down := dir+"000009_activity_log_api_client.up.sql", dir+"000009_activity_log_api_client.down.sql"
+	testCases := []struct {
+		name string
+		run  func(t *testing.T, ctx context.Context, conn *sql.Conn)
+	}{
+		{name: "the up file gives up on a held table instead of queueing writes behind it", run: func(t *testing.T, ctx context.Context, conn *sql.Conn) {
+			requireLockTimeout(t, ctx, conn, up)
+		}},
+		{name: "the down file gives up on a held table too", run: func(t *testing.T, ctx context.Context, conn *sql.Conn) {
+			requireLockTimeout(t, ctx, conn, down)
+		}},
+		{name: "the timeout ends with the migration: the connection's later statements don't inherit it", run: func(t *testing.T, ctx context.Context, conn *sql.Conn) {
+			_, err := conn.ExecContext(ctx, `ALTER TABLE api_activity_logs DROP COLUMN IF EXISTS api_client`) // back to before 000009
+			require.NoError(t, err)
+			sqlText, err := os.ReadFile(up)
+			require.NoError(t, err)
+			_, err = conn.ExecContext(ctx, string(sqlText))
+			require.NoError(t, err)
+			var timeout string
+			require.NoError(t, conn.QueryRowContext(ctx, `SHOW lock_timeout`).Scan(&timeout))
+			require.Equal(t, "0", timeout)
+		}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// a regression must fail here, not hang until go test's own timeout
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			conn, err := testDB.Conn(ctx)
+			require.NoError(t, err)
+			defer func() { _ = conn.Close() }()
+			tc.run(t, ctx, conn)
+		})
+	}
+}
+
+// requireLockTimeout runs a migration file while another transaction holds a
+// write lock on api_activity_logs, and wants it to give up with a lock
+// timeout.
+func requireLockTimeout(t *testing.T, ctx context.Context, conn *sql.Conn, file string) {
+	t.Helper()
+	sqlText, err := os.ReadFile(file)
+	require.NoError(t, err)
+	// its own ctx: database/sql rolls a transaction back when its ctx ends,
+	// which would free the table for the migration under test
+	holder, err := testDB.BeginTx(context.Background(), nil)
+	require.NoError(t, err)
+	defer func() { _ = holder.Rollback() }()
+	_, err = holder.ExecContext(context.Background(), `DELETE FROM api_activity_logs WHERE false`) // a write's table lock
+	require.NoError(t, err)
+
+	_, err = conn.ExecContext(ctx, string(sqlText))
+	require.ErrorContains(t, err, "lock timeout")
+	_, _ = conn.ExecContext(context.Background(), `ROLLBACK`) // leave no aborted transaction on the connection
+}
+
+func TestRecorder_APIClientColumn_I(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
 	testCases := []struct {
 		name string
-		file string
 	}{
-		{name: "000009 gives up on a held table instead of queueing writes behind it",
-			file: "../../platform/db/migration/000009_activity_log_api_client.up.sql"},
+		{name: "the api_client column holds as many characters as config accepts in a client name"},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
-			up, err := os.ReadFile(tc.file)
-			require.NoError(t, err)
-
-			holder, err := testDB.BeginTx(ctx, nil)
-			require.NoError(t, err)
-			defer func() { _ = holder.Rollback() }()
-			_, err = holder.ExecContext(ctx, `DELETE FROM api_activity_logs WHERE false`) // a write's table lock
-			require.NoError(t, err)
-
-			conn, err := testDB.Conn(ctx)
-			require.NoError(t, err)
-			defer func() { _ = conn.Close() }()
-			start := time.Now()
-			_, err = conn.ExecContext(ctx, string(up))
-			require.ErrorContains(t, err, "lock timeout")
-			require.Less(t, time.Since(start), 15*time.Second)
+			var size int
+			require.NoError(t, testDB.QueryRow(`SELECT character_maximum_length FROM information_schema.columns
+				WHERE table_name = 'api_activity_logs' AND column_name = 'api_client'`).Scan(&size))
+			require.Equal(t, config.MaxAPIClientNameLength, size)
 		})
 	}
 }

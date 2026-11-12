@@ -23,8 +23,11 @@ func TestOriginGuard_U(t *testing.T) {
 		method  string
 		// origins are the Origin header values sent; nil = no header, {""} = an empty one.
 		origins  []string
+		keyOnly  bool // an Origin key with no value at all (another layer can leave one)
 		wantCode int
 	}{
+		{name: "POST with an Origin key but no value is a 403, like an empty one", allowed: listed, method: http.MethodPost,
+			keyOnly: true, wantCode: http.StatusForbidden},
 		{name: "an empty list lets everything through", method: http.MethodPost,
 			origins: []string{"https://evil.example"}, wantCode: http.StatusTeapot},
 		{name: "GET from an unlisted origin passes", allowed: listed, method: http.MethodGet,
@@ -70,6 +73,9 @@ func TestOriginGuard_U(t *testing.T) {
 			req := httptest.NewRequest(tc.method, "/x", nil)
 			for _, o := range tc.origins {
 				req.Header.Add("Origin", o)
+			}
+			if tc.keyOnly {
+				req.Header["Origin"] = []string{}
 			}
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)

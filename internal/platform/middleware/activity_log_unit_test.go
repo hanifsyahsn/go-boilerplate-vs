@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/config"
 	internalsharedconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/constant"
 	"github.com/stretchr/testify/require"
 )
@@ -131,6 +132,20 @@ func TestActivityLog_U(t *testing.T) {
 			}
 			r.ServeHTTP(httptest.NewRecorder(), req)
 			tc.check(t, rec.got)
+		})
+	}
+}
+
+func TestActivityLog_APIClientLimit_U(t *testing.T) {
+	testCases := []struct {
+		name string
+	}{
+		{name: "the activity log keeps exactly as many characters of a client name as config accepts"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, config.MaxAPIClientNameLength, apiClientMaxRunes,
+				"a longer accepted name would be cut, and two names could read the same")
 		})
 	}
 }

@@ -343,6 +343,7 @@ func TestService_Login_GiveBackOutlivesRequest_U(t *testing.T) {
 		email       *stubLimiter
 		foldErr     error
 		readsUser   bool
+		lookupErr   error
 		wantIPGives int
 		wantEmGives int
 	}{
@@ -350,6 +351,8 @@ func TestService_Login_GiveBackOutlivesRequest_U(t *testing.T) {
 			email: &stubLimiter{}, foldErr: context.Canceled, wantIPGives: 1},
 		{name: "an email that refuses after the client went away still gives the IP its token back",
 			email: &stubLimiter{refuse: true}, wantIPGives: 1},
+		{name: "an account lookup cut off by the client hanging up still gives both tokens back",
+			email: &stubLimiter{}, lookupErr: context.Canceled, wantIPGives: 1, wantEmGives: 1},
 		{name: "the right password still resets the email and returns the IP's token after the client went away",
 			email: &stubLimiter{}, readsUser: true, wantIPGives: 1, wantEmGives: 1},
 	}
@@ -361,6 +364,9 @@ func TestService_Login_GiveBackOutlivesRequest_U(t *testing.T) {
 			sq.EXPECT().FoldEmail(gomock.Any(), gomock.Any()).Return("jane@example.com", tc.foldErr)
 			if tc.readsUser {
 				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil)
+			}
+			if tc.lookupErr != nil {
+				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(sqlc.GetUserForLoginRow{}, tc.lookupErr)
 			}
 			tm := jwttoken.NewMockM(ctrl)
 			tm.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil).AnyTimes()
