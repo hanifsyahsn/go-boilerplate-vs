@@ -188,7 +188,9 @@ Added 2026-11-09 as the boilerplate's base security.
   `login:` + the trimmed email **folded by Postgres** (`authshared` query `FoldEmail`, `SELECT lower($1)`), exactly
   as `GetUserForLogin` matches it. Never Go's `strings.ToLower` for a key a SQL `lower()` lookup must agree with:
   their Unicode tables differ (glibc lowers U+A7DC to `ƛ`, Go doesn't), so one account got two counts
-  (`TestService_Login_FoldedLikeTheLookup_I`). The fold runs before either limiter; its error is a 500. Every
+  (`TestService_Login_FoldedLikeTheLookup_I`). Login takes the IP's token first (it needs no email, so a login the IP cap refuses costs no query), then folds
+  (an error is a 500 and gives the IP its token back), then the email's token; the fold and the lookup get the
+  same trimmed email. Every
   attempt `Take`s a token
   **before the DB read** (so parallel guesses can't outrun the count — `TestService_Login_ParallelGuesses_U`);
   an unknown email and a wrong password keep it (so a 429 doesn't reveal whether the email exists); the right
@@ -201,7 +203,7 @@ limiter's wait (`WithRetryAfter(d.RetryAfter)` → `Retry-After`). Known trade-o
 - **Per IP, failed logins across emails** (`login` service, `Limiters.IP`, 100 / 6 h — `loginIPFailureRate`): key
   `loginip:` + `ratelimit.IPKey(c.ClientIP())` (the handler passes `login.Client{IP, UserAgent}`). Credential
   stuffing tries each leaked email once, so the per-email cap never fires; this one does. The IP's token is
-  taken **first**, then the email's, both before the DB read: a caller the IP cap already stopped can't drain a
+  taken **first** (before the fold too), then the email's, both before the account lookup: a caller the IP cap already stopped can't drain a
   victim's email budget, and when the **email** refuses (or errors) the IP gets its token back with `Return` — no
   password was tried, so hammering a locked email from a shared IP doesn't lock the IP. The right password
   `Return`s the IP's token — **never `Reset`**: one real account would otherwise wipe an attacker's count. Same

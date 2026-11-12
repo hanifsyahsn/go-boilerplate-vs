@@ -63,7 +63,8 @@ A per-email limit key (failed logins, reset emails) is the email folded by Postg
 `SELECT`, the same function the account lookup uses. It is never folded by Go's `strings.ToLower`. The two
 Unicode tables differ for a few letters (glibc's Unicode 16 lowers U+A7DC to U+019B, Go's tables don't). With
 Go's fold, two spellings reached one account but counted apart, which doubled an attacker's guesses. The price
-is one round trip per attempt, without touching a table.
+is one round trip per attempt, without touching a table. Login folds after taking the IP's token (that one needs
+no email), so a login the IP cap refuses costs no query; a fold error gives the IP its token back.
 
 ## Every 429 carries Retry-After (added 2026-11-12)
 Point 5's "429 + `Retry-After`" holds for **every** limit, not only the per-IP middleware. A service-level limit

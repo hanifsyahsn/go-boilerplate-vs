@@ -123,21 +123,13 @@ func ipFailureKey(ip string) string {
 }
 
 func (s *service) Login(ctx context.Context, req Request, client Client) (Result, error) {
-	// Fold the email where the lookup folds it (Postgres), not with Go's
-	// strings.ToLower: their Unicode tables differ for a few letters, and a
-	// key that differs from the lookup would give one account two counts.
-	// Before any limiter, so a failure here touches neither.
-	folded, err := s.authSharedQuerier.FoldEmail(ctx, strings.TrimSpace(req.Email))
-	if err != nil {
-		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
-			fmt.Errorf("FoldEmail() (%s): %w", feature, err))
-	}
-	emailKey, ipKey := failureKey(folded), ipFailureKey(client.IP)
+	email := strings.TrimSpace(req.Email) // the fold and the lookup get the same value
+	ipKey := ipFailureKey(client.IP)
 	// Take before anything else (not peek now, count later): the bcrypt
 	// comparison takes ~100ms, and a check-then-count would let N parallel
-	// requests all pass the check before the first one is counted.
-	var d ratelimit.Decision
-	d, err = s.limits.IP.Take(ctx, ipKey)
+	// requests all pass the check before the first one is counted. The IP's
+	// token needs no email, so a login the IP cap refuses costs no DB query.
+	d, err := s.limits.IP.Take(ctx, ipKey)
 	if err != nil {
 		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
 			fmt.Errorf("limits.IP.Take() (%s): %w", feature, err))
@@ -146,6 +138,18 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 		return Result{}, apperror.New(apperror.CodeTooManyRequests, tooManyFailuresMessage,
 			fmt.Errorf("(%s): login failures exceeded for an IP", feature)).WithRetryAfter(d.RetryAfter)
 	}
+
+	// Fold the email where the lookup folds it (Postgres), not with Go's
+	// strings.ToLower: their Unicode tables differ for a few letters, and a
+	// key that differs from the lookup would give one account two counts.
+	folded, err := s.authSharedQuerier.FoldEmail(ctx, email)
+	if err != nil {
+		// No password is tried, so this attempt doesn't count against the IP.
+		s.giveBack(ctx, "ip", s.limits.IP.Return(ctx, ipKey))
+		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
+			fmt.Errorf("FoldEmail() (%s): %w", feature, err))
+	}
+	emailKey := failureKey(folded)
 
 	d, err = s.limits.Email.Take(ctx, emailKey)
 	if err != nil || !d.Allowed {
@@ -161,7 +165,7 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 			fmt.Errorf("(%s): login failures exceeded for an email", feature)).WithRetryAfter(d.RetryAfter)
 	}
 
-	user, err := s.querier.GetUserForLogin(ctx, strings.TrimSpace(req.Email))
+	user, err := s.querier.GetUserForLogin(ctx, email)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Spend a bcrypt comparison anyway, so an unknown email answers in
 		// about the time a wrong password does and timing doesn't reveal

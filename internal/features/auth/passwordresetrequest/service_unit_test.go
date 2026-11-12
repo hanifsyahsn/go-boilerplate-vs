@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/mailer"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/testhelper"
 	"github.com/stretchr/testify/require"
 )
 
@@ -122,7 +122,7 @@ func TestService_Request_U(t *testing.T) {
 			emailer := authshared.Emailer{Mailer: fake, AppBaseURL: "https://app.example.com",
 				Go: func(ctx context.Context, fn func(context.Context)) { fn(ctx) }}
 
-			svc := NewService(q, foldingQuerier(ctrl), store, tc.limiter, emailer)
+			svc := NewService(q, testhelper.FoldingQuerier(ctrl), store, tc.limiter, emailer)
 			svc.(*service).now = func() time.Time { return time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC) }
 			svc.Request(context.Background(), Request{Email: "  Jane@Example.com "})
 
@@ -195,7 +195,7 @@ func TestService_Request_AnswersBeforeWork_U(t *testing.T) {
 				}}
 
 			reqCtx, cancel := context.WithCancel(requestid.With(context.Background(), "req-1"))
-			NewService(q, foldingQuerier(ctrl), store, limiter, emailer).Request(reqCtx, Request{Email: "jane@example.com"})
+			NewService(q, testhelper.FoldingQuerier(ctrl), store, limiter, emailer).Request(reqCtx, Request{Email: "jane@example.com"})
 			cancel() // the request is over
 
 			// Answered: no limit taken, no lookup, no write, nothing sent (the
@@ -218,15 +218,6 @@ func TestService_Request_AnswersBeforeWork_U(t *testing.T) {
 			require.Len(t, fake.Sent(), map[bool]int{true: 1, false: 0}[tc.wantEmail])
 		})
 	}
-}
-
-// foldingQuerier is the auth-shared mock with FoldEmail answering like
-// Postgres for ASCII (lowercase).
-func foldingQuerier(ctrl *gomock.Controller) *authsharedsqlc.MockQuerier {
-	sq := authsharedsqlc.NewMockQuerier(ctrl)
-	sq.EXPECT().FoldEmail(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, email string) (string, error) { return strings.ToLower(email), nil }).AnyTimes()
-	return sq
 }
 
 func TestService_Request_FoldEmail_U(t *testing.T) {

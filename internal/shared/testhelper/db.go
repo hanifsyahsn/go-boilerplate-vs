@@ -15,6 +15,12 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+// postgresImage is pinned to a patch release on a Debian release: the email
+// fold tests (*_FoldedLikeTheLookup_I) need lower() to know Unicode 16
+// (glibc ≥ 2.41, trixie), which a floating tag rebuilt on another base could
+// drop. Bump it on purpose and re-run those tests.
+const postgresImage = "postgres:17.9-trixie"
+
 // SetupTestDB starts a migrated Postgres container; a failed start is retried
 // (startContainer — the packages of one `go test ./...` race for the Ryuk
 // reaper).
@@ -22,7 +28,7 @@ func SetupTestDB(ctx context.Context, migrationPath string) (*sql.DB, func()) {
 	container, err := startContainer("postgres", func() (testcontainers.Container, error) {
 		return testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
-				Image:        "postgres:17",
+				Image:        postgresImage,
 				ExposedPorts: []string{"5432/tcp"},
 				Env: map[string]string{
 					"POSTGRES_USER":     "test",

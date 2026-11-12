@@ -122,7 +122,7 @@ make lint                      # staticcheck (staticcheck.conf) + golangci-lint 
 make fmt                       # apply gofmt + goimports
 
 go test ./... -short           # unit tests only (no Docker)
-go test ./...                  # full suite; TestMain starts a migrated postgres:17 container per package
+go test ./...                  # full suite; TestMain starts a migrated postgres:17.9-trixie container per package
 go test -run '^TestService_Update_I$' ./internal/features/note/update -count=1
 ```
 
@@ -239,6 +239,8 @@ See `.env.example`.
 ## Gotchas
 
 - `.env` and `*.pem` are gitignored; never commit keys or secrets.
+- **The test Postgres image is pinned** (`testhelper.postgresImage`, `postgres:17.9-trixie`): the email fold tests
+  need `lower()` to know Unicode 16 (glibc ≥ 2.41). Bump it on purpose and re-run `*_FoldedLikeTheLookup_I`.
 - `sqlc.yaml` has one block per slice with queries — a new one needs its entry, then `make sqlc`.
 - `updated_at` is maintained by the `update_updated_at_column()` trigger on every table that has it.
 - **`make sec` runs only on a developer's machine**, unlocked by `SEC_PASSWORD=imsureitislocal` typed on the
