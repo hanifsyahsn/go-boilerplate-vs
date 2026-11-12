@@ -385,12 +385,14 @@ func NormalizeOrigin(s string) (string, error) {
 }
 
 // parseAPIKeys reads API_KEYS entries ("name:key"). An error names the entry
-// or the client, never a key.
+// by its position only, never by a field: an entry written the wrong way round
+// (key:name) holds the key in the name field, and the error goes to the log.
 func parseAPIKeys(entries []string) (map[string]string, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
 	keys := make(map[string]string, len(entries))
+	entryOf := make(map[string]int, len(entries)) // name → its entry number
 	var errs []error
 	for i, entry := range entries {
 		name, key, ok := strings.Cut(entry, ":")
@@ -399,11 +401,12 @@ func parseAPIKeys(entries []string) (map[string]string, error) {
 		case !ok || name == "" || key == "":
 			errs = append(errs, fmt.Errorf("config: API_KEYS entry %d is not name:key", i+1))
 		case len(key) < MinAPIKeyLength:
-			errs = append(errs, fmt.Errorf("config: API_KEYS key of %q is shorter than %d characters", name, MinAPIKeyLength))
-		case keys[name] != "":
-			errs = append(errs, fmt.Errorf("config: API_KEYS name %q is used twice", name))
+			errs = append(errs, fmt.Errorf("config: API_KEYS entry %d has a key shorter than %d characters", i+1, MinAPIKeyLength))
+		case entryOf[name] != 0:
+			errs = append(errs, fmt.Errorf("config: API_KEYS entry %d repeats the name of entry %d", i+1, entryOf[name]))
 		default:
 			keys[name] = key
+			entryOf[name] = i + 1
 		}
 	}
 	if err := errors.Join(errs...); err != nil {

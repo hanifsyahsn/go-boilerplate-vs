@@ -103,3 +103,38 @@ func TestAccessLog_APIClient_U(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIKey_RefusalLog_U(t *testing.T) {
+	sent := strings.Repeat("w", 40) // often a real key sent to the wrong service
+	testCases := []struct {
+		name   string
+		header string
+	}{
+		{name: "a refused key never reaches the log", header: sent},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			l, err := logging.New(&buf, logging.FormatJSON, "debug")
+			require.NoError(t, err)
+			prev := slog.Default()
+			slog.SetDefault(l)
+			defer slog.SetDefault(prev)
+
+			gin.SetMode(gin.TestMode)
+			r := gin.New()
+			r.Use(AccessLog())
+			r.GET("/machine", APIKey(map[string]string{"billing": strings.Repeat("b", 32)}), func(c *gin.Context) { c.Status(http.StatusOK) })
+
+			req := httptest.NewRequest(http.MethodGet, "/machine", nil)
+			req.Header.Set(APIKeyHeader, tc.header)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusUnauthorized, w.Code)
+			require.Contains(t, buf.String(), `"msg":"request rejected"`, "the refusal is logged")
+			require.NotContains(t, buf.String(), tc.header, "the key that was sent is never logged")
+			require.NotContains(t, w.Body.String(), tc.header, "nor echoed in the response")
+		})
+	}
+}
