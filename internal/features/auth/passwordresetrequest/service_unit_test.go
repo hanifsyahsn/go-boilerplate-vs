@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/authsharedtest"
+
 	"github.com/golang/mock/gomock"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/passwordresetrequest/sqlc"
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
@@ -18,7 +20,6 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/mailer"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/requestid"
-	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/testhelper"
 	"github.com/stretchr/testify/require"
 )
 
@@ -122,7 +123,7 @@ func TestService_Request_U(t *testing.T) {
 			emailer := authshared.Emailer{Mailer: fake, AppBaseURL: "https://app.example.com",
 				Go: func(ctx context.Context, fn func(context.Context)) { fn(ctx) }}
 
-			svc := NewService(q, testhelper.FoldingQuerier(ctrl), store, tc.limiter, emailer)
+			svc := NewService(q, authsharedtest.FoldingQuerier(ctrl), store, tc.limiter, emailer)
 			svc.(*service).now = func() time.Time { return time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC) }
 			svc.Request(context.Background(), Request{Email: "  Jane@Example.com "})
 
@@ -195,7 +196,7 @@ func TestService_Request_AnswersBeforeWork_U(t *testing.T) {
 				}}
 
 			reqCtx, cancel := context.WithCancel(requestid.With(context.Background(), "req-1"))
-			NewService(q, testhelper.FoldingQuerier(ctrl), store, limiter, emailer).Request(reqCtx, Request{Email: "jane@example.com"})
+			NewService(q, authsharedtest.FoldingQuerier(ctrl), store, limiter, emailer).Request(reqCtx, Request{Email: "jane@example.com"})
 			cancel() // the request is over
 
 			// Answered: no limit taken, no lookup, no write, nothing sent (the

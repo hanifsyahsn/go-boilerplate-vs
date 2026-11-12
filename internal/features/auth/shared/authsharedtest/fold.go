@@ -1,4 +1,7 @@
-package testhelper
+// Package authsharedtest holds test helpers for the auth slices, next to the
+// auth-shared queries they fake (internal/shared/testhelper stays free of
+// feature packages).
+package authsharedtest
 
 import (
 	"context"

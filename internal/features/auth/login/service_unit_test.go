@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/authsharedtest"
+
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/login/sqlc"
@@ -24,7 +26,6 @@ import (
 	internalshareddto "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/dto"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/enum"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/password"
-	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/testhelper"
 	"github.com/stretchr/testify/require"
 )
 
@@ -142,7 +143,7 @@ func TestService_Login_U(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
-			sq := testhelper.FoldingQuerier(ctrl)
+			sq := authsharedtest.FoldingQuerier(ctrl)
 			m := jwttoken.NewMockM(ctrl)
 			tc.stub(q, sq, m)
 
@@ -221,7 +222,7 @@ func TestService_Login_FailureLimit_U(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
-			sq := testhelper.FoldingQuerier(ctrl)
+			sq := authsharedtest.FoldingQuerier(ctrl)
 			m := jwttoken.NewMockM(ctrl)
 			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour,
 				Limiters{Email: ratelimit.NewMemory(ratelimit.Rate{Burst: 2, Per: time.Minute}), IP: wideLimits().IP})
@@ -280,7 +281,7 @@ func TestService_Login_TimingEqualized_U(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
 			q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(tc.row, tc.readErr)
-			svc := NewService(q, testhelper.FoldingQuerier(ctrl), jwttoken.NewMockM(ctrl),
+			svc := NewService(q, authsharedtest.FoldingQuerier(ctrl), jwttoken.NewMockM(ctrl),
 				15*time.Minute, 24*time.Hour, 12*time.Hour, wideLimits())
 
 			var calls [][]string
@@ -460,7 +461,7 @@ func TestService_Login_LimiterOutcomes_U(t *testing.T) {
 
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
-			sq := testhelper.FoldingQuerier(ctrl)
+			sq := authsharedtest.FoldingQuerier(ctrl)
 			m := jwttoken.NewMockM(ctrl)
 			if tc.readsUser {
 				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil)
@@ -583,7 +584,7 @@ func TestService_Login_IPFailureLimit_U(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
-			sq := testhelper.FoldingQuerier(ctrl)
+			sq := authsharedtest.FoldingQuerier(ctrl)
 			m := jwttoken.NewMockM(ctrl)
 			svc := NewService(q, sq, m, 15*time.Minute, 24*time.Hour, 12*time.Hour, Limiters{
 				Email: ratelimit.NewMemory(ratelimit.Rate{Burst: tc.emailBurst, Per: time.Hour}),
@@ -648,7 +649,7 @@ func TestService_Login_ParallelGuesses_U(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			q := sqlc.NewMockQuerier(ctrl)
 			q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil).AnyTimes()
-			svc := NewService(q, testhelper.FoldingQuerier(ctrl), jwttoken.NewMockM(ctrl),
+			svc := NewService(q, authsharedtest.FoldingQuerier(ctrl), jwttoken.NewMockM(ctrl),
 				15*time.Minute, 24*time.Hour, 12*time.Hour, Limiters{
 					Email: ratelimit.NewMemory(ratelimit.Rate{Burst: tc.emailBurst, Per: time.Hour}),
 					IP:    ratelimit.NewMemory(ratelimit.Rate{Burst: tc.ipBurst, Per: time.Hour}),

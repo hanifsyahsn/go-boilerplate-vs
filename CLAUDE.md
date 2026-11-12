@@ -165,7 +165,8 @@ Windows".
   that domain needs (`note/shared`: the `NoteResource`, the include policy, the ownership helpers
   `GetOwnedNote` / `LockOwnedNote`, and the shared sqlc querier; `auth/shared`: cookies, reading the refresh
   token off a request, response shapes, the session revoke reasons, and the session queries — `StartSession`,
-  `InsertRefreshToken`, `RevokeSession`, `RevokeUserSessions`).
+  `InsertRefreshToken`, `RevokeSession`, `RevokeUserSessions`); `auth/shared/authsharedtest` = test helpers over
+  those queries (`FoldingQuerier`), kept out of `internal/shared/testhelper`, which imports no feature package.
 
 ### Slice structure
 
