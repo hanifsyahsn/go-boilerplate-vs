@@ -401,6 +401,7 @@ func TestService_Login_LimiterOutcomes_U(t *testing.T) {
 		email, ip     *stubLimiter
 		password      string
 		readsUser     bool
+		lookupErr     error         // GetUserForLogin fails with it (readsUser implied)
 		wantCode      apperror.Code // zero = success
 		wantErr       error
 		wantEmail     []string
@@ -422,6 +423,10 @@ func TestService_Login_LimiterOutcomes_U(t *testing.T) {
 			email: &stubLimiter{refuse: true}, ip: &stubLimiter{}, password: "Passw0rd!",
 			wantCode:  apperror.CodeTooManyRequests,
 			wantEmail: []string{"Take " + emailKey}, wantIP: []string{"Take " + ipKey, "Return " + ipKey}},
+		{name: "an account lookup that fails is a 500 and gives both tokens back (no password was tried)",
+			email: &stubLimiter{}, ip: &stubLimiter{}, password: "Passw0rd!", lookupErr: storeDown,
+			wantCode: apperror.CodeInternal, wantErr: storeDown,
+			wantEmail: []string{"Take " + emailKey, "Return " + emailKey}, wantIP: []string{"Take " + ipKey, "Return " + ipKey}},
 		{name: "a wrong password keeps both tokens",
 			email: &stubLimiter{}, ip: &stubLimiter{}, password: "wrong", readsUser: true,
 			wantCode:  apperror.CodeUnauthorized,
@@ -459,6 +464,9 @@ func TestService_Login_LimiterOutcomes_U(t *testing.T) {
 			m := jwttoken.NewMockM(ctrl)
 			if tc.readsUser {
 				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(active, nil)
+			}
+			if tc.lookupErr != nil {
+				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(sqlc.GetUserForLoginRow{}, tc.lookupErr)
 			}
 			if tc.wantCode.IsZero() {
 				m.EXPECT().CreateToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(jwttoken.Pair{}, nil)

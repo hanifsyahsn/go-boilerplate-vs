@@ -175,6 +175,10 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 			fmt.Errorf("GetUserForLogin() (%s): unknown email: %w", feature, err))
 	}
 	if err != nil {
+		// No password was tried: both tokens go back (one each, never a
+		// Reset), so retries during a DB failure don't lock the email out.
+		s.giveBack(ctx, "email", s.limits.Email.Return(context.WithoutCancel(ctx), emailKey))
+		s.giveBack(ctx, "ip", s.limits.IP.Return(context.WithoutCancel(ctx), ipKey))
 		return Result{}, apperror.New(apperror.CodeInternal, apperror.CodeInternal.SafeToThrow(),
 			fmt.Errorf("GetUserForLogin() (%s): %w", feature, err))
 	}

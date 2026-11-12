@@ -190,7 +190,8 @@ Added 2026-11-09 as the boilerplate's base security.
   their Unicode tables differ (glibc lowers U+A7DC to `ƛ`, Go doesn't), so one account got two counts
   (`TestService_Login_FoldedLikeTheLookup_I`). Login takes the IP's token first (it needs no email, so a login the IP cap refuses costs no query), then folds
   (an error is a 500 and gives the IP its token back), then the email's token; the fold and the lookup get the
-  same trimmed email. Every give-back (`Return` / `Reset`, in login and password change) runs on
+  same trimmed email. A failed account lookup (a DB error, not "no such email") gives both tokens back with `Return`: no password
+  was tried. Every give-back (`Return` / `Reset`, in login and password change) runs on
   `context.WithoutCancel(ctx)`: a client that hung up cancels the request ctx, Redis refuses a call on it, and the
   count would stay taken although no password was tried or the right one was (`TestService_Login_GiveBackOutlivesRequest_U`,
   `TestService_Change_ResetOutlivesRequest_U`). Every
