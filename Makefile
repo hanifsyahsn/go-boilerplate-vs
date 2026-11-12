@@ -29,7 +29,9 @@ coverage_report_view:
 # and build caches in named volumes. Unit tests only (-short): the integration tests would need the Docker socket.
 RACE_IMAGE ?= golang:1.26.11
 test_race:
-	MSYS_NO_PATHCONV=1 docker run --rm -v "$(CURDIR):/src" -w /src 		-v go_boilerplate_vs_gomod:/go/pkg/mod -v go_boilerplate_vs_gobuild:/root/.cache/go-build 		-e GOFLAGS=-buildvcs=false $(RACE_IMAGE) go test -race -short -count=1 $(PACKAGE)
+	MSYS_NO_PATHCONV=1 docker run --rm -v "$(CURDIR):/src" -w /src \
+		-v go_boilerplate_vs_gomod:/go/pkg/mod -v go_boilerplate_vs_gobuild:/root/.cache/go-build \
+		-e GOFLAGS=-buildvcs=false $(RACE_IMAGE) go test -race -short -count=1 $(PACKAGE)
 
 # Codegen
 SOURCE ?= .
