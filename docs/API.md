@@ -262,7 +262,7 @@ Supports `fields[users]`.
 | Attribute | Type | Required | Rules |
 | --- | --- | --- | --- |
 | `email` | string | yes | valid email, ≤ 255 |
-| `password` | string | yes | ≤ 72 bytes (no longer password can be registered) |
+| `password` | string | yes | ≤ 72 bytes: a longer one is a 422 here, whatever made the account (decision 0018) |
 | `trust_device` | boolean | no (default `false`) | `true` ("remember this device"): the session slides with no cap; otherwise it ends `UNTRUSTED_SESSION_DURATION` after the login |
 
 ```bash
@@ -401,7 +401,7 @@ curl -s -X POST "$BASE/api/auth/password-reset-requests" -H "$CT" \
 
 | Status | `code` | When |
 | --- | --- | --- |
-| 422 | `invalid_request_body` | `email` missing or not an email |
+| 422 | `unprocessable_entity` | `email` missing or not an email |
 | 429 | `too_many_requests` | the IP's budget (see *Rate limits*) |
 
 ### `POST /api/auth/password-resets`
@@ -418,7 +418,7 @@ curl -s -X POST "$BASE/api/auth/password-resets" -H "$CT" \
 | Status | `code` | When |
 | --- | --- | --- |
 | 422 | `invalid_token` | `This link is invalid or has expired. Ask for a new one.` — `source.pointer` `/data/attributes/token`: unknown, already used or expired |
-| 422 | `invalid_request_body` | `password` under 8 characters or over 72 bytes, `token` missing or over 64 characters |
+| 422 | `unprocessable_entity` | `password` under 8 characters or over 72 bytes, `token` missing or over 64 characters |
 | 429 | `too_many_requests` | the IP's budget (see *Rate limits*) |
 
 ```json
@@ -447,7 +447,7 @@ curl -s -X POST "$BASE/api/auth/password-changes" -H "$CT" -H "Authorization: Be
 | Status | `code` | When |
 | --- | --- | --- |
 | 422 | `wrong_password` | `The current password is incorrect.` — `source.pointer` `/data/attributes/current_password` |
-| 422 | `invalid_request_body` | a password missing, the new one under 8 characters, either over 72 bytes |
+| 422 | `unprocessable_entity` | a password missing, the new one under 8 characters, either over 72 bytes |
 | 429 | `too_many_requests` | `Too many wrong attempts. Please wait a few minutes and try again.` — 5 wrong current passwords / 15 min per account (then one more every 3 min), the right one too until a try comes back; with a `Retry-After` header (seconds) |
 
 ### `POST /api/auth/email-verifications`
@@ -464,7 +464,7 @@ curl -s -X POST "$BASE/api/auth/email-verifications" -H "$CT" \
 | Status | `code` | When |
 | --- | --- | --- |
 | 422 | `invalid_token` | `This link is invalid or has expired. Ask for a new one.` — `source.pointer` `/data/attributes/token` |
-| 422 | `invalid_request_body` | `token` missing or over 64 characters |
+| 422 | `unprocessable_entity` | `token` missing or over 64 characters |
 
 ### `POST /api/me/email-verification-requests`
 
@@ -663,14 +663,17 @@ A failed rule is **422 Unprocessable Entity**, one error per field, each with it
 ```
 
 **Password length is in bytes.** bcrypt reads at most 72 bytes. Plain letters, digits and symbols are one byte
-each, an accented letter (`é`) two and an emoji four — so 40 accented letters are 40 characters but 80 bytes,
-and are refused with `422` "Password is too long (at most 72 bytes). Accented letters and emoji count as more
-than one character, so use a shorter one." (`source.pointer` `/data/attributes/password`), on register and on
-login. A form can count `new TextEncoder().encode(pw).length` to warn early.
+each, an accented letter (`é`) two, a Chinese / Japanese character three, an emoji three or more (a combined one —
+skin tone, flag, family — is much longer) — so 40 accented letters are 40 characters but 80 bytes. Over the limit is a
+`422` "<Label> must be at most 72 bytes (accented letters, non-Latin scripts and emoji take more than one byte
+each)." on the field's own pointer: register, login and password reset → "Password", `/data/attributes/password`;
+password change → "Current password" (`/data/attributes/current_password`) or "New password"
+(`/data/attributes/password`). A form can count `new TextEncoder().encode(pw).length` to warn early.
 
 The `detail` names the field by its **label**, not its JSON name: `title` → "Title", `body` →
-"Content", `name` → "Name", `email` → "Email", `password` → "Password", `refresh_token` →
-"Refresh token", `trust_device` → "Trust device", `is_active` → "Active flag".
+"Content", `name` → "Name", `email` → "Email", `password` → "Password" (password change: "New password"),
+`current_password` → "Current password", `token` → "Token", `refresh_token` → "Refresh token", `trust_device` → "Trust device",
+`is_active` → "Active flag".
 
 ### Request documents
 

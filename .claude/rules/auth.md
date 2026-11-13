@@ -27,9 +27,10 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
 
 ### Auth
 
-- **Password length is in bytes** (decision 0018): register and login validate `maxbytes=72` (`validation.MaxBytes`),
-  never `max=72` — `max` counts characters, bcrypt refuses over 72 **bytes**, so 40 accented letters passed `max`
-  and register answered 500. Register's minimum stays `min=8` characters.
+- **Password length is in bytes** (decision 0018): register, login, password reset and password change (both
+  fields) validate `maxbytes=72` (`validation.MaxBytes`), never `max=72` — `max` counts characters, bcrypt
+  refuses over 72 **bytes**, so 40 accented letters passed `max` and register answered 500. A new password's
+  minimum stays `min=8` characters (register, reset, change).
 - Register takes a `users` document; role is always `user` (a `role` attribute is a 403); email unique
   ignoring case (`users_email_lower_key`, pq `23505` → 409). 201 with the account, no `Location` (a plain user
   has no URL of its own).

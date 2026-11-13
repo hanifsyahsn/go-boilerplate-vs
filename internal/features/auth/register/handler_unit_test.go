@@ -85,7 +85,7 @@ func TestHandler_Register_U(t *testing.T) {
 			body:     doc(`{"name":"Jane","email":"jane@example.com","password":"` + strings.Repeat("a", 73) + `"}`),
 			stub:     func(s *MockS) {},
 			wantCode: http.StatusUnprocessableEntity,
-			wantInBody: []string{"Password is too long (at most 72 bytes).",
+			wantInBody: []string{`"code":"unprocessable_entity"`, "Password must be at most 72 bytes (accented letters, non-Latin scripts and emoji take more than one byte each).",
 				`"pointer":"/data/attributes/password"`},
 		},
 		{
@@ -93,7 +93,7 @@ func TestHandler_Register_U(t *testing.T) {
 			body:     doc(`{"name":"Jane","email":"jane@example.com","password":"` + strings.Repeat("é", 40) + `"}`),
 			stub:     func(s *MockS) {},
 			wantCode: http.StatusUnprocessableEntity,
-			wantInBody: []string{"Password is too long (at most 72 bytes). Accented letters and emoji count as more than one character",
+			wantInBody: []string{`"code":"unprocessable_entity"`, "Password must be at most 72 bytes (accented letters, non-Latin scripts and emoji take more than one byte each).",
 				`"pointer":"/data/attributes/password"`},
 		},
 		{

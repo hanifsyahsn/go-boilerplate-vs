@@ -60,7 +60,7 @@ func TestHandler_Login_U(t *testing.T) {
 			body:     doc(`{"email":"jane@example.com","password":"` + strings.Repeat("é", 37) + `"}`),
 			stub:     func(s *MockS) {},
 			wantCode: http.StatusUnprocessableEntity,
-			wantInBody: []string{"Password is too long (at most 72 bytes).",
+			wantInBody: []string{`"code":"unprocessable_entity"`, "Password must be at most 72 bytes (accented letters, non-Latin scripts and emoji take more than one byte each).",
 				`"pointer":"/data/attributes/password"`},
 		},
 		{

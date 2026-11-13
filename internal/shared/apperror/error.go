@@ -264,8 +264,8 @@ func ValidatorError(err validator.ValidationErrors, obj interface{}) []Validatio
 		case "max":
 			detail = sizeBound(label, "at most", e.Param(), e.Kind())
 		case "maxbytes":
-			detail = fmt.Sprintf("%s is too long (at most %s bytes). Accented letters and emoji count as more than one "+
-				"character, so use a shorter one.", label, e.Param())
+			detail = fmt.Sprintf("%s must be at most %s bytes (accented letters, non-Latin scripts and emoji "+
+				"take more than one byte each).", label, e.Param())
 		case "email":
 			detail = fmt.Sprintf("%s must be a valid email address.", label)
 		case "len":

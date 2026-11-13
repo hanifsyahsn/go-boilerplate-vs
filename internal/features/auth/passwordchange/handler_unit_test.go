@@ -51,11 +51,19 @@ func TestHandler_Change_U(t *testing.T) {
 		},
 		{
 			name: "a new password under 8 characters is a 422 named New password", body: doc("Passw0rd!", "short"), stub: func(*MockS) {},
-			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"pointer":"/data/attributes/password"`, "New password"},
+			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"pointer":"/data/attributes/password"`,
+				"New password must be at least 8 characters long."},
 		},
 		{
 			name: "a current password over 72 bytes is a 422", body: doc(strings.Repeat("é", 37), "N3w-Passw0rd"), stub: func(*MockS) {},
-			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"pointer":"/data/attributes/current_password"`},
+			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"code":"unprocessable_entity"`, `"pointer":"/data/attributes/current_password"`,
+				"Current password must be at most 72 bytes (accented letters, non-Latin scripts and emoji take more than one byte each)."},
+		},
+		{
+			name: "a new password over 72 bytes (40 two-byte letters) is a 422 named New password, never reaching bcrypt's 500",
+			body: doc("Passw0rd!", strings.Repeat("é", 40)), stub: func(*MockS) {},
+			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"code":"unprocessable_entity"`, `"pointer":"/data/attributes/password"`,
+				"New password must be at most 72 bytes (accented letters, non-Latin scripts and emoji take more than one byte each)."},
 		},
 		{
 			name: "a service error is a 500", body: doc("Passw0rd!", "N3w-Passw0rd"),

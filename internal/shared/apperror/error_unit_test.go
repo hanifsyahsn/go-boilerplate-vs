@@ -382,8 +382,8 @@ func TestValidatorError(t *testing.T) {
 	assert.Equal(t, "Tags must not contain duplicates.", byField["Tags"].Detail)
 	assert.Equal(t, "IDs must contain at least 1 item(s).", byField["IDs"].Detail)
 	assert.Equal(t, "Refs must contain at most 1 item(s).", byField["Refs"].Detail)
-	assert.Equal(t, "Secret is too long (at most 4 bytes). Accented letters and emoji count as more than one character, "+
-		"so use a shorter one.", byField["Secret"].Detail)
+	assert.Equal(t, "Secret must be at most 4 bytes (accented letters, non-Latin scripts and emoji take more than one byte each).",
+		byField["Secret"].Detail, "neutral: true of any UTF-8 field, not only a password")
 	assert.Equal(t, "/Name", byField["Name"].Pointer)
 }
 

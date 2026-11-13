@@ -48,9 +48,9 @@ func TestHandler_Reset_U(t *testing.T) {
 				"This link is invalid or has expired. Ask for a new one.", `"pointer":"/data/attributes/token"`},
 		},
 		{
-			name: "a password of 73 bytes (37 two-byte letters) is a 422 before the service",
-			body: doc("tok", strings.Repeat("é", 36)+"ab"), stub: func(*MockS) {},
-			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"pointer":"/data/attributes/password"`},
+			name: "a password of 73 bytes (36 two-byte letters + 1) is a 422 before the service",
+			body: doc("tok", strings.Repeat("é", 36)+"a"), stub: func(*MockS) {},
+			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"code":"unprocessable_entity"`, `"pointer":"/data/attributes/password"`, "Password must be at most 72 bytes (accented letters, non-Latin scripts and emoji take more than one byte each)."},
 		},
 		{
 			name: "a short password is a 422", body: doc("tok", "short"), stub: func(*MockS) {},
