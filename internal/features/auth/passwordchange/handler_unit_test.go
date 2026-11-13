@@ -66,6 +66,24 @@ func TestHandler_Change_U(t *testing.T) {
 				"New password must be at most 72 bytes (accented letters, non-Latin scripts and emoji take more than one byte each)."},
 		},
 		{
+			name: "a decomposed new password of 108 bytes as sent (72 in NFC) reaches the service: the limit counts the NFC form",
+			body: doc("Passw0rd!", strings.Repeat("e\u0301", 36)),
+			stub: func(s *MockS) {
+				s.EXPECT().Change(gomock.Any(), gomock.Any(), gomock.Any(),
+					Request{CurrentPassword: "Passw0rd!", Password: strings.Repeat("e\u0301", 36)}).Return(nil)
+			},
+			wantCode: http.StatusNoContent,
+		},
+		{
+			name: "a current password of 20 क़ (60 sent, 120 in NFC) reaches the service: a hash made before NFC can still be checked",
+			body: doc(strings.Repeat("\u0958", 20), "N3w-Passw0rd"),
+			stub: func(s *MockS) {
+				s.EXPECT().Change(gomock.Any(), gomock.Any(), gomock.Any(),
+					Request{CurrentPassword: strings.Repeat("\u0958", 20), Password: "N3w-Passw0rd"}).Return(nil)
+			},
+			wantCode: http.StatusNoContent,
+		},
+		{
 			name: "a service error is a 500", body: doc("Passw0rd!", "N3w-Passw0rd"),
 			stub: func(s *MockS) {
 				s.EXPECT().Change(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("boom"))

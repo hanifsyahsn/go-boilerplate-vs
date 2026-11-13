@@ -10,7 +10,7 @@ What a derivative follows from the boilerplate today. Details live in `CLAUDE.md
 | HTTP | JSON:API 1.1 on both sides: media type middleware (415 / 406), `BindResource`, `ParseQuery`, JSON:API errors | `rules/jsonapi.md` |
 | Router | `server.Handlers` struct; graceful shutdown | `CLAUDE.md` |
 | Logging | `log/slog`, `request_id` + `user_id` on every line, `AccessLog`, detached goroutines | `rules/logging.md` |
-| Auth (local users) | bcrypt; ES256 JWT with `typ`; DB-backed refresh rotation + reuse detection; trusted vs untrusted sessions; `password.CheckOrWaste` | `rules/auth.md` |
+| Auth (local users) | bcrypt; ES256 JWT with `typ`; DB-backed refresh rotation + reuse detection; trusted vs untrusted sessions; `password.VerifyOrWaste` | `rules/auth.md` |
 | Security | Per-IP limits on register / login, per-email login-failure limit, `TRUSTED_PROXIES` (to be reshaped by 0003) | `rules/auth.md` |
 | Runtime | gin release mode unless `ENVIRONMENT=development`; container uid 10001; pagination `MaxPage` | `CLAUDE.md` *Gotchas* |
 | Toolchain | go.mod `toolchain` + patch-tagged Dockerfile builder, bumped together | `CLAUDE.md` *Gotchas* |

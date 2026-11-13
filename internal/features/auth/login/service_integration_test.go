@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,8 +15,10 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/password"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/testhelper"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestService_Login_I(t *testing.T) {
@@ -153,6 +156,106 @@ func TestService_Login_FoldedLikeTheLookup_I(t *testing.T) {
 				}
 				require.Equal(t, want, appErr.Code, "attempt %d (%q)", i+1, email)
 			}
+		})
+	}
+}
+
+// TestService_Login_NFC_I pins decision 0019 against Postgres: a password
+// signs in whichever Unicode form the device sends, and a hash made before
+// passwords were normalized (bcrypt of the bytes as sent) is upgraded on its
+// first login, after which the other form works too. The upgrade never
+// overwrites a hash that changed since it was read.
+func TestService_Login_NFC_I(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	maker := jwttoken.NewTokenMakerES256(key, &key.PublicKey, "client", "issuer")
+	login := func(plain string) error {
+		_, err := NewService(sqlc.New(testDB), authsharedsqlc.New(testDB), maker, time.Minute, time.Hour, time.Hour,
+			Limiters{
+				Email: ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: time.Minute}),
+				IP:    ratelimit.NewMemory(ratelimit.Rate{Burst: 5, Per: time.Minute}),
+			}).Login(context.Background(), Request{Email: "jane@example.com", Password: plain}, Client{IP: "203.0.113.7"})
+		return err
+	}
+	const (
+		composed   = "caf\u00e9-Passw0rd"
+		decomposed = "cafe\u0301-Passw0rd"
+	)
+
+	// setLegacy stores bcrypt of plain's bytes as sent: a hash made before 0019.
+	setLegacy := func(t *testing.T, userID int64, plain string) {
+		t.Helper()
+		b, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.MinCost)
+		require.NoError(t, err)
+		_, err = testDB.Exec(`UPDATE users SET password_hash = $1 WHERE id = $2`, string(b), userID)
+		require.NoError(t, err)
+	}
+
+	testCases := []struct {
+		name string
+		run  func(t *testing.T, userID int64)
+	}{
+		{name: "a legacy hash of the decomposed form: signs in, is rehashed, then the composed form signs in too",
+			run: func(t *testing.T, userID int64) {
+				setLegacy(t, userID, decomposed)
+				before := testhelper.GetUser(t, testDB, userID).PasswordHash
+				var appErr *apperror.AppError
+				require.ErrorAs(t, login(composed), &appErr, "before the upgrade the other form can't match")
+				require.Equal(t, apperror.CodeUnauthorized, appErr.Code)
+				require.NoError(t, login(decomposed))
+				after := testhelper.GetUser(t, testDB, userID).PasswordHash
+				require.NotEqual(t, before, after, "the hash was replaced")
+				require.Equal(t, password.Match{OK: true}, password.Verify(after, composed))
+				require.NoError(t, login(composed), "another device's form now signs in")
+				require.Equal(t, after, testhelper.GetUser(t, testDB, userID).PasswordHash, "an NFC hash isn't rewritten")
+			}},
+		{name: "an NFC hash (made by password.Hash from the decomposed form) signs in from both forms and is never rewritten",
+			run: func(t *testing.T, userID int64) {
+				hash, err := password.Hash(decomposed)
+				require.NoError(t, err)
+				_, err = testDB.Exec(`UPDATE users SET password_hash = $1 WHERE id = $2`, hash, userID)
+				require.NoError(t, err)
+				require.NoError(t, login(composed))
+				require.NoError(t, login(decomposed))
+				require.Equal(t, hash, testhelper.GetUser(t, testDB, userID).PasswordHash)
+			}},
+		{name: "a legacy password NFC makes longer than 72 bytes (20 क़: 60 sent, 120 in NFC) still signs in, and is left as it is",
+			run: func(t *testing.T, userID int64) {
+				qa := strings.Repeat("\u0958", 20)
+				setLegacy(t, userID, qa)
+				before := testhelper.GetUser(t, testDB, userID).PasswordHash
+				require.NoError(t, login(qa))
+				require.Equal(t, before, testhelper.GetUser(t, testDB, userID).PasswordHash, "it can't be rehashed: bcrypt would refuse it")
+			}},
+		{name: "a legacy 72-byte password plus one more character is wrong (bcrypt would read only the first 72 bytes)",
+			run: func(t *testing.T, userID int64) {
+				p72 := strings.Repeat("e\u0301", 24) // 72 bytes sent, 48 in NFC
+				setLegacy(t, userID, p72)
+				var appErr *apperror.AppError
+				require.ErrorAs(t, login(p72+"x"), &appErr)
+				require.Equal(t, apperror.CodeUnauthorized, appErr.Code)
+				require.NoError(t, login(p72), "the real password still works")
+			}},
+		{name: "RehashPassword doesn't overwrite a hash that changed since the login read it",
+			run: func(t *testing.T, userID int64) {
+				current := testhelper.GetUser(t, testDB, userID).PasswordHash
+				n, err := sqlc.New(testDB).RehashPassword(context.Background(),
+					sqlc.RehashPasswordParams{ID: userID, NewHash: "$2a$10$new", OldHash: "$2a$10$stale"})
+				require.NoError(t, err)
+				require.Zero(t, n)
+				require.Equal(t, current, testhelper.GetUser(t, testDB, userID).PasswordHash)
+			}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer testhelper.Truncate(t, testDB)
+			userID := testhelper.SeedUser(t, testDB, testhelper.SeedUserParams{Email: "jane@example.com", Password: decomposed})
+			tc.run(t, userID)
 		})
 	}
 }

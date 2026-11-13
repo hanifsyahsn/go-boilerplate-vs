@@ -7,5 +7,5 @@ package register
 type Request struct {
 	Name     string `json:"name" binding:"required,notblank,max=255" label:"Name"`
 	Email    string `json:"email" binding:"required,email,max=255" label:"Email"`
-	Password string `json:"password" binding:"required,min=8,maxbytes=72" label:"Password"`
+	Password string `json:"password" binding:"required,min=8,nfcmaxbytes=72" label:"Password"`
 }

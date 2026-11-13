@@ -80,11 +80,13 @@ type service struct {
 	// untrustedSessionDuration caps a login without trust_device.
 	untrustedSessionDuration time.Duration
 	limits                   Limiters
-	// checkPassword is password.CheckOrWaste; a seam for the test that pins
-	// the unknown-email path still spends a bcrypt comparison.
-	checkPassword func(hash, plain string) bool
-	newFamilyID   func() uuid.UUID
-	now           func() time.Time
+	// verifyPassword is password.VerifyOrWaste; a seam for the test that pins
+	// the unknown-email path still spends the bcrypt comparisons.
+	verifyPassword func(hash, plain string) password.Match
+	// hashPassword is password.Hash (a seam for the failed-rehash test).
+	hashPassword func(plain string) (string, error)
+	newFamilyID  func() uuid.UUID
+	now          func() time.Time
 }
 
 func NewService(
@@ -103,7 +105,8 @@ func NewService(
 
 		untrustedSessionDuration: untrustedSessionDuration,
 		limits:                   limits,
-		checkPassword:            password.CheckOrWaste,
+		verifyPassword:           password.VerifyOrWaste,
+		hashPassword:             password.Hash,
 		newFamilyID:              uuid.New,
 		now:                      time.Now,
 	}
@@ -170,7 +173,7 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 		// Spend a bcrypt comparison anyway, so an unknown email answers in
 		// about the time a wrong password does and timing doesn't reveal
 		// which emails have an account.
-		s.checkPassword("", req.Password)
+		s.verifyPassword("", req.Password)
 		return Result{}, apperror.New(apperror.CodeUnauthorized, invalidCredentialsMessage,
 			fmt.Errorf("GetUserForLogin() (%s): unknown email: %w", feature, err))
 	}
@@ -183,7 +186,8 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 			fmt.Errorf("GetUserForLogin() (%s): %w", feature, err))
 	}
 
-	if !s.checkPassword(user.PasswordHash, req.Password) {
+	match := s.verifyPassword(user.PasswordHash, req.Password)
+	if !match.OK {
 		return Result{}, apperror.New(apperror.CodeUnauthorized, invalidCredentialsMessage,
 			fmt.Errorf("(%s): wrong password for user %d", feature, user.ID))
 	}
@@ -200,6 +204,10 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 	if !user.IsActive {
 		return Result{}, apperror.New(apperror.CodeUnauthorized, "Your account is no longer active.",
 			fmt.Errorf("(%s): user %d is not active", feature, user.ID))
+	}
+
+	if match.Legacy {
+		s.rehash(ctx, user.ID, user.PasswordHash, req.Password)
 	}
 
 	refreshTokenDuration := s.refreshTokenDuration
@@ -241,6 +249,28 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 		User:   authshared.NewUserResource(user.ID, user.Name, user.Email, user.Role),
 		Tokens: tokens,
 	}, nil
+}
+
+// rehash stores the NFC hash of a password that matched only as sent — a hash
+// made before decision 0019 — so the next login from a device that sends the
+// other Unicode form works. Only for an active account, and only if the stored
+// hash is still oldHash (a password changed in between, or a parallel login
+// that rehashed first, is never overwritten: 0 rows, logged at info). It runs on context.WithoutCancel: a client that hung
+// up after a right password still gets its hash upgraded. A failure is only
+// logged: the login itself is right, and the next one tries again.
+func (s *service) rehash(ctx context.Context, userID int64, oldHash, plain string) {
+	newHash, err := s.hashPassword(plain)
+	var n int64
+	if err == nil {
+		n, err = s.querier.RehashPassword(context.WithoutCancel(ctx),
+			sqlc.RehashPasswordParams{ID: userID, NewHash: newHash, OldHash: oldHash})
+	}
+	switch {
+	case err != nil:
+		slog.WarnContext(ctx, "login: rehash password failed", "feature", feature, "target_user_id", userID, "err", err)
+	case n == 0:
+		slog.InfoContext(ctx, "login: rehash skipped, stored hash no longer the one checked", "feature", feature, "target_user_id", userID)
+	}
 }
 
 // giveBack logs a failed Reset / Return of a failure budget; it never fails

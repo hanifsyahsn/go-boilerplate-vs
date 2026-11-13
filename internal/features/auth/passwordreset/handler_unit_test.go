@@ -53,6 +53,12 @@ func TestHandler_Reset_U(t *testing.T) {
 			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"code":"unprocessable_entity"`, `"pointer":"/data/attributes/password"`, "Password must be at most 72 bytes (accented letters, non-Latin scripts and emoji take more than one byte each)."},
 		},
 		{
+			name: "13 क़ (39 bytes sent, 78 in NFC) are a 422, never reaching bcrypt's 500",
+			body: doc("tok", strings.Repeat("\u0958", 13)), stub: func(*MockS) {},
+			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"code":"unprocessable_entity"`,
+				`"pointer":"/data/attributes/password"`, "Password must be at most 72 bytes"},
+		},
+		{
 			name: "a short password is a 422", body: doc("tok", "short"), stub: func(*MockS) {},
 			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"pointer":"/data/attributes/password"`},
 		},

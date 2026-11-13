@@ -319,6 +319,8 @@ type testPayload struct {
 	IDs      []int64  `validate:"min=1"`
 	Refs     []int64  `validate:"max=1"`
 	Secret   string   `validate:"maxbytes=4"`
+	Pass     string   `validate:"nfcmaxbytes=4"`
+	Current  string   `validate:"checkmaxbytes=4"`
 }
 
 func registerCustomValidators(v *validator.Validate) {
@@ -329,6 +331,12 @@ func registerCustomValidators(v *validator.Validate) {
 		return false // always fail, we just need the tag to trigger
 	})
 	_ = v.RegisterValidation("maxbytes", func(fl validator.FieldLevel) bool {
+		return false // always fail, we just need the tag to trigger
+	})
+	_ = v.RegisterValidation("nfcmaxbytes", func(fl validator.FieldLevel) bool {
+		return false // always fail, we just need the tag to trigger
+	})
+	_ = v.RegisterValidation("checkmaxbytes", func(fl validator.FieldLevel) bool {
 		return false // always fail, we just need the tag to trigger
 	})
 }
@@ -352,6 +360,8 @@ func TestValidatorError(t *testing.T) {
 		IDs:      []int64{},          // min=1 on a slice -> fails, counted in items
 		Refs:     []int64{1, 2},      // max=1 on a slice -> fails, counted in items
 		Secret:   "ééé",              // maxbytes=4 -> fails
+		Pass:     "ééé",              // nfcmaxbytes=4 -> fails
+		Current:  "ééé",              // checkmaxbytes=4 -> fails
 	}
 
 	err := v.Struct(payload)
@@ -384,6 +394,10 @@ func TestValidatorError(t *testing.T) {
 	assert.Equal(t, "Refs must contain at most 1 item(s).", byField["Refs"].Detail)
 	assert.Equal(t, "Secret must be at most 4 bytes (accented letters, non-Latin scripts and emoji take more than one byte each).",
 		byField["Secret"].Detail, "neutral: true of any UTF-8 field, not only a password")
+	assert.Equal(t, "Pass must be at most 4 bytes (accented letters, non-Latin scripts and emoji take more than one byte each).",
+		byField["Pass"].Detail, "nfcmaxbytes reads like maxbytes: the client needn't know about NFC")
+	assert.Equal(t, "Current must be at most 4 bytes (accented letters, non-Latin scripts and emoji take more than one byte each).",
+		byField["Current"].Detail, "checkmaxbytes too")
 	assert.Equal(t, "/Name", byField["Name"].Pointer)
 }
 

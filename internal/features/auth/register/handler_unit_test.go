@@ -89,6 +89,23 @@ func TestHandler_Register_U(t *testing.T) {
 				`"pointer":"/data/attributes/password"`},
 		},
 		{
+			name: "36 decomposed é (108 bytes as a Mac sends them, 72 in NFC) reach the service: the limit counts the NFC form",
+			body: doc(`{"name":"Jane","email":"jane@example.com","password":"` + strings.Repeat("e\u0301", 36) + `"}`),
+			stub: func(s *MockS) {
+				s.EXPECT().Register(gomock.Any(), Request{Name: "Jane", Email: "jane@example.com", Password: strings.Repeat("e\u0301", 36)}).
+					Return(authshared.UserResource{ID: "1", Name: "Jane", Email: "jane@example.com", Role: "user"}, nil)
+			},
+			wantCode: http.StatusCreated,
+		},
+		{
+			name:     "13 क़ (39 bytes as sent, 78 in NFC) are a 422, never reaching bcrypt's 500",
+			body:     doc(`{"name":"Jane","email":"jane@example.com","password":"` + strings.Repeat("\u0958", 13) + `"}`),
+			stub:     func(s *MockS) {},
+			wantCode: http.StatusUnprocessableEntity,
+			wantInBody: []string{`"code":"unprocessable_entity"`, "Password must be at most 72 bytes",
+				`"pointer":"/data/attributes/password"`},
+		},
+		{
 			name:     "40 accented letters (40 characters, 80 bytes) are a 422, never reaching bcrypt's 500",
 			body:     doc(`{"name":"Jane","email":"jane@example.com","password":"` + strings.Repeat("é", 40) + `"}`),
 			stub:     func(s *MockS) {},

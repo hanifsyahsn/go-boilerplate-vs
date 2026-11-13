@@ -27,10 +27,22 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
 
 ### Auth
 
-- **Password length is in bytes** (decision 0018): register, login, password reset and password change (both
-  fields) validate `maxbytes=72` (`validation.MaxBytes`), never `max=72` — `max` counts characters, bcrypt
-  refuses over 72 **bytes**, so 40 accented letters passed `max` and register answered 500. A new password's
-  minimum stays `min=8` characters (register, reset, change).
+- **Password length is in bytes** (decision 0018), never `max=72` — `max` counts characters, bcrypt refuses over
+  72 **bytes**, so 40 accented letters passed `max` and register answered 500. A **new** password (register,
+  reset, change's `password`) validates `nfcmaxbytes=72` (`validation.NFCMaxBytes`: bytes of the NFC form, the one
+  hashed); a password being **checked** (login, change's `current_password`) `checkmaxbytes=72`
+  (`validation.CheckMaxBytes`: fits as sent **or** in NFC — the two forms `Verify` compares). A new password's
+  minimum stays `min=8` characters as sent.
+- **Passwords are NFC** (decision 0019): only through the `password` package, never bcrypt directly. `Hash` and
+  `Verify` normalize (`password.Normalize`); `Verify` falls back to the bytes as sent for a hash made before 0019
+  (`Match.Legacy`, only when the NFC form fits bcrypt), and login then rehashes it — after the active check, on
+  `context.WithoutCancel` (`RehashPassword`, compare-and-set on the old hash: 0 rows → info `login: rehash
+  skipped, stored hash no longer the one checked`; a failure → warn `login: rehash password failed`, both with
+  `target_user_id`). **A form over 72 bytes never matches** (`password.MaxBytes`): `CompareHashAndPassword`
+  doesn't check the length, it reads the first 72 bytes, so a 72-byte password plus anything would pass. `VerifyOrWaste` spends a second comparison for non-NFC input on an
+  unknown email too (timing). Tests: `TestVerify_NFC_U`, `TestVerifyOrWaste_Comparisons_U`,
+  `TestService_Login_LegacyRehash_U`, `TestService_Login_NFC_I`, `TestNFCMaxBytes_U`, `TestCheckMaxBytes_U`,
+  `TestFitsNFC_U`, `TestService_Change_I`.
 - Register takes a `users` document; role is always `user` (a `role` attribute is a 403); email unique
   ignoring case (`users_email_lower_key`, pq `23505` → 409). 201 with the account, no `Location` (a plain user
   has no URL of its own).
@@ -115,12 +127,12 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   failure (`password reset: recipient limit failed` / `lookup failed` / `issue token failed`) is only logged,
   never with the address; there is no 500. Tests: `TestService_Request_AnswersBeforeWork_U`,
   `TestService_Request_BackgroundGroup_I`.
-  `POST /api/auth/password-resets` (`password-resets`, `token` + `password` `min=8,maxbytes=72`): in one tx
+  `POST /api/auth/password-resets` (`password-resets`, `token` + `password` `min=8,nfcmaxbytes=72`): in one tx
   `ConsumeAuthToken` (none → 422 `invalid_token` on `/data/attributes/token`, `authshared.CodeInvalidToken`), new
   hash + `email_verified_at` (`SetPasswordAfterReset`), `RevokeUserSessions(password_reset)`; bcrypt runs before
   the tx; after commit the "password changed" notice → 204.
 - **Change password** (slice `auth/passwordchange`, authed, `POST /api/auth/password-changes`, `password-changes`:
-  `current_password` `maxbytes=72`, `password` `min=8,maxbytes=72`): the per-user failure limiter (5 / 15 min, key
+  `current_password` `checkmaxbytes=72`, `password` `min=8,nfcmaxbytes=72`): the per-user failure limiter (5 / 15 min, key
   `pwchange:` + user id) is **taken first** (refused → 429 "Too many wrong attempts…", error → 500), a wrong
   current password → 422 `wrong_password` on `/data/attributes/current_password`, the right one `Reset`s the count
   (a failed reset only logged); then in one tx the new hash + `RevokeUserSessions(password_changed, keep = the
@@ -236,6 +248,6 @@ limiter's wait (`WithRetryAfter(d.RetryAfter)` → `Retry-After`). Known trade-o
   history) is the security scan; it runs all four and fails at the end if any failed, and must stay green (see
   *Gotchas* in CLAUDE.md for `#nosec` / `nosemgrep`). `.semgrep/gin.yml` bans `gin.Default()` (trusts every
   proxy) and `context.WithoutCancel` on a `*gin.Context`. A convention worth enforcing gets a rule there.
-- **Login timing**: an unknown email still spends one bcrypt comparison (`password.CheckOrWaste("", …)` against a
-  dummy hash), so the response time doesn't reveal which emails have an account; `password.Check` never matches
-  an empty hash. `TestService_Login_TimingEqualized_U` pins it.
+- **Login timing**: an unknown email still spends the bcrypt comparisons a wrong password would
+  (`password.VerifyOrWaste("", …)` against a dummy hash: one, two for non-NFC input), so the response time doesn't
+  reveal which emails have an account; `password.Verify` never matches an empty hash. `TestService_Login_TimingEqualized_U` pins it.

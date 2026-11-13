@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/password"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -46,7 +47,10 @@ func SeedUser(t *testing.T, db *sql.DB, p SeedUserParams) int64 {
 		isActive = *p.IsActive
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(p.Password), bcrypt.MinCost)
+	// What password.Hash stores (the NFC form, decision 0019), at bcrypt's
+	// lowest cost so seeding stays fast. A test that needs a hash made before
+	// 0019 writes it itself.
+	hash, err := password.HashCost(p.Password, bcrypt.MinCost)
 	require.NoError(t, err)
 
 	var id int64
@@ -54,7 +58,7 @@ func SeedUser(t *testing.T, db *sql.DB, p SeedUserParams) int64 {
 		INSERT INTO users (name, email, password_hash, role, is_active)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id
-	`, p.Name, p.Email, string(hash), p.Role, isActive).Scan(&id)
+	`, p.Name, p.Email, hash, p.Role, isActive).Scan(&id)
 	require.NoError(t, err, "seed user")
 
 	return id

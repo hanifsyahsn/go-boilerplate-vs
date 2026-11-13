@@ -259,7 +259,7 @@ func TestService_Login_FailureLimit_U(t *testing.T) {
 
 // TestService_Login_TimingEqualized_U pins that every login with a known-format
 // request spends one bcrypt comparison, an unknown email included (against a
-// dummy hash via password.CheckOrWaste), so response time doesn't reveal which
+// dummy hash via password.VerifyOrWaste), so response time doesn't reveal which
 // emails have an account.
 func TestService_Login_TimingEqualized_U(t *testing.T) {
 	user := sqlc.GetUserForLoginRow{ID: 1, Email: "jane@example.com", PasswordHash: "$2a$10$stored", IsActive: true}
@@ -270,7 +270,7 @@ func TestService_Login_TimingEqualized_U(t *testing.T) {
 		readErr   error
 		wantCheck []string // the (hash, plain) the one comparison got
 	}{
-		{name: "an unknown email still runs one comparison, with no hash (CheckOrWaste spends it on the dummy)",
+		{name: "an unknown email still runs one comparison, with no hash (VerifyOrWaste spends it on the dummy)",
 			readErr: sql.ErrNoRows, wantCheck: []string{"", "guess"}},
 		{name: "a known email compares against its stored hash",
 			row: user, wantCheck: []string{"$2a$10$stored", "guess"}},
@@ -285,9 +285,9 @@ func TestService_Login_TimingEqualized_U(t *testing.T) {
 				15*time.Minute, 24*time.Hour, 12*time.Hour, wideLimits())
 
 			var calls [][]string
-			svc.(*service).checkPassword = func(hash, plain string) bool {
+			svc.(*service).verifyPassword = func(hash, plain string) password.Match {
 				calls = append(calls, []string{hash, plain})
-				return false
+				return password.Match{}
 			}
 
 			_, err := svc.Login(context.Background(), Request{Email: "jane@example.com", Password: "guess"}, testClient)
@@ -665,10 +665,10 @@ func TestService_Login_ParallelGuesses_U(t *testing.T) {
 			// through are all "in bcrypt" while the others decide.
 			var compared, tooMany, unauthorized atomic.Int32
 			release := make(chan struct{})
-			svc.(*service).checkPassword = func(string, string) bool {
+			svc.(*service).verifyPassword = func(string, string) password.Match {
 				compared.Add(1)
 				<-release
-				return false
+				return password.Match{}
 			}
 
 			var wg sync.WaitGroup

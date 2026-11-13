@@ -26,6 +26,7 @@ Statuses: **built** = implemented in the boilerplate · **accepted** = agreed, n
 | [0016](0016-piece-done-size-review-stop.md) | One piece: done checklist, size, and when code review stops | built |
 | [0017](0017-race-detector-in-docker.md) | Race detector: `go test -race` inside Docker (`make test_race`) | built |
 | [0018](0018-password-limit-in-bytes.md) | Password length is validated in bytes (`maxbytes=72`), bcrypt's limit | built |
+| [0019](0019-password-nfc.md) | Passwords are hashed and compared in Unicode NFC (`nfcmaxbytes=72`, legacy hashes rehashed at login) | built |
 
 The list of derivatives, where each decision came from and the adoption tracker are kept out of this public repo,
 in a gitignored `DERIVATIVES.local.md` next to this file on the maintainer's machine.

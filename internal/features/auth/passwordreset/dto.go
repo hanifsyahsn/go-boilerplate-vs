@@ -8,5 +8,5 @@ const ResourceType = "password-resets"
 // limit).
 type Request struct {
 	Token    string `json:"token" binding:"required,max=64" label:"Token"`
-	Password string `json:"password" binding:"required,min=8,maxbytes=72" label:"Password"`
+	Password string `json:"password" binding:"required,min=8,nfcmaxbytes=72" label:"Password"`
 }

@@ -153,8 +153,9 @@ Windows".
 - `internal/shared` — cross-cutting: `apperror` (typed error → HTTP status, with a JSON:API `Source`),
   `jsonapi` (documents, serializer, sparse fieldsets, links, error objects, `?include` policy, the query
   parser), `handlerutil` (`ParseQuery` / `BindResource` / `ParamID` / `WriteData` / `WriteMeta` /
-  `WriteError`), `validation` (`notblank`, `rfc3339`, `maxbytes`, `RegisterGinValidators`), `pagination`, `password`
-  (bcrypt), `enum` (`Role`: `user` / `admin`), `requestid` (`Header`, `Key`, `With` / `FromContext` / `Detach`),
+  `WriteError`), `validation` (`notblank`, `rfc3339`, `maxbytes`, `nfcmaxbytes`, `checkmaxbytes`,
+  `RegisterGinValidators`), `pagination`,
+  `password` (bcrypt on the NFC form, decision 0019), `enum` (`Role`: `user` / `admin`), `requestid` (`Header`, `Key`, `With` / `FromContext` / `Detach`),
   `dto`, `constant` (context keys, cookie names), `onetimetoken` (email-link tokens: `New` → plain + SHA-256 hash),
   `utility` (`SafeGo` / `SafeGoContext`, `Group` + `GoFunc` for
   background work main waits for at shutdown, …), `testhelper`.

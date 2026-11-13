@@ -11,6 +11,10 @@ import (
 type Querier interface {
 	// The account behind a login attempt, matched on email ignoring case.
 	GetUserForLogin(ctx context.Context, email string) (GetUserForLoginRow, error)
+	// Replaces a hash made before passwords were NFC-normalized (decision 0019)
+	// with the NFC one, only if it is still the hash the login checked: a password
+	// changed in between is never overwritten (0 rows).
+	RehashPassword(ctx context.Context, arg RehashPasswordParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

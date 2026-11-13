@@ -15,7 +15,7 @@ var (
 	registerErr  error
 )
 
-// RegisterGinValidators wires the custom tags (notblank, rfc3339, maxbytes) into gin's
+// RegisterGinValidators wires the custom tags (notblank, rfc3339, maxbytes, nfcmaxbytes, checkmaxbytes) into gin's
 // binding validator and makes validation errors name fields by their json
 // tag. Called once from main; safe to call again (handler tests do).
 func RegisterGinValidators() error {
@@ -44,6 +44,14 @@ func RegisterGinValidators() error {
 		}
 		if err := v.RegisterValidation("maxbytes", MaxBytes); err != nil {
 			registerErr = fmt.Errorf("RegisterValidation(maxbytes): %w", err)
+			return
+		}
+		if err := v.RegisterValidation("nfcmaxbytes", NFCMaxBytes); err != nil {
+			registerErr = fmt.Errorf("RegisterValidation(nfcmaxbytes): %w", err)
+			return
+		}
+		if err := v.RegisterValidation("checkmaxbytes", CheckMaxBytes); err != nil {
+			registerErr = fmt.Errorf("RegisterValidation(checkmaxbytes): %w", err)
 		}
 	})
 	return registerErr

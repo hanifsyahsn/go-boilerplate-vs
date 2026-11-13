@@ -15,6 +15,8 @@ Status: built (2026-11-11)
 3. Every request that carries a password uses it: register, login, password reset and password change (0007;
    change checks both the current and the new one). The minimum stays a character count (`min=8`).
 4. Any other limit that is really in bytes uses `maxbytes=N` too.
+5. Since 0019 (2026-11-13) a new password counts its **NFC form** (`nfcmaxbytes=72`) and a checked one (login,
+   current password) fits as sent or in NFC (`checkmaxbytes=72`); same rule, same 422 text.
 
 ## Why
 `max=72` let 40 accented letters through (40 characters, 80 bytes); `bcrypt.GenerateFromPassword` then refused

@@ -38,3 +38,27 @@ func (q *Queries) GetUserForLogin(ctx context.Context, email string) (GetUserFor
 	)
 	return i, err
 }
+
+const rehashPassword = `-- name: RehashPassword :execrows
+UPDATE users
+SET password_hash = $1
+WHERE id = $2
+  AND password_hash = $3
+`
+
+type RehashPasswordParams struct {
+	NewHash string `json:"new_hash"`
+	ID      int64  `json:"id"`
+	OldHash string `json:"old_hash"`
+}
+
+// Replaces a hash made before passwords were NFC-normalized (decision 0019)
+// with the NFC one, only if it is still the hash the login checked: a password
+// changed in between is never overwritten (0 rows).
+func (q *Queries) RehashPassword(ctx context.Context, arg RehashPasswordParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, rehashPassword, arg.NewHash, arg.ID, arg.OldHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

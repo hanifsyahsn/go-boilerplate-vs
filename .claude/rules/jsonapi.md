@@ -70,7 +70,9 @@ The whole API is JSON:API 1.1; keep it that way in a new slice.
   `Request` doesn't declare (read-only, unknown) → 403; a wrong JSON type → 422; a failed rule → 422 per field.
   A limit that is really in bytes (bcrypt's 72, a column in bytes) uses the custom `maxbytes=N`, never `max=N`
   (which counts characters). `maxbytes` is for string fields (or `*string`); on any other kind it fails every
-  value.
+  value. A password field uses `nfcmaxbytes=N` instead (a new password: the bytes of its NFC form, the one
+  that is hashed) or `checkmaxbytes=N` (one checked against a stored hash: fits as sent or in NFC) — decision
+  0019; same 422 text.
   Every error carries `source.pointer` (`/data/attributes/title`).
 - **Updates are `PATCH` and partial**: `Request` fields are pointers, nil keeps the current value (`note/update`
   → `COALESCE(sqlc.narg(...), col)`; `admin/user` with nothing to change just reads the user back).

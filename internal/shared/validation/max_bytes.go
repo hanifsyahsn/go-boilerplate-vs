@@ -1,9 +1,6 @@
 package validation
 
 import (
-	"reflect"
-	"strconv"
-
 	"github.com/go-playground/validator/v10"
 )
 
@@ -15,9 +12,6 @@ import (
 // and fails every value (reflect's String() of another kind is a description
 // like "<[]uint8 Value>", which would pass by accident).
 func MaxBytes(fl validator.FieldLevel) bool {
-	n, err := strconv.Atoi(fl.Param())
-	if err != nil || n < 0 || fl.Field().Kind() != reflect.String {
-		return false
-	}
-	return len(fl.Field().String()) <= n
+	n, s, ok := byteLimit(fl)
+	return ok && len(s) <= n
 }

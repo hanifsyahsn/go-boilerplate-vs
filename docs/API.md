@@ -664,7 +664,13 @@ A failed rule is **422 Unprocessable Entity**, one error per field, each with it
 
 **Password length is in bytes.** bcrypt reads at most 72 bytes. Plain letters, digits and symbols are one byte
 each, an accented letter (`é`) two, a Chinese / Japanese character three, an emoji three or more (a combined one —
-skin tone, flag, family — is much longer) — so 40 accented letters are 40 characters but 80 bytes. Over the limit is a
+skin tone, flag, family — is much longer) — so 40 accented letters are 40 characters but 80 bytes.
+Passwords are stored in Unicode NFC (decision 0019): an "é" sent as "e" + a combining accent (macOS, some phone
+keyboards) is stored as the two-byte "é", so a password set since then signs in from any device whichever form it
+sends. A **new** password (register, reset, change's new one) is counted in that NFC form. A password being
+**checked** (login, change's current one) passes the limit when it fits either as sent or in NFC. A password set
+before 0019 from the decomposed form signs in from that form and is upgraded on that login; until then the
+composed form doesn't match it. Over the limit is a
 `422` "<Label> must be at most 72 bytes (accented letters, non-Latin scripts and emoji take more than one byte
 each)." on the field's own pointer: register, login and password reset → "Password", `/data/attributes/password`;
 password change → "Current password" (`/data/attributes/current_password`) or "New password"

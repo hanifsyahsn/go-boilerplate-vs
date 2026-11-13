@@ -16,8 +16,8 @@ const ResourceType = "password-changes"
 // Request is the attributes of the POST /api/auth/password-changes document.
 // Both passwords are bounded in bytes (bcrypt's 72).
 type Request struct {
-	CurrentPassword string `json:"current_password" binding:"required,maxbytes=72" label:"Current password"`
-	Password        string `json:"password" binding:"required,min=8,maxbytes=72" label:"New password"`
+	CurrentPassword string `json:"current_password" binding:"required,checkmaxbytes=72" label:"Current password"`
+	Password        string `json:"password" binding:"required,min=8,nfcmaxbytes=72" label:"New password"`
 }
 
 type H interface {

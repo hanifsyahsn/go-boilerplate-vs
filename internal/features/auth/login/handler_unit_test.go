@@ -73,6 +73,24 @@ func TestHandler_Login_U(t *testing.T) {
 			wantCookies: true,
 		},
 		{
+			name: "36 decomposed é (108 bytes as a Mac sends them, 72 in NFC) reach the service as sent: the limit counts the NFC form",
+			body: doc(`{"email":"jane@example.com","password":"` + strings.Repeat("e\u0301", 36) + `"}`),
+			stub: func(s *MockS) {
+				s.EXPECT().Login(gomock.Any(), Request{Email: "jane@example.com", Password: strings.Repeat("e\u0301", 36)}, gomock.Any()).Return(ok, nil)
+			},
+			wantCode:    http.StatusOK,
+			wantCookies: true,
+		},
+		{
+			name: "20 क़ (60 bytes sent, 120 in NFC) reach the service: a hash made before NFC from them can still sign in",
+			body: doc(`{"email":"jane@example.com","password":"` + strings.Repeat("\u0958", 20) + `"}`),
+			stub: func(s *MockS) {
+				s.EXPECT().Login(gomock.Any(), Request{Email: "jane@example.com", Password: strings.Repeat("\u0958", 20)}, gomock.Any()).Return(ok, nil)
+			},
+			wantCode:    http.StatusOK,
+			wantCookies: true,
+		},
+		{
 			name:     "plain JSON is not a document: 400",
 			body:     `{"email":"jane@example.com","password":"Passw0rd!"}`,
 			stub:     func(s *MockS) {},

@@ -48,3 +48,18 @@ func (mr *MockQuerierMockRecorder) GetUserForLogin(ctx, email interface{}) *gomo
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserForLogin", reflect.TypeOf((*MockQuerier)(nil).GetUserForLogin), ctx, email)
 }
+
+// RehashPassword mocks base method.
+func (m *MockQuerier) RehashPassword(ctx context.Context, arg RehashPasswordParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RehashPassword", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RehashPassword indicates an expected call of RehashPassword.
+func (mr *MockQuerierMockRecorder) RehashPassword(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RehashPassword", reflect.TypeOf((*MockQuerier)(nil).RehashPassword), ctx, arg)
+}
