@@ -164,4 +164,4 @@ ec_private:
 ec_public:
 	openssl ec -in internal/platform/config/ec-private.pem -pubout -out internal/platform/config/ec-public.pem
 
-.PHONY: check check_short lint fmt lint_installsec sec_install test test_short test_race test_only test_package test_coverage coverage_report_view mock sqlc migrate_create migrate_up migrate_up1 migrate_down migrate_down1 migrate_dirty run ec_private ec_public
+.PHONY: check check_short lint fmt lint_install sec sec_install test test_short test_race test_only test_package test_coverage coverage_report_view mock sqlc migrate_create migrate_up migrate_up1 migrate_down migrate_down1 migrate_dirty run ec_private ec_public
