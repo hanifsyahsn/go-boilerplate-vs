@@ -12,6 +12,7 @@ import (
 	"github.com/golang/mock/gomock"
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	internalsharedconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/validation"
@@ -40,6 +41,9 @@ func TestHandler_Refresh_U(t *testing.T) {
 		wantCode   int
 		wantInBody []string
 		wantCookie bool
+		// wantCleared: both auth cookies are expired in the response (a
+		// refresh that can never succeed again, decision 0020).
+		wantCleared bool
 	}{
 		{
 			name:       "from the cookie: both cookies replaced + both tokens in meta",
@@ -64,12 +68,42 @@ func TestHandler_Refresh_U(t *testing.T) {
 			wantCode: http.StatusOK, wantCookie: true,
 		},
 		{
-			name: "an invalid token is a 401",
+			name: "session_expired (no / invalid token): 401 and both cookies cleared",
 			stub: func(s *MockS) {
-				s.EXPECT().Refresh(gomock.Any(), "", client).Return(Result{}, apperror.New(apperror.CodeUnauthorized, sessionExpiredMessage, nil))
+				s.EXPECT().Refresh(gomock.Any(), "", client).Return(Result{}, apperror.New(CodeSessionExpired, sessionExpiredMessage, nil))
+			},
+			wantCode:    http.StatusUnauthorized,
+			wantInBody:  []string{sessionExpiredMessage, `"code":"session_expired"`},
+			wantCleared: true,
+		},
+		{
+			name:   "session_ended: 401 and both cookies cleared",
+			cookie: "ref",
+			stub: func(s *MockS) {
+				s.EXPECT().Refresh(gomock.Any(), "ref", client).Return(Result{}, apperror.New(middleware.CodeSessionEnded, middleware.SessionEndedMessage, nil))
+			},
+			wantCode:    http.StatusUnauthorized,
+			wantInBody:  []string{`"code":"session_ended"`},
+			wantCleared: true,
+		},
+		{
+			name:   "account_inactive: 401 and both cookies cleared",
+			cookie: "ref",
+			stub: func(s *MockS) {
+				s.EXPECT().Refresh(gomock.Any(), "ref", client).Return(Result{}, apperror.New(middleware.CodeAccountInactive, middleware.AccountInactiveMessage, nil))
+			},
+			wantCode:    http.StatusUnauthorized,
+			wantInBody:  []string{`"code":"account_inactive"`},
+			wantCleared: true,
+		},
+		{
+			name:   "refresh_superseded: 401 and no cookie touched (the winning request already set the new ones)",
+			cookie: "ref",
+			stub: func(s *MockS) {
+				s.EXPECT().Refresh(gomock.Any(), "ref", client).Return(Result{}, apperror.New(CodeRefreshSuperseded, supersededMessage, nil))
 			},
 			wantCode:   http.StatusUnauthorized,
-			wantInBody: []string{sessionExpiredMessage},
+			wantInBody: []string{`"code":"refresh_superseded"`},
 		},
 		{
 			name:     "a malformed body",
@@ -84,7 +118,7 @@ func TestHandler_Refresh_U(t *testing.T) {
 			wantCode: http.StatusBadRequest,
 		},
 		{
-			name:     "service generic error",
+			name:     "service generic error: a 500, no cookie touched",
 			cookie:   "ref",
 			stub:     func(s *MockS) { s.EXPECT().Refresh(gomock.Any(), "ref", client).Return(Result{}, errors.New("boom")) },
 			wantCode: http.StatusInternalServerError,
@@ -114,14 +148,23 @@ func TestHandler_Refresh_U(t *testing.T) {
 				require.Contains(t, w.Body.String(), s)
 			}
 
-			cookies := map[string]string{}
+			cookies := map[string]*http.Cookie{}
 			for _, ck := range w.Result().Cookies() {
-				cookies[ck.Name] = ck.Value
+				cookies[ck.Name] = ck
 			}
-			if tc.wantCookie {
-				require.Equal(t, "new-acc", cookies[internalsharedconstant.AccessTokenCookieKey])
-				require.Equal(t, "new-ref", cookies[internalsharedconstant.RefreshTokenCookieKey])
-			} else {
+			access, refresh := cookies[internalsharedconstant.AccessTokenCookieKey], cookies[internalsharedconstant.RefreshTokenCookieKey]
+			switch {
+			case tc.wantCookie:
+				require.Equal(t, "new-acc", access.Value)
+				require.Equal(t, "new-ref", refresh.Value)
+				require.Equal(t, refresh.MaxAge, access.MaxAge, "the access cookie lives as long as the refresh token")
+			case tc.wantCleared:
+				require.Len(t, cookies, 2)
+				require.Empty(t, access.Value)
+				require.Negative(t, access.MaxAge, "access cookie expired")
+				require.Empty(t, refresh.Value)
+				require.Negative(t, refresh.MaxAge, "refresh cookie expired")
+			default:
 				require.Empty(t, cookies)
 			}
 		})

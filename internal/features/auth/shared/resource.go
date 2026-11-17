@@ -54,8 +54,14 @@ func NewTokenMeta(p jwttoken.Pair) TokenMeta {
 	}
 }
 
-// SetTokenCookies stores a freshly issued pair in the two auth cookies.
+// SetTokenCookies stores a freshly issued pair in the two auth cookies. Both
+// cookies live until the refresh token expires (decision 0020): the access
+// token inside still expires on its own and every request checks its exp, but
+// the cookie stays, so an SSR server — which never gets the refresh cookie,
+// scoped to /api/auth — can tell a signed-in user whose access token ran out
+// (cookie present, 401 unauthorized → let the client refresh) from a guest (no
+// cookie).
 func SetTokenCookies(c *gin.Context, cfg CookieConfig, p jwttoken.Pair) {
-	SetAccessCookie(c, cfg, p.AccessToken, p.AccessTokenExpiresAt)
+	SetAccessCookie(c, cfg, p.AccessToken, p.RefreshTokenExpiresAt)
 	SetRefreshCookie(c, cfg, p.RefreshToken, p.RefreshTokenExpiresAt)
 }

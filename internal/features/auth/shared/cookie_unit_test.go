@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	internalsharedconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/constant"
 	"github.com/stretchr/testify/require"
 )
@@ -68,6 +69,52 @@ func TestCookies_U(t *testing.T) {
 				require.Negative(t, got.MaxAge)
 			} else {
 				require.Positive(t, got.MaxAge)
+			}
+		})
+	}
+}
+
+func TestSetTokenCookies_U(t *testing.T) {
+	cfg := CookieConfig{Secure: true}
+
+	testCases := []struct {
+		name          string
+		accessTTL     time.Duration
+		refreshTTL    time.Duration
+		wantCookieTTL time.Duration
+	}{
+		{
+			name:      "the access cookie lives as long as the refresh token, not the 15-minute access token",
+			accessTTL: 15 * time.Minute, refreshTTL: 7 * 24 * time.Hour, wantCookieTTL: 7 * 24 * time.Hour,
+		},
+		{
+			name:      "an untrusted session near its cap: both cookies end at the cap",
+			accessTTL: 15 * time.Minute, refreshTTL: time.Hour, wantCookieTTL: time.Hour,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			SetTokenCookies(c, cfg, jwttoken.Pair{
+				AccessToken: "acc", AccessTokenExpiresAt: now.Add(tc.accessTTL),
+				RefreshToken: "ref", RefreshTokenExpiresAt: now.Add(tc.refreshTTL),
+			})
+
+			got := map[string]*http.Cookie{}
+			for _, ck := range w.Result().Cookies() {
+				got[ck.Name] = ck
+			}
+			access, refresh := got[internalsharedconstant.AccessTokenCookieKey], got[internalsharedconstant.RefreshTokenCookieKey]
+			require.NotNil(t, access)
+			require.NotNil(t, refresh)
+			require.Equal(t, "acc", access.Value)
+			require.Equal(t, "ref", refresh.Value)
+			for _, ck := range []*http.Cookie{access, refresh} {
+				require.InDelta(t, tc.wantCookieTTL.Seconds(), float64(ck.MaxAge), 2, ck.Name)
+				require.WithinDuration(t, now.Add(tc.wantCookieTTL), ck.Expires, 2*time.Second, ck.Name)
 			}
 		})
 	}

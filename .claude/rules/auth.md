@@ -49,7 +49,12 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
 - Login takes a `sessions` document (`email`, `password`). One 401 message for unknown email and wrong
   password; "no longer active" only after the password matched. Sets `app-access-token` (path `/`) and
   `app-refresh-token` (path `/api/auth`) HttpOnly, SameSite=Lax cookies (`COOKIE_SECURE`, `COOKIE_DOMAIN`), and
-  answers with the account as `data` and the tokens under `meta` for non-browser clients.
+  answers with the account as `data` and the tokens under `meta` for non-browser clients. **Both cookies expire
+  with the refresh token** (`authshared.SetTokenCookies`, decision 0020): the access JWT still expires on its
+  own, but an SSR server (no refresh cookie, it's scoped to `/api/auth`) can tell an expired user (cookie, 401
+  `unauthorized`) from a guest (no cookie). The refresh handler clears both cookies on `session_expired` /
+  `session_ended` / `account_inactive` (`endsSession`), never on `refresh_superseded` or a 500
+  (`TestSetTokenCookies_U`, `TestHandler_Refresh_U`).
 - **CSRF**: the cookies are SameSite=Lax **and** `/api` runs `middleware.OriginGuard` (decision 0004): a write
   whose `Origin` isn't in `ALLOWED_ORIGINS` is a 403 before anything else runs. Lax alone leaves a same-site
   sibling (another subdomain) and old browsers; a request without `Origin` passes (no page sent it). Empty

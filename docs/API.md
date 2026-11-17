@@ -160,12 +160,21 @@ Ids in **responses are strings** (`"id": "42"`) while `sub` is a number — comp
 
 | Piece | Where it lives | Lifetime |
 | --- | --- | --- |
-| Access token (ES256 JWT) | cookie `app-access-token` (path `/`), also `meta.access_token` in the login / refresh body | `ACCESS_TOKEN_DURATION` (e.g. 15 min) |
+| Access token (ES256 JWT) | cookie `app-access-token` (path `/`), also `meta.access_token` in the login / refresh body | the token: `ACCESS_TOKEN_DURATION` (e.g. 15 min). The **cookie** lives as long as the refresh token (below) — see the note under this table |
 | Refresh token (ES256 JWT, rotating) | cookie `app-refresh-token` (path `/api/auth`), also `meta.refresh_token` in the login / refresh body | `REFRESH_TOKEN_DURATION` **from its own issue** (default 7 days); on an untrusted device never past the session's end |
 
 Both cookies are **HttpOnly**, `SameSite=Lax`, `Secure` unless `COOKIE_SECURE=false` (plain-HTTP
 dev), scoped to `COOKIE_DOMAIN` when set. A browser client never reads them: it calls the API with
 `credentials: "include"`.
+
+**Both cookies expire together, with the refresh token** — the access token *inside* still expires after
+`ACCESS_TOKEN_DURATION` and is then a `401` `unauthorized`. So a server-side renderer (which sees the
+HttpOnly `app-access-token` but never `app-refresh-token`, scoped to `/api/auth`) can tell the two apart:
+no `app-access-token` cookie → a guest; the cookie but `GET /api/me` → `401` `unauthorized` → a signed-in
+user whose access token ran out (render "checking", let the browser refresh). A refresh that can never
+succeed again (`session_expired`, `session_ended`, `account_inactive`) **clears both cookies**; logout
+does too. A session revoked from **another** device can't clear this one's cookies: its next page load
+looks signed in once, the refresh fails and clears them.
 
 - **Every login starts a session** (a refresh-token *family*): one per device / browser.
 - **Refresh rotates**: each `POST /api/auth/refresh` spends the presented refresh token and returns a
@@ -280,7 +289,7 @@ curl -X POST "$BASE/api/auth/login" -H "$CT" -c jar.txt -d '{
 **tokens** under `meta` (for clients that don't use cookies: mobile, server-to-server):
 
 ```
-Set-Cookie: app-access-token=eyJhbGciOi…; Path=/; Max-Age=899; HttpOnly; SameSite=Lax
+Set-Cookie: app-access-token=eyJhbGciOi…; Path=/; Max-Age=604799; HttpOnly; SameSite=Lax
 Set-Cookie: app-refresh-token=eyJhbGciOi…; Path=/api/auth; Max-Age=604799; HttpOnly; SameSite=Lax
 ```
 
@@ -315,7 +324,9 @@ Set-Cookie: app-refresh-token=eyJhbGciOi…; Path=/api/auth; Max-Age=604799; Htt
 
 Rotates the pair: spends the presented refresh token, issues a **new access + refresh token**
 (both cookies replaced, both tokens in `meta`). The user is re-read, so the new access token carries
-the **current** role and a deactivated user gets none.
+the **current** role and a deactivated user gets none. A `401` `session_expired`, `session_ended` or
+`account_inactive` also **clears both cookies** (`Max-Age=0`); `refresh_superseded` and a `500` leave them
+as they are.
 
 The refresh token is taken from the `app-refresh-token` cookie; **without the cookie**, send it in
 an optional `sessions` document:

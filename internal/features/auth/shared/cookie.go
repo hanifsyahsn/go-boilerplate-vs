@@ -22,8 +22,8 @@ type CookieConfig struct {
 	Domain string
 }
 
-// SetAccessCookie stores the access token in an HttpOnly cookie that expires
-// with the token.
+// SetAccessCookie stores the access token in an HttpOnly cookie on / that
+// expires at expiresAt — the refresh token's expiry, from SetTokenCookies.
 func SetAccessCookie(c *gin.Context, cfg CookieConfig, token string, expiresAt time.Time) {
 	setCookie(c, cfg, internalsharedconstant.AccessTokenCookieKey, token, "/", expiresAt)
 }

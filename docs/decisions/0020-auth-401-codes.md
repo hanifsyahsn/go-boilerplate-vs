@@ -1,6 +1,6 @@
 # 0020 — Auth 401s carry a code that tells the client what to do; the access cookie outlives its token
 
-Status: accepted (2026-11-16), not built yet. Two pieces: A = the codes, B = the cookies (B needs A).
+Status: built (2026-11-17). Two pieces: A = the codes, B = the cookies (B needs A).
 
 ## Decision, part A — 401 codes
 Every 401 that means "don't just refresh" gets its own `apperror.Code` (status 401, title `Unauthorized`), so a
@@ -45,11 +45,16 @@ team integrating an SSR React app.
 - `docs/API.md`: the 401 tables (*Authentication*, login, refresh), *How a session works*, the *Error code
   reference* and the *Client guide*.
 
-## Open points (settle when building part B)
-- Part B: whether the access-token middleware also clears the cookies on `session_ended` / `account_inactive`
-  (needs the cookie config in `middleware`); not promised to the front end — refresh clearing them is.
-- Part B tests: login / refresh set the access cookie with the refresh token's expiry (an untrusted session's
-  capped one included); each terminal refresh 401 clears both cookies; `refresh_superseded` sets none.
+## Built (part B, 2026-11-17)
+- `authshared.SetTokenCookies` (login and refresh) gives the access cookie the refresh token's expiry; an untrusted
+  session near its cap ends both cookies at the cap (the refresh token's expiry already is the cap).
+- The refresh handler clears both cookies when the service's error is `session_expired` / `session_ended` /
+  `account_inactive` (`endsSession`); not on `refresh_superseded`, not on a 500.
+- **Not done, on purpose:** the access-token middleware doesn't clear cookies on its own `session_ended` /
+  `account_inactive` — it would need the cookie config in `middleware`, and it wasn't promised: a client goes
+  to login on those codes, and its next refresh (or login / logout) replaces or clears the cookies.
+- Tests: `TestSetTokenCookies_U` (both lifetimes), `TestHandler_Refresh_U` (each terminal code clears both,
+  `refresh_superseded` and a 500 touch none, a success sets equal lifetimes); both mutation-checked.
 - Tests: one behaviour case per code at each place that returns it (middleware, refresh, login), asserting
   `code` and status; the concurrent-refresh test asserts `refresh_superseded` and that the session is still live.
 
