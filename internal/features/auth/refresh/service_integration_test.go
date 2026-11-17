@@ -33,6 +33,7 @@ func TestService_Refresh_I(t *testing.T) {
 	maker := jwttoken.NewTokenMakerES256(key, &key.PublicKey, "client", "issuer")
 
 	minuteAgo := time.Now().Add(-time.Minute)
+	secondAgo := time.Now().Add(-time.Second)
 	inAnHour := time.Now().Add(time.Hour)
 
 	testCases := []struct {
@@ -71,13 +72,21 @@ func TestService_Refresh_I(t *testing.T) {
 			stored: func(uuid.UUID) *testhelper.SeedRefreshTokenParams {
 				return &testhelper.SeedRefreshTokenParams{SessionExpiresAt: &minuteAgo}
 			},
-			wantCode: apperror.CodeUnauthorized,
+			wantCode: CodeSessionExpired,
 		},
 		{
 			name:     "a deactivated user gets none, the token stays live",
 			seed:     testhelper.SeedUserParams{IsActive: testhelper.BoolPtr(false)},
 			stored:   func(uuid.UUID) *testhelper.SeedRefreshTokenParams { return &testhelper.SeedRefreshTokenParams{} },
-			wantCode: apperror.CodeUnauthorized,
+			wantCode: middleware.CodeAccountInactive,
+		},
+		{
+			name: "a token another request rotated a second ago (two tabs at once) is refresh_superseded and the session stays live",
+			stored: func(sibling uuid.UUID) *testhelper.SeedRefreshTokenParams {
+				return &testhelper.SeedRefreshTokenParams{RevokedAt: &secondAgo, ReplacedBy: uuid.NullUUID{UUID: sibling, Valid: true}}
+			},
+			wantCode:   CodeRefreshSuperseded,
+			wantDetail: supersededMessage,
 		},
 		{
 			name: "a spent token presented again revokes the family",
@@ -86,14 +95,14 @@ func TestService_Refresh_I(t *testing.T) {
 			},
 			siblingRevoked:    true,
 			wantSessionReason: authshared.RevokeReasonTokenReused,
-			wantCode:          apperror.CodeUnauthorized,
+			wantCode:          CodeSessionExpired,
 		},
 		{
 			name:              "a live token of a signed-out session is refused with 'your session has ended' and the session stays as it was",
 			stored:            func(uuid.UUID) *testhelper.SeedRefreshTokenParams { return &testhelper.SeedRefreshTokenParams{} },
 			sessionRevokedAs:  authshared.RevokeReasonSignedOutRemotely,
 			wantSessionReason: authshared.RevokeReasonSignedOutRemotely,
-			wantCode:          apperror.CodeUnauthorized,
+			wantCode:          middleware.CodeSessionEnded,
 			wantDetail:        middleware.SessionEndedMessage,
 		},
 		{
@@ -102,13 +111,13 @@ func TestService_Refresh_I(t *testing.T) {
 			stored:            func(uuid.UUID) *testhelper.SeedRefreshTokenParams { return &testhelper.SeedRefreshTokenParams{} },
 			sessionRevokedAs:  authshared.RevokeReasonDeactivated,
 			wantSessionReason: authshared.RevokeReasonDeactivated,
-			wantCode:          apperror.CodeUnauthorized,
-			wantDetail:        accountInactiveMessage,
+			wantCode:          middleware.CodeAccountInactive,
+			wantDetail:        middleware.AccountInactiveMessage,
 		},
 		{
 			name:     "a token with no row (unknown) is refused",
 			stored:   func(uuid.UUID) *testhelper.SeedRefreshTokenParams { return nil },
-			wantCode: apperror.CodeUnauthorized,
+			wantCode: CodeSessionExpired,
 		},
 	}
 
@@ -239,7 +248,7 @@ func TestService_Refresh_RevokeInFlight_I(t *testing.T) {
 
 			var appErr *apperror.AppError
 			require.ErrorAs(t, testhelper.Await(t, done), &appErr)
-			require.Equal(t, apperror.CodeUnauthorized, appErr.Code)
+			require.Equal(t, middleware.CodeSessionEnded, appErr.Code)
 			require.Equal(t, middleware.SessionEndedMessage, appErr.Message)
 
 			var tokens int

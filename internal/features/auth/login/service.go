@@ -14,6 +14,7 @@ import (
 	authshared "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared"
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	internalshareddto "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/dto"
@@ -202,7 +203,7 @@ func (s *service) Login(ctx context.Context, req Request, client Client) (Result
 	// Checked after the password, so only the account holder learns it's
 	// deactivated.
 	if !user.IsActive {
-		return Result{}, apperror.New(apperror.CodeUnauthorized, "Your account is no longer active.",
+		return Result{}, apperror.New(middleware.CodeAccountInactive, middleware.AccountInactiveMessage,
 			fmt.Errorf("(%s): user %d is not active", feature, user.ID))
 	}
 

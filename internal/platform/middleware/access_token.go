@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -24,13 +25,27 @@ type AccessStatusReader interface {
 	GetAccessStatus(ctx context.Context, arg sqlc.GetAccessStatusParams) (sqlc.GetAccessStatusRow, error)
 }
 
-// inactiveAccountMessage is the 401 detail for a valid token whose user has
-// been deactivated (or deleted) since it was issued.
-const inactiveAccountMessage = "Your account is no longer active."
+// AccountInactiveMessage is the 401 detail for a valid token whose user has
+// been deactivated (or deleted) since it was issued. Refresh and login say the
+// same, with CodeAccountInactive.
+const AccountInactiveMessage = "Your account is no longer active."
 
 // SessionEndedMessage is the 401 detail for a valid token whose session was
 // revoked since it was issued (logout, a remote sign-out, a password change).
 const SessionEndedMessage = "Your session has ended. Please sign in again."
+
+// The 401 codes that tell a client not to refresh but to sign in again
+// (decision 0020): it branches on the code, never on the detail text. A plain
+// CodeUnauthorized from this middleware (no / bad / expired token) means
+// "refresh once, then retry". Declared here, not in apperror (decision 0015),
+// because refresh and login return them too and this package can't import a
+// feature.
+var (
+	// CodeSessionEnded: the token's session was signed out.
+	CodeSessionEnded = apperror.NewCode("session_ended", http.StatusUnauthorized)
+	// CodeAccountInactive: the account is deactivated or gone.
+	CodeAccountInactive = apperror.NewCode("account_inactive", http.StatusUnauthorized)
+)
 
 // AccessTokenMiddleware authenticates a request from its access token (cookie
 // first, then `Authorization: Bearer`) and then checks, in one query, that the
@@ -44,13 +59,13 @@ func AccessTokenMiddleware(jwt jwttoken.M, status AccessStatusReader) gin.Handle
 	return func(c *gin.Context) {
 		tokenString, err := extractToken(c)
 		if err != nil {
-			unauthorized(c, apperror.CodeUnauthorized.SafeToThrow(), err)
+			unauthorized(c, apperror.CodeUnauthorized, apperror.CodeUnauthorized.SafeToThrow(), err)
 			return
 		}
 
 		claims, err := jwt.VerifyAccessToken(tokenString)
 		if err != nil {
-			unauthorized(c, apperror.CodeUnauthorized.SafeToThrow(),
+			unauthorized(c, apperror.CodeUnauthorized, apperror.CodeUnauthorized.SafeToThrow(),
 				fmt.Errorf("jwt.VerifyAccessToken() (Access Token Middleware): %w", err))
 			return
 		}
@@ -58,14 +73,14 @@ func AccessTokenMiddleware(jwt jwttoken.M, status AccessStatusReader) gin.Handle
 		userID, err := jwttoken.SubjectID(claims)
 		if err != nil {
 			// defensive: VerifyAccessToken already checked sub
-			unauthorized(c, apperror.CodeUnauthorized.SafeToThrow(),
+			unauthorized(c, apperror.CodeUnauthorized, apperror.CodeUnauthorized.SafeToThrow(),
 				fmt.Errorf("jwttoken.SubjectID() (Access Token Middleware): %w", err))
 			return
 		}
 
 		sessionID, err := jwttoken.SessionID(claims)
 		if err != nil {
-			unauthorized(c, apperror.CodeUnauthorized.SafeToThrow(),
+			unauthorized(c, apperror.CodeUnauthorized, apperror.CodeUnauthorized.SafeToThrow(),
 				fmt.Errorf("jwttoken.SessionID() (Access Token Middleware): %w", err))
 			return
 		}
@@ -73,7 +88,7 @@ func AccessTokenMiddleware(jwt jwttoken.M, status AccessStatusReader) gin.Handle
 		st, err := status.GetAccessStatus(c.Request.Context(), sqlc.GetAccessStatusParams{SessionID: sessionID, UserID: userID})
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			unauthorized(c, inactiveAccountMessage,
+			unauthorized(c, CodeAccountInactive, AccountInactiveMessage,
 				fmt.Errorf("GetAccessStatus() (Access Token Middleware): user %d not found: %w", userID, err))
 			return
 		case err != nil:
@@ -82,11 +97,11 @@ func AccessTokenMiddleware(jwt jwttoken.M, status AccessStatusReader) gin.Handle
 			c.Abort()
 			return
 		case !st.IsActive:
-			unauthorized(c, inactiveAccountMessage,
+			unauthorized(c, CodeAccountInactive, AccountInactiveMessage,
 				fmt.Errorf("GetAccessStatus() (Access Token Middleware): user %d is not active", userID))
 			return
 		case !st.SessionLive:
-			unauthorized(c, SessionEndedMessage,
+			unauthorized(c, CodeSessionEnded, SessionEndedMessage,
 				fmt.Errorf("GetAccessStatus() (Access Token Middleware): session %s of user %d is not live", sessionID, userID))
 			return
 		}
@@ -126,7 +141,7 @@ func extractToken(c *gin.Context) (string, error) {
 	return fields[1], nil
 }
 
-func unauthorized(c *gin.Context, message string, err error) {
-	jsonapi.WriteErrorsContext(handlerutil.RequestContext(c), c.Writer, apperror.New(apperror.CodeUnauthorized, message, err))
+func unauthorized(c *gin.Context, code apperror.Code, message string, err error) {
+	jsonapi.WriteErrorsContext(handlerutil.RequestContext(c), c.Writer, apperror.New(code, message, err))
 	c.Abort()
 }

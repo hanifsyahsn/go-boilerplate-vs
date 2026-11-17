@@ -33,6 +33,10 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 		stub       func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier)
 		wantCode   int
 		wantInBody string
+		// wantErr, when set, is the error's JSON:API code: what the client
+		// branches on (decision 0020) — unauthorized = refresh and retry,
+		// session_ended / account_inactive = sign in again.
+		wantErr string
 	}{
 		{
 			name:   "a bearer token of an active user in a live session: id + role + session in the context",
@@ -55,8 +59,8 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 			wantCode:   http.StatusOK,
 			wantInBody: "7:|request ctx:7|",
 		},
-		{name: "no token at all", stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {}, wantCode: http.StatusUnauthorized},
-		{name: "not a bearer header", header: "Basic abc", stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {}, wantCode: http.StatusUnauthorized},
+		{name: "no token at all", stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {}, wantCode: http.StatusUnauthorized, wantErr: "unauthorized"},
+		{name: "not a bearer header", header: "Basic abc", stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {}, wantCode: http.StatusUnauthorized, wantErr: "unauthorized"},
 		{
 			name:   "an invalid token",
 			header: "Bearer bad",
@@ -64,6 +68,7 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 				m.EXPECT().VerifyAccessToken("bad").Return(nil, errors.New("expired"))
 			},
 			wantCode: http.StatusUnauthorized,
+			wantErr:  "unauthorized",
 		},
 		{
 			// VerifyAccessToken checks sub; this pins the middleware's own guard
@@ -74,6 +79,7 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 				m.EXPECT().VerifyAccessToken("good").Return(jwt.MapClaims{"role": "admin"}, nil)
 			},
 			wantCode: http.StatusUnauthorized,
+			wantErr:  "unauthorized",
 		},
 		{
 			name:   "an access token without sid (issued before sessions) is a 401 and the DB isn't read",
@@ -82,6 +88,7 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 				m.EXPECT().VerifyAccessToken("good").Return(jwt.MapClaims{"sub": float64(7), "role": "admin"}, nil)
 			},
 			wantCode:   http.StatusUnauthorized,
+			wantErr:    "unauthorized",
 			wantInBody: "You're not authorized to perform this action.",
 		},
 		{
@@ -91,27 +98,30 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 				m.EXPECT().VerifyAccessToken("good").Return(jwt.MapClaims{"sub": float64(7), "sid": "abc"}, nil)
 			},
 			wantCode:   http.StatusUnauthorized,
+			wantErr:    "unauthorized",
 			wantInBody: "You're not authorized to perform this action.",
 		},
 		{
-			name:   "a revoked session is refused at once, before the token expires",
+			name:   "a revoked session is refused at once, before the token expires: session_ended",
 			header: "Bearer good",
 			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
 				m.EXPECT().VerifyAccessToken("good").Return(claims, nil)
 				status(q, middlewaresqlc.GetAccessStatusRow{IsActive: true, SessionLive: false}, nil)
 			},
 			wantCode:   http.StatusUnauthorized,
+			wantErr:    "session_ended",
 			wantInBody: "Your session has ended. Please sign in again.",
 		},
 		{
-			name:   "a deactivated user (whatever the session) gets the inactive message",
+			name:   "a deactivated user (whatever the session) gets the inactive message: account_inactive",
 			header: "Bearer good",
 			stub: func(m *jwttoken.MockM, q *middlewaresqlc.MockQuerier) {
 				m.EXPECT().VerifyAccessToken("good").Return(claims, nil)
 				status(q, middlewaresqlc.GetAccessStatusRow{IsActive: false, SessionLive: false}, nil)
 			},
 			wantCode:   http.StatusUnauthorized,
-			wantInBody: inactiveAccountMessage,
+			wantErr:    "account_inactive",
+			wantInBody: AccountInactiveMessage,
 		},
 		{
 			name:   "a deactivated user",
@@ -121,7 +131,8 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 				status(q, middlewaresqlc.GetAccessStatusRow{IsActive: false, SessionLive: true}, nil)
 			},
 			wantCode:   http.StatusUnauthorized,
-			wantInBody: inactiveAccountMessage,
+			wantErr:    "account_inactive",
+			wantInBody: AccountInactiveMessage,
 		},
 		{
 			name:   "a deleted user",
@@ -131,7 +142,8 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 				status(q, middlewaresqlc.GetAccessStatusRow{}, sql.ErrNoRows)
 			},
 			wantCode:   http.StatusUnauthorized,
-			wantInBody: inactiveAccountMessage,
+			wantErr:    "account_inactive",
+			wantInBody: AccountInactiveMessage,
 		},
 		{
 			name:   "a DB error is a 500",
@@ -176,6 +188,9 @@ func TestAccessTokenMiddleware_U(t *testing.T) {
 
 			require.Equal(t, tc.wantCode, w.Code, w.Body.String())
 			require.Contains(t, w.Body.String(), tc.wantInBody)
+			if tc.wantErr != "" {
+				require.Contains(t, w.Body.String(), `"code":"`+tc.wantErr+`"`)
+			}
 		})
 	}
 }

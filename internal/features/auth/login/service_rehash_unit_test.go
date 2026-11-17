@@ -13,6 +13,7 @@ import (
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/authsharedtest"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/password"
 	"github.com/stretchr/testify/require"
@@ -69,7 +70,7 @@ func TestService_Login_LegacyRehash_U(t *testing.T) {
 			stored: legacy, plain: decomposedPassword, wantRehash: true, noRows: true,
 			wantLog: "login: rehash skipped, stored hash no longer the one checked"},
 		{name: "a deactivated account's legacy hash isn't rewritten (the login is refused anyway)",
-			stored: legacy, plain: decomposedPassword, inactive: true, wantErr: apperror.CodeUnauthorized},
+			stored: legacy, plain: decomposedPassword, inactive: true, wantErr: middleware.CodeAccountInactive},
 		{name: "a client that hung up after a right password still gets its hash upgraded (the write outlives the request)",
 			stored: legacy, plain: decomposedPassword, cancelled: true, wantRehash: true},
 	}

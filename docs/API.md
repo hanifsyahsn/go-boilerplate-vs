@@ -127,17 +127,18 @@ the user **and the token's session** are **re-read from the database on every re
 deactivated (or deleted), or a session signed out (logout, another device's sign-out) after the token
 was issued, gets **401** on the very next call, not when the token expires.
 
-| Failure | Status | `detail` |
-| --- | --- | --- |
-| No token, bad signature, expired, a refresh token used as an access token | 401 | `You're not authorized to perform this action.` |
-| The user is inactive / gone | 401 | `Your account is no longer active.` |
-| The token's session was signed out | 401 | `Your session has ended. Please sign in again.` |
-| A plain user on `/api/admin/*` | 403 | `You don't have access to this.` |
+| Failure | Status | `code` | `detail` |
+| --- | --- | --- | --- |
+| No token, bad signature, expired, a refresh token used as an access token | 401 | `unauthorized` | `You're not authorized to perform this action.` |
+| The user is inactive / gone | 401 | `account_inactive` | `Your account is no longer active.` |
+| The token's session was signed out | 401 | `session_ended` | `Your session has ended. Please sign in again.` |
+| A plain user on `/api/admin/*` | 403 | `forbidden` | `You don't have access to this.` |
 
-→ on a `401` *"not authorized"*, [refresh](#post-apiauthrefresh) once and retry the call. On
-*"no longer active"* or *"session has ended"*, drop the local state and go to the login screen.
-An access token issued before sessions existed (no session claim) is a `401` *"not authorized"*;
-its refresh fails too, so the user signs in again once.
+**Branch on `code`, never on `detail`** (the text may change): on `unauthorized`,
+[refresh](#post-apiauthrefresh) once and retry the call; on `account_inactive` or `session_ended`, drop the
+local state and go to the login screen.
+An access token issued before sessions existed (no session claim) is a `401` `unauthorized`; its refresh
+fails too, so the user signs in again once.
 
 ### Who is the caller?
 
@@ -176,9 +177,10 @@ dev), scoped to `COOKIE_DOMAIN` when set. A browser client never reads them: it 
   login, however often it refreshes: the last refresh token expires exactly then, and a refresh
   after it is a `401`.
 - **Reuse detection**: presenting an **already-spent** refresh token revokes the **whole session**
-  (it was probably stolen) → `401`, log in again. Exception: within **10 s** of its rotation it's
-  treated as two tabs refreshing at once — `401`, but the session survives (the other tab already
-  holds the new pair). **Single-flight** your refresh calls anyway.
+  (it was probably stolen) → `401` `session_expired`, log in again. Exception: within **10 s** of its
+  rotation it's treated as two tabs refreshing at once — `401` `refresh_superseded`, the session survives
+  (the other request already set the new cookies): retry the original call, don't refresh again.
+  **Single-flight** your refresh calls anyway.
 - **Logout** revokes the session: its refresh tokens **and** its access tokens, at once (every request
   checks the session).
 
@@ -304,7 +306,7 @@ Set-Cookie: app-refresh-token=eyJhbGciOi…; Path=/api/auth; Max-Age=604799; Htt
 | Status | `code` | When |
 | --- | --- | --- |
 | 401 | `unauthorized` | `The email or password is incorrect.` — the **same** message for an unknown email and a wrong password, so an account's existence never leaks |
-| 401 | `unauthorized` | `Your account is no longer active.` — only **after** the password matched |
+| 401 | `account_inactive` | `Your account is no longer active.` — only **after** the password matched |
 | 422 | `unprocessable_entity` | a field failed validation |
 | 429 | `too_many_requests` | the email or the IP used up its failed logins, or the IP its register + login budget (see *Rate limits* above) |
 | 500 | `internal_error` | token signing / DB failure |
@@ -352,12 +354,15 @@ token is spent:
 
 | Status | `code` | When |
 | --- | --- | --- |
-| 401 | `unauthorized` | `Your session has expired. Please log in again.` — no / invalid / expired token, an untrusted device past its session cap, an access token sent instead, an unknown token, or a **reused** spent token (which also revokes the session — see [How a session works](#how-a-session-works)) |
-| 401 | `unauthorized` | `Your session has ended. Please sign in again.` — the token's session was signed out (logout, a sign-out from another device, a password change or reset). Not treated as reuse: nothing else is revoked |
-| 401 | `unauthorized` | `Your account is no longer active.` — the account was deactivated or deleted (checked before the session, as on every authenticated call) |
+| 401 | `session_expired` | `Your session has expired. Please log in again.` — no / invalid / expired token, an untrusted device past its session cap, an access token sent instead, an unknown token, or a **reused** spent token after the 10 s grace (which also revokes the session — see [How a session works](#how-a-session-works)) |
+| 401 | `refresh_superseded` | `Your session was just refreshed by another request. Please try again.` — another request (another tab) rotated this token less than 10 s ago; the session is **alive** and that request already set the new cookies |
+| 401 | `session_ended` | `Your session has ended. Please sign in again.` — the token's session was signed out (logout, a sign-out from another device, a password change or reset). Not treated as reuse: nothing else is revoked |
+| 401 | `account_inactive` | `Your account is no longer active.` — the account was deactivated or deleted (checked before the session, as on every authenticated call) |
 | 500 | `internal_error` | DB / token signing failure |
 
-→ on any `401` here: drop the local state, go to the login screen. **Never retry a refresh in a loop.**
+→ on `refresh_superseded`: retry the original call **once** with the cookies you now hold (a non-browser
+client never received the other request's pair, so it signs in again). On any other `401` here: drop the
+local state, go to the login screen. **Never retry a refresh in a loop.**
 
 ### `POST /api/auth/logout`
 
@@ -735,7 +740,11 @@ The links keep the request's other parameters (filters, sort, fields) — follow
 | `code` | HTTP | Meaning |
 | --- | --- | --- |
 | `bad_request` | 400 | Malformed body / unsupported or invalid query parameter |
-| `unauthorized` | 401 | Missing / invalid / expired token, inactive account, wrong credentials, expired session |
+| `unauthorized` | 401 | Missing / invalid / expired access token (→ refresh once, retry); wrong login credentials; a missing / wrong API key |
+| `session_expired` | 401 | Refresh: no usable refresh token (missing, invalid, expired, unknown, past the session cap, reused) → log in again |
+| `refresh_superseded` | 401 | Refresh: another request rotated this token a moment ago; the session is alive → retry the original call |
+| `session_ended` | 401 | The session was signed out (logout, another device, password change / reset) → log in again |
+| `account_inactive` | 401 | The account is deactivated or deleted → log in again |
 | `forbidden` | 403 | Not an admin on `/api/admin`; a client-generated id, a relationship or a read-only attribute in the body |
 | `not_found` | 404 | Unknown route; a missing / deleted / **someone else's** note; a non-numeric path id |
 | `method_not_allowed` | 405 | e.g. `PUT /api/notes/1` (updates are `PATCH`) |
@@ -1172,9 +1181,11 @@ curl "$BASE/healthz"
 1. `POST /api/auth/login` with `credentials: "include"` → cookies are set; keep `data` (the account).
 2. `GET /api/me` for the live role → show / hide the admin menu.
 3. Call the API with `credentials: "include"` — no `Authorization` header needed.
-4. On a `401` *"You're not authorized to perform this action."*: call `POST /api/auth/refresh`
-   **once** (single-flight across tabs), then retry the original call.
-5. Refresh `401` or *"Your account is no longer active."* → go to the login screen.
+4. On a `401` `unauthorized`: call `POST /api/auth/refresh` **once** (single-flight across tabs), then
+   retry the original call. Refresh `refresh_superseded` → retry the original call once (another tab
+   already refreshed).
+5. Any other `401` (`session_expired`, `session_ended`, `account_inactive`, from refresh or any call) →
+   go to the login screen. Branch on `code`, never on `detail`.
 6. `POST /api/auth/logout` on sign-out.
 7. On any error, show `errors[].detail` with the response's `X-Request-ID` as a *"ref: …"* the user
    can quote to support ([Request ids](#request-ids)).

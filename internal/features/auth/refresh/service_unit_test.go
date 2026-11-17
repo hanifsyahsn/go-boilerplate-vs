@@ -135,16 +135,16 @@ func TestService_Refresh_U(t *testing.T) {
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				verified(q, m, cappedIn(-time.Second))
 			},
-			wantCode: apperror.CodeUnauthorized,
+			wantCode: CodeSessionExpired,
 		},
-		{name: "no token", token: "", stub: func(q *MockQuerier, m *jwttoken.MockM) {}, wantCode: apperror.CodeUnauthorized},
+		{name: "no token", token: "", stub: func(q *MockQuerier, m *jwttoken.MockM) {}, wantCode: CodeSessionExpired},
 		{
 			name:  "an invalid token",
 			token: "bad",
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				m.EXPECT().VerifyRefreshToken("bad").Return(nil, errors.New("expired"))
 			},
-			wantCode: apperror.CodeUnauthorized,
+			wantCode: CodeSessionExpired,
 		},
 		{
 			name:  "claims without a usable sub (defensive): 401 session expired",
@@ -152,7 +152,7 @@ func TestService_Refresh_U(t *testing.T) {
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				m.EXPECT().VerifyRefreshToken("ref").Return(jwt.MapClaims{"jti": jti.String()}, nil)
 			},
-			wantCode:   apperror.CodeUnauthorized,
+			wantCode:   CodeSessionExpired,
 			wantDetail: sessionExpiredMessage,
 		},
 		{
@@ -161,7 +161,7 @@ func TestService_Refresh_U(t *testing.T) {
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				m.EXPECT().VerifyRefreshToken("ref").Return(jwt.MapClaims{"sub": float64(1), "jti": "abc"}, nil)
 			},
-			wantCode: apperror.CodeUnauthorized,
+			wantCode: CodeSessionExpired,
 		},
 		{
 			name:  "an unknown token (no row)",
@@ -171,7 +171,7 @@ func TestService_Refresh_U(t *testing.T) {
 				q.EXPECT().LockSessionOfToken(gomock.Any(), jti).Return(nil)
 				q.EXPECT().LockRefreshToken(gomock.Any(), jti).Return(sqlc.LockRefreshTokenRow{}, sql.ErrNoRows)
 			},
-			wantCode: apperror.CodeUnauthorized,
+			wantCode: CodeSessionExpired,
 		},
 		{
 			name:  "a session lock error is a 500 and the token isn't touched",
@@ -200,24 +200,25 @@ func TestService_Refresh_U(t *testing.T) {
 				other.UserID = 2
 				verified(q, m, other)
 			},
-			wantCode: apperror.CodeUnauthorized,
+			wantCode: CodeSessionExpired,
 		},
 		{
-			name:  "a spent token presented again: the session is revoked as token_reused",
+			name:  "a spent token presented again: the session is revoked as token_reused, 401 session_expired",
 			token: "ref",
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				verified(q, m, rotatedAgo(time.Minute))
 				q.EXPECT().RevokeSession(gomock.Any(), reused).Return(int64(1), nil)
 			},
-			wantCode: apperror.CodeUnauthorized,
+			wantCode: CodeSessionExpired,
 		},
 		{
-			name:  "a token rotated within the grace window (concurrent refresh): 401, the family kept",
+			name:  "a token rotated within the grace window (concurrent refresh): 401 refresh_superseded, the family kept",
 			token: "ref",
 			stub: func(q *MockQuerier, m *jwttoken.MockM) {
 				verified(q, m, rotatedAgo(time.Second))
 			},
-			wantCode: apperror.CodeUnauthorized,
+			wantCode:   CodeRefreshSuperseded,
+			wantDetail: supersededMessage,
 		},
 		{
 			name:  "a token of a signed-out session: 401 'your session has ended', nothing issued or revoked again",
@@ -226,7 +227,7 @@ func TestService_Refresh_U(t *testing.T) {
 				verified(q, m, signedOut)
 				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(active, nil)
 			},
-			wantCode:   apperror.CodeUnauthorized,
+			wantCode:   middleware.CodeSessionEnded,
 			wantDetail: middleware.SessionEndedMessage,
 		},
 		{
@@ -236,8 +237,8 @@ func TestService_Refresh_U(t *testing.T) {
 				verified(q, m, signedOut)
 				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(inactive, nil)
 			},
-			wantCode:   apperror.CodeUnauthorized,
-			wantDetail: accountInactiveMessage,
+			wantCode:   middleware.CodeAccountInactive,
+			wantDetail: middleware.AccountInactiveMessage,
 		},
 		{
 			name:  "a signed-out session of a deleted account: 401 'no longer active'",
@@ -246,8 +247,8 @@ func TestService_Refresh_U(t *testing.T) {
 				verified(q, m, signedOut)
 				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(sqlc.GetUserForRefreshRow{}, sql.ErrNoRows)
 			},
-			wantCode:   apperror.CodeUnauthorized,
-			wantDetail: accountInactiveMessage,
+			wantCode:   middleware.CodeAccountInactive,
+			wantDetail: middleware.AccountInactiveMessage,
 		},
 		{
 			name:  "a signed-out session whose user read fails: 500",
@@ -274,7 +275,7 @@ func TestService_Refresh_U(t *testing.T) {
 				verified(q, m, live)
 				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(inactive, nil)
 			},
-			wantCode: apperror.CodeUnauthorized,
+			wantCode: middleware.CodeAccountInactive,
 		},
 		{
 			name:  "a deleted user",
@@ -283,7 +284,7 @@ func TestService_Refresh_U(t *testing.T) {
 				verified(q, m, live)
 				q.EXPECT().GetUserForRefresh(gomock.Any(), int64(1)).Return(sqlc.GetUserForRefreshRow{}, sql.ErrNoRows)
 			},
-			wantCode: apperror.CodeUnauthorized,
+			wantCode: middleware.CodeAccountInactive,
 		},
 		{
 			name:  "a user read error is a 500",

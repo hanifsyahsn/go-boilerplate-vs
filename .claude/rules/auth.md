@@ -65,9 +65,18 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   `refresh_tokens.session_expires_at` NULL, the session slides with no cap. Untrusted (the default) →
   `session_expires_at = login + UNTRUSTED_SESSION_DURATION` (optional, default 7 days), copied to every
   successor; refresh issues a token no longer than what's left and is a 401 past it.
-- **Reuse detection**: a spent token presented again revokes its whole session (`token_reused`, → 401), since
-  it was probably stolen. Exception: within `reuseGrace` (10s, `refresh/service.go`) of its rotation it's treated as two tabs
-  refreshing at once — 401, family kept. Clients should still single-flight their refresh calls.
+- **Reuse detection**: a spent token presented again revokes its whole session (`token_reused`, → 401
+  `session_expired`), since it was probably stolen. Exception: within `reuseGrace` (10s, `refresh/service.go`) of
+  its rotation it's treated as two tabs refreshing at once — 401 `refresh_superseded`, family kept. Clients should
+  still single-flight their refresh calls.
+- **Auth 401 codes** (decision 0020): a client branches on the code, never the detail. `unauthorized` = the
+  access token is missing / bad / expired (refresh once, retry) — also wrong login credentials and a bad API key;
+  `session_ended` / `account_inactive` (`middleware.CodeSessionEnded` / `CodeAccountInactive`, with
+  `middleware.SessionEndedMessage` / `AccountInactiveMessage`) from the access-token check, refresh and login;
+  `session_expired` / `refresh_superseded` (`refresh.CodeSessionExpired` / `CodeRefreshSuperseded`) from refresh
+  only. Every 401 path of those three returns one of them — a new one picks its code from this list, and the
+  shared two are declared once in `middleware` (it can't import a feature; refresh and login import it). Tests
+  assert the code per case (`TestAccessTokenMiddleware_U`, `TestService_Refresh_U` / `_I`, `TestService_Login_U`).
 - Refresh re-reads the user, so the new access token carries the **current** role and a deactivated user gets
   none. An unknown jti (no row) is a 401.
 - Refresh / logout take the token from the cookie, else an optional `sessions` document

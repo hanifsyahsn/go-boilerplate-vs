@@ -27,6 +27,8 @@ Statuses: **built** = implemented in the boilerplate · **accepted** = agreed, n
 | [0017](0017-race-detector-in-docker.md) | Race detector: `go test -race` inside Docker (`make test_race`) | built |
 | [0018](0018-password-limit-in-bytes.md) | Password length is validated in bytes (`maxbytes=72`), bcrypt's limit | built |
 | [0019](0019-password-nfc.md) | Passwords are hashed and compared in Unicode NFC (`nfcmaxbytes=72`, legacy hashes rehashed at login) | built |
+| [0020](0020-auth-401-codes.md) | Auth 401s carry a code (`refresh_superseded`, `session_expired`, `session_ended`, `account_inactive`); the access cookie lives as long as the refresh token | accepted |
+| [0021](0021-allowed-origins-required.md) | `ALLOWED_ORIGINS` required outside development; `none` for a service without browser callers | accepted |
 
 The list of derivatives, where each decision came from and the adoption tracker are kept out of this public repo,
 in a gitignored `DERIVATIVES.local.md` next to this file on the maintainer's machine.

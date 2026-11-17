@@ -21,6 +21,7 @@ import (
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	internalshareddto "github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/dto"
@@ -103,12 +104,20 @@ func TestService_Login_U(t *testing.T) {
 			wantCode: apperror.CodeUnauthorized, wantMsg: invalidCredentialsMessage,
 		},
 		{
-			name: "a deactivated account",
+			name: "a deactivated account with the right password: account_inactive",
 			req:  Request{Email: "jane@example.com", Password: "Passw0rd!"},
 			stub: func(q *sqlc.MockQuerier, sq *authsharedsqlc.MockQuerier, m *jwttoken.MockM) {
 				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(inactive, nil)
 			},
-			wantCode: apperror.CodeUnauthorized, wantMsg: "Your account is no longer active.",
+			wantCode: middleware.CodeAccountInactive, wantMsg: middleware.AccountInactiveMessage,
+		},
+		{
+			name: "a deactivated account with a wrong password: the same unauthorized as any wrong password, never account_inactive",
+			req:  Request{Email: "jane@example.com", Password: "wrong"},
+			stub: func(q *sqlc.MockQuerier, sq *authsharedsqlc.MockQuerier, m *jwttoken.MockM) {
+				q.EXPECT().GetUserForLogin(gomock.Any(), gomock.Any()).Return(inactive, nil)
+			},
+			wantCode: apperror.CodeUnauthorized, wantMsg: invalidCredentialsMessage,
 		},
 		{
 			name: "a read error is a 500",
@@ -208,9 +217,9 @@ func TestService_Login_FailureLimit_U(t *testing.T) {
 				blocked("jane@example.com")}},
 		{name: "a deactivated account with the right password is not a failure",
 			attempts: []attempt{
-				{email: "jane@example.com", password: "Passw0rd!", user: &inactive, wantCode: apperror.CodeUnauthorized},
-				{email: "jane@example.com", password: "Passw0rd!", user: &inactive, wantCode: apperror.CodeUnauthorized},
-				{email: "jane@example.com", password: "Passw0rd!", user: &inactive, wantCode: apperror.CodeUnauthorized},
+				{email: "jane@example.com", password: "Passw0rd!", user: &inactive, wantCode: middleware.CodeAccountInactive},
+				{email: "jane@example.com", password: "Passw0rd!", user: &inactive, wantCode: middleware.CodeAccountInactive},
+				{email: "jane@example.com", password: "Passw0rd!", user: &inactive, wantCode: middleware.CodeAccountInactive},
 			}},
 		{name: "case and surrounding spaces don't give an email a fresh count",
 			attempts: []attempt{wrong("Jane@Example.com"), wrong(" jane@example.com "), blocked("JANE@EXAMPLE.COM")}},
@@ -537,7 +546,7 @@ func TestService_Login_IPFailureLimit_U(t *testing.T) {
 	inactive := jane
 	inactive.IsActive = false
 	inactiveRight := func(ip string) attempt {
-		return attempt{ip: ip, email: "jane@example.com", password: "Passw0rd!", user: &inactive, wantCode: apperror.CodeUnauthorized}
+		return attempt{ip: ip, email: "jane@example.com", password: "Passw0rd!", user: &inactive, wantCode: middleware.CodeAccountInactive}
 	}
 	blocked := func(ip, email string) attempt {
 		return attempt{ip: ip, email: email, password: "Passw0rd!", wantCode: apperror.CodeTooManyRequests}

@@ -13,6 +13,7 @@ import (
 	authsharedsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/shared/sqlc"
 	platformconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
+	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/middleware"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/ratelimit"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/apperror"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/shared/password"
@@ -55,9 +56,15 @@ func TestService_Login_I(t *testing.T) {
 			wantCode: apperror.CodeUnauthorized,
 		},
 		{
-			name:     "deactivated",
+			name:     "deactivated: the right password gets account_inactive",
 			seed:     testhelper.SeedUserParams{Email: "jane@example.com", IsActive: testhelper.BoolPtr(false)},
 			req:      Request{Email: "jane@example.com", Password: testhelper.DefaultPassword},
+			wantCode: middleware.CodeAccountInactive,
+		},
+		{
+			name:     "deactivated with a wrong password: unauthorized like any wrong password, never account_inactive",
+			seed:     testhelper.SeedUserParams{Email: "jane@example.com", IsActive: testhelper.BoolPtr(false)},
+			req:      Request{Email: "jane@example.com", Password: "wrong"},
 			wantCode: apperror.CodeUnauthorized,
 		},
 	}

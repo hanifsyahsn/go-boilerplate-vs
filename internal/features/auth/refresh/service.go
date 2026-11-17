@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/features/auth/refresh/sqlc"
@@ -20,6 +21,24 @@ import (
 const feature = "Refresh service"
 
 const sessionExpiredMessage = "Your session has expired. Please log in again."
+
+// supersededMessage is the 401 detail for a token another request rotated a
+// moment ago (two tabs refreshing at once): the client retries, it isn't
+// signed out.
+const supersededMessage = "Your session was just refreshed by another request. Please try again."
+
+// The refresh-only 401 codes (decision 0020); the shared ones
+// (middleware.CodeSessionEnded, middleware.CodeAccountInactive) come from the
+// access-token middleware.
+var (
+	// CodeSessionExpired: no usable refresh token (missing, invalid, expired,
+	// unknown, past the session cap, or a spent one reused) — sign in again.
+	CodeSessionExpired = apperror.NewCode("session_expired", http.StatusUnauthorized)
+	// CodeRefreshSuperseded: the token was rotated within reuseGrace by
+	// another request, the session is alive — retry the original call with
+	// the cookies that request set; don't refresh again, don't sign out.
+	CodeRefreshSuperseded = apperror.NewCode("refresh_superseded", http.StatusUnauthorized)
+)
 
 // reuseGrace is how long a just-rotated refresh token may come back without
 // counting as stolen: two tabs refreshing at the same moment send the same
@@ -64,15 +83,13 @@ func NewService(store StoreI, tokenMaker jwttoken.M, accessTokenDuration, refres
 }
 
 func sessionExpired(err error) error {
-	return apperror.New(apperror.CodeUnauthorized, sessionExpiredMessage, err)
+	return apperror.New(CodeSessionExpired, sessionExpiredMessage, err)
 }
 
-// accountInactiveMessage is the 401 detail for a missing or deactivated
-// account (the access-token middleware says the same).
-const accountInactiveMessage = "Your account is no longer active."
-
+// accountInactive is the 401 for a missing or deactivated account, the same
+// code and detail as the access-token middleware's.
 func accountInactive(err error) error {
-	return apperror.New(apperror.CodeUnauthorized, accountInactiveMessage, err)
+	return apperror.New(middleware.CodeAccountInactive, middleware.AccountInactiveMessage, err)
 }
 
 func internalError(err error) error {
@@ -135,13 +152,14 @@ func (s *service) Refresh(ctx context.Context, refreshToken string, client auths
 			if err != nil {
 				return internalError(fmt.Errorf("GetUserForRefresh(%d) (%s): %w", userID, feature, err))
 			}
-			return apperror.New(apperror.CodeUnauthorized, middleware.SessionEndedMessage,
+			return apperror.New(middleware.CodeSessionEnded, middleware.SessionEndedMessage,
 				fmt.Errorf("(%s): session %s of token %s is not live", feature, token.FamilyID, jti))
 		}
 
 		if token.RevokedAt.Valid {
 			if token.ReplacedBy.Valid && s.now().Sub(token.RevokedAt.Time) < reuseGrace {
-				return sessionExpired(fmt.Errorf("(%s): token %s was just rotated (concurrent refresh)", feature, jti))
+				return apperror.New(CodeRefreshSuperseded, supersededMessage,
+					fmt.Errorf("(%s): token %s was just rotated (concurrent refresh)", feature, jti))
 			}
 			if _, err := q.RevokeSession(ctx, authsharedsqlc.RevokeSessionParams{
 				FamilyID: token.FamilyID, Reason: authshared.RevokeReasonTokenReused,
