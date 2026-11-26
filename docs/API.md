@@ -84,8 +84,11 @@ Every response carries `Vary: Accept`. `/healthz` sits outside `/api` and skips 
 ## Cross-origin requests (CORS)
 
 A browser page on another origin may call the API only when its origin is listed in `ALLOWED_ORIGINS`
-(`scheme://host[:port]`, compared ignoring case and a trailing `/`). Empty list = CORS is off: no CORS
-header at all, so only same-origin pages can read the answers.
+(`scheme://host[:port]`, compared ignoring case and a trailing `/`). The list is **required** in every
+`ENVIRONMENT` but `development` (the API refuses to start without it). `ALLOWED_ORIGINS=none` is a service
+with no browser callers: no origin is listed, every preflight is a 403 and every write carrying an `Origin`
+header is refused (requests without one — servers, curl, native apps — pass). In `development` the list may
+be empty: CORS and the cross-origin write check below are then off.
 
 **Mobile apps:** a native app (Kotlin, Swift, Flutter, React Native) sends no `Origin` and needs no entry; it
 uses `Authorization: Bearer` and the tokens in `meta`. A hybrid app (Capacitor / Ionic) runs in a WebView that

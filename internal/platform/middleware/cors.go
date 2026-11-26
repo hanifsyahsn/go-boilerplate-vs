@@ -23,7 +23,9 @@ const (
 const OriginNotAllowedMessage = "This origin isn't allowed."
 
 // CORS answers browsers for the listed origins only. Empty list = off (no
-// CORS headers at all).
+// CORS headers at all; development only). "none" (NoBrowserOrigins) = on with
+// no origin listed: every preflight is a 403 and no response carries CORS
+// headers.
 //
 // A listed Origin is echoed back with credentials allowed (the auth cookies),
 // never "*"; a preflight (OPTIONS with Access-Control-Request-Method) from it
@@ -32,9 +34,9 @@ const OriginNotAllowedMessage = "This origin isn't allowed."
 // answer, and OriginGuard refuses its writes). Every response varies on
 // Origin.
 func CORS(allowedOrigins []string) gin.HandlerFunc {
-	allowed := newOriginSet(allowedOrigins)
+	allowed, on := newOriginSet(allowedOrigins)
 	return func(c *gin.Context) {
-		if len(allowed) == 0 {
+		if !on {
 			c.Next()
 			return
 		}

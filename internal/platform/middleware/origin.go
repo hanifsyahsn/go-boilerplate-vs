@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	platformconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/constant"
 )
 
 // normalizeOrigin is the form origins are compared in, by CORS and the
@@ -12,13 +14,20 @@ func normalizeOrigin(s string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(s)), "/")
 }
 
-// newOriginSet is ALLOWED_ORIGINS as a set of normalised origins.
-func newOriginSet(origins []string) map[string]struct{} {
-	set := make(map[string]struct{}, len(origins))
+// newOriginSet is ALLOWED_ORIGINS as a set of normalised origins, and whether
+// CORS and the origin guard are on. An empty list is off (allowed in
+// development only, decision 0021). platformconstant.NoBrowserOrigins
+// ("none") is on with nothing in the set: no browser origin is allowed, and a
+// request sending "Origin: none" matches nothing either.
+func newOriginSet(origins []string) (set map[string]struct{}, on bool) {
+	set = make(map[string]struct{}, len(origins))
 	for _, o := range origins {
+		if strings.EqualFold(strings.TrimSpace(o), platformconstant.NoBrowserOrigins) {
+			continue
+		}
 		set[normalizeOrigin(o)] = struct{}{}
 	}
-	return set
+	return set, len(origins) > 0
 }
 
 // singleHeader reads a header that is accepted only when sent exactly once:

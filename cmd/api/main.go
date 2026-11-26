@@ -47,6 +47,7 @@ import (
 	sessionlistsqlc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/list/sqlc"
 	sessionrevokesvc "github.com/hanifsyahsn/go_boilerplate_vs/internal/features/session/revoke"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/config"
+	platformconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/jwttoken"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/mailer"
@@ -107,8 +108,11 @@ func main() {
 	}
 
 	slog.InfoContext(ctx, "starting go_boilerplate_vs", "version", Version, "environment", conf.Environment)
-	if len(conf.AllowedOrigins) == 0 {
+	switch {
+	case len(conf.AllowedOrigins) == 0: // config allows it in development only
 		slog.WarnContext(ctx, "ALLOWED_ORIGINS is empty: CORS and the origin guard are off")
+	case conf.AllowedOrigins[0] == platformconstant.NoBrowserOrigins:
+		slog.InfoContext(ctx, "ALLOWED_ORIGINS=none: no browser origin is allowed, writes with an Origin header are refused")
 	}
 
 	conn, err := sql.Open(conf.DBDriver, conf.DBSource)

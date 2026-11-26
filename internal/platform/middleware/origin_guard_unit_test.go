@@ -16,6 +16,7 @@ func TestOriginGuard_U(t *testing.T) {
 	const forbidden = `{"jsonapi":{"version":"1.1"},"errors":[{"status":"403","code":"forbidden","title":"Forbidden",
 		"detail":"This request didn't come from an allowed origin.","source":{"header":"Origin"}}]}`
 	listed := []string{"https://app.example.com"}
+	none := []string{"none"} // ALLOWED_ORIGINS=none: no browser callers (decision 0021)
 
 	testCases := []struct {
 		name    string
@@ -30,6 +31,14 @@ func TestOriginGuard_U(t *testing.T) {
 			keyOnly: true, wantCode: http.StatusForbidden},
 		{name: "an empty list lets everything through", method: http.MethodPost,
 			origins: []string{"https://evil.example"}, wantCode: http.StatusTeapot},
+		{name: "none: a POST carrying an Origin is a 403", allowed: none, method: http.MethodPost,
+			origins: []string{"https://app.example.com"}, wantCode: http.StatusForbidden},
+		{name: "none: Origin none itself matches nothing", allowed: none, method: http.MethodPost,
+			origins: []string{"none"}, wantCode: http.StatusForbidden},
+		{name: "none: a POST without Origin (a server, curl) passes", allowed: none, method: http.MethodPost,
+			wantCode: http.StatusTeapot},
+		{name: "none: a GET with an Origin passes", allowed: none, method: http.MethodGet,
+			origins: []string{"https://app.example.com"}, wantCode: http.StatusTeapot},
 		{name: "GET from an unlisted origin passes", allowed: listed, method: http.MethodGet,
 			origins: []string{"https://evil.example"}, wantCode: http.StatusTeapot},
 		{name: "HEAD from an unlisted origin passes", allowed: listed, method: http.MethodHead,

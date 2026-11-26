@@ -57,8 +57,11 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   (`TestSetTokenCookies_U`, `TestHandler_Refresh_U`).
 - **CSRF**: the cookies are SameSite=Lax **and** `/api` runs `middleware.OriginGuard` (decision 0004): a write
   whose `Origin` isn't in `ALLOWED_ORIGINS` is a 403 before anything else runs. Lax alone leaves a same-site
-  sibling (another subdomain) and old browsers; a request without `Origin` passes (no page sent it). Empty
-  `ALLOWED_ORIGINS` turns the guard off (a startup warning says so) — set it in every deployed environment.
+  sibling (another subdomain) and old browsers; a request without `Origin` passes (no page sent it).
+  `ALLOWED_ORIGINS` is required outside development (decision 0021, `Config.Validate`), so a deployed service
+  can't run with the guard off by forgetting it; `none` = no browser origin (writes with an `Origin` → 403);
+  empty (development only) turns the guard and CORS off with a startup warning. `newOriginSet` returns the set
+  **and** whether it's on — never infer "off" from an empty set (`none` is on and empty).
 - Tokens carry `typ` (`access` / `refresh`); each verify rejects the other type.
 - **Refresh tokens rotate** (migration 000004, table `refresh_tokens`, one row per refresh token keyed on its
   `jti`). Login starts a *family* (one per login / device). `POST /api/auth/refresh` locks the presented token's

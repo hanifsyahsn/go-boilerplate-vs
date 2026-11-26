@@ -1,6 +1,6 @@
 # 0021 — `ALLOWED_ORIGINS` is required outside development (`none` for no browser callers)
 
-Status: accepted (2026-11-16), not built yet
+Status: built (2026-11-26)
 
 ## Decision
 1. `Config.Validate()` refuses an empty `ALLOWED_ORIGINS` when `ENVIRONMENT` isn't `development` — the start fails
@@ -19,14 +19,16 @@ still blocks a cross-site POST, but not a same-site sibling (another subdomain),
 Raised by the front-end team integrating an SSR React app. `none` exists so a service without a browser client
 never has to invent a fake origin to pass the check — and it ends up stricter than empty (browser writes refused).
 
-## Open points (settle when building)
-- How the guard / CORS get "on, nothing allowed": today an empty list means off in both; `none` must reach them as
-  an enabled-but-empty set (e.g. a flag on `server.Security`), not as an empty list.
-- `.env.example`, CLAUDE.md *Config*, `docs/API.md` (*Cross-origin requests*), auth.md / jsonapi.md mentions of
-  "empty = off".
-- Tests: config cases (empty in production → error; empty in development → ok; `none` → ok; `none,https://x` →
-  error); guard with `none` (write with Origin → 403, without → passes, GET passes); CORS with `none` (no header,
-  preflight 403).
+## Built (2026-11-26)
+- `Config.Validate` → `checkAllowedOrigins`: empty outside development is an error naming the fix; `none` (any
+  case, trimmed) stands alone and is stored as `none` (`platformconstant.NoBrowserOrigins`, one constant for
+  config and middleware); every other entry is checked by `NormalizeOrigin` as before.
+- `none` reaches CORS / the guard as the list `["none"]`: `middleware.newOriginSet` returns the set **and** `on`
+  (= the list isn't empty) and never puts `none` in the set, so `Origin: none` sent by hand matches nothing.
+  No new field on `server.Security`.
+- `main` logs info `ALLOWED_ORIGINS=none: …` for `none`; the warning for empty stays (development only now).
+- Tests: `TestLoadConfig_Env_U` (empty outside development, staging, empty in development, `None`, `none` mixed),
+  `TestOriginGuard_U` / `TestCORS_U` (`none` cases); both mutation-checked.
 
 ## Adopting it in a derivative
 Every derivative: set `ALLOWED_ORIGINS` in each non-development environment (the front end's origins, or `none`)

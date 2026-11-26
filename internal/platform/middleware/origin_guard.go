@@ -15,7 +15,8 @@ import (
 const OriginNotAllowedForWriteMessage = "This request didn't come from an allowed origin."
 
 // OriginGuard refuses a state-changing request whose Origin header isn't
-// listed. Empty list = off.
+// listed. Empty list = off (development only); "none" (NoBrowserOrigins) = on
+// with no origin listed, so every write carrying an Origin is refused.
 //
 // It closes the CSRF paths SameSite=Lax leaves open (a same-site sibling, an
 // old browser): GET / HEAD / OPTIONS pass; any other method passes with no
@@ -24,9 +25,9 @@ const OriginNotAllowedForWriteMessage = "This request didn't come from an allowe
 // lowercase, no trailing /), and is a 403 on source.header Origin otherwise,
 // the literal "null" (a sandboxed frame, a file:// page) included.
 func OriginGuard(allowedOrigins []string) gin.HandlerFunc {
-	allowed := newOriginSet(allowedOrigins)
+	allowed, on := newOriginSet(allowedOrigins)
 	return func(c *gin.Context) {
-		if len(allowed) == 0 {
+		if !on {
 			c.Next()
 			return
 		}

@@ -24,6 +24,7 @@ var validEnv = map[string]string{
 	"APP_BASE_URL":           "https://app.example.com",
 	"SMTP_HOST":              "smtp.example.com",
 	"SMTP_FROM":              "App <no-reply@example.com>",
+	"ALLOWED_ORIGINS":        "https://app.example.com",
 }
 
 func TestLoadConfig_Env_U(t *testing.T) {
@@ -46,7 +47,7 @@ func TestLoadConfig_Env_U(t *testing.T) {
 				require.Equal(t, "text", c.LogFormat)
 				require.Equal(t, "info", c.LogLevel)
 				require.Empty(t, c.TrustedProxies, "no proxy trusted by default")
-				require.Empty(t, c.AllowedOrigins, "no origin allowed by default")
+				require.Equal(t, []string{"https://app.example.com"}, c.AllowedOrigins)
 				require.Empty(t, c.APIKeys, "no API key by default")
 				require.Equal(t, 587, c.SMTPPort, "SMTP submission port by default")
 				require.Equal(t, "https://app.example.com", c.AppBaseURL)
@@ -169,6 +170,31 @@ func TestLoadConfig_Env_U(t *testing.T) {
 				require.Equal(t, "https://example.com/app", c.AppBaseURL)
 			},
 		},
+		{name: "outside development ALLOWED_ORIGINS is required: empty refuses to start and the error says how to fix it (decision 0021)",
+			override: map[string]string{"ALLOWED_ORIGINS": ""},
+			wantErr: "config: ALLOWED_ORIGINS is required outside development: the front end's origins " +
+				"(https://app.example.com), or none for a service without browser callers"},
+		{name: "staging counts as outside development", override: map[string]string{"ENVIRONMENT": "staging", "ALLOWED_ORIGINS": " , "},
+			wantErr: "ALLOWED_ORIGINS is required outside development"},
+		{
+			name:     "in development ALLOWED_ORIGINS may stay empty (CORS and the origin guard off, a warning at start)",
+			override: map[string]string{"ENVIRONMENT": "development", "ALLOWED_ORIGINS": ""},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Empty(t, c.AllowedOrigins)
+			},
+		},
+		{
+			name:     "none (any case) is a service without browser callers, stored as none",
+			override: map[string]string{"ALLOWED_ORIGINS": " None "},
+			wantCheck: func(t *testing.T, c Config) {
+				require.Equal(t, []string{"none"}, c.AllowedOrigins)
+			},
+		},
+		{name: "none can't be combined with origins", override: map[string]string{"ALLOWED_ORIGINS": "none,https://app.example.com"},
+			wantErr: "ALLOWED_ORIGINS none can't be combined with origins"},
+		{name: "none can't be combined with origins wherever it stands (last, upper case)",
+			override: map[string]string{"ALLOWED_ORIGINS": "https://app.example.com,NONE"},
+			wantErr:  "ALLOWED_ORIGINS none can't be combined with origins"},
 		{
 			name:     "allowed origins read as a list, normalised to lowercase without a trailing slash",
 			override: map[string]string{"ALLOWED_ORIGINS": " https://App.Example.com/ ,http://localhost:5173"},
@@ -279,7 +305,6 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			t.Setenv("LOG_FORMAT", "")
 			t.Setenv("LOG_LEVEL", "")
 			t.Setenv("TRUSTED_PROXIES", "")
-			t.Setenv("ALLOWED_ORIGINS", "")
 			t.Setenv("SMTP_PORT", "")
 			t.Setenv("ACTIVITY_LOG_RETENTION", "")
 			t.Setenv("TELEGRAM_BOT_TOKEN", "")

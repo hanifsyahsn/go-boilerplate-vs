@@ -76,7 +76,9 @@ type Security struct {
 	// (they run on every open tab). Required.
 	PublicIPLimit ratelimit.Limiter
 	// AllowedOrigins (ALLOWED_ORIGINS, normalised) are the browser origins
-	// CORS answers and the origin guard lets write. Empty turns both off.
+	// CORS answers and the origin guard lets write. Empty turns both off
+	// (config allows it in development only); ["none"] keeps both on with no
+	// origin allowed (decision 0021).
 	AllowedOrigins []string
 	// ActivityRecorder takes one record per request (the API activity log,
 	// decision 0008). nil records nothing (router tests); main always sets it.

@@ -306,7 +306,8 @@ func TestNewRouter_CORS_U(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	testCases := []struct {
 		name        string
-		method      string // "" = a preflight (OPTIONS + Access-Control-Request-Method)
+		allowed     []string // nil = https://app.example.com listed
+		method      string   // "" = a preflight (OPTIONS + Access-Control-Request-Method)
 		origin      string
 		contentType string // "" = application/vnd.api+json
 		wantCode    int
@@ -323,6 +324,13 @@ func TestNewRouter_CORS_U(t *testing.T) {
 		{name: "a write from a listed origin passes the guard and reaches the handler",
 			method: http.MethodPost, origin: "https://app.example.com", wantCode: http.StatusTeapot,
 			wantOrigin: "https://app.example.com"},
+		{name: "ALLOWED_ORIGINS=none: a preflight is CORS's 403 with no CORS header (decision 0021)",
+			allowed: []string{"none"}, origin: "https://app.example.com", wantCode: http.StatusForbidden},
+		{name: "ALLOWED_ORIGINS=none: a write carrying an Origin is the guard's 403, the handler never runs",
+			allowed: []string{"none"}, method: http.MethodPost, origin: "https://app.example.com", wantCode: http.StatusForbidden,
+			wantDetail: "This request didn't come from an allowed origin."},
+		{name: "ALLOWED_ORIGINS=none: a write without Origin (a server, curl) reaches the handler",
+			allowed: []string{"none"}, method: http.MethodPost, wantCode: http.StatusTeapot},
 	}
 
 	for _, tc := range testCases {
@@ -330,11 +338,15 @@ func TestNewRouter_CORS_U(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			h := newMocks(ctrl)
 			h.login.EXPECT().Login(gomock.Any()).Do(func(c *gin.Context) { c.Status(http.StatusTeapot) }).AnyTimes()
+			allowed := tc.allowed
+			if allowed == nil {
+				allowed = []string{"https://app.example.com"}
+			}
 			r, err := NewRouter("v", jwttoken.NewMockM(ctrl), middlewaresqlc.NewMockQuerier(ctrl), h.handlers(),
 				Security{
 					AuthIPLimit:    ratelimit.NewMemory(ratelimit.Rate{Burst: 10, Per: time.Minute}),
 					PublicIPLimit:  ratelimit.NewMemory(ratelimit.Rate{Burst: 10, Per: time.Minute}),
-					AllowedOrigins: []string{"https://app.example.com"},
+					AllowedOrigins: allowed,
 				})
 			require.NoError(t, err)
 
@@ -346,7 +358,9 @@ func TestNewRouter_CORS_U(t *testing.T) {
 				contentType = jsonapi.MediaType
 			}
 			req := httptest.NewRequest(method, "/api/auth/login", strings.NewReader(`{}`))
-			req.Header.Set("Origin", tc.origin)
+			if tc.origin != "" { // an empty Origin header is itself refused by the guard
+				req.Header.Set("Origin", tc.origin)
+			}
 			req.Header.Set("Content-Type", contentType)
 			if tc.method == "" {
 				req.Header.Set("Access-Control-Request-Method", http.MethodPost)

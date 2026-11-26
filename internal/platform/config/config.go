@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	platformconstant "github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/constant"
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
@@ -224,6 +225,10 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, err
 	}
 	for i, origin := range config.AllowedOrigins {
+		if isNoBrowserOrigins(origin) {
+			config.AllowedOrigins[i] = platformconstant.NoBrowserOrigins
+			continue
+		}
 		config.AllowedOrigins[i], _ = NormalizeOrigin(origin) // Validate checked every entry
 	}
 
@@ -295,9 +300,11 @@ func getBoolEnv(v *viper.Viper, key string, defaultVal bool) (bool, error) {
 }
 
 // Validate enforces every required field. Optional knobs
-// (REFRESH_TOKEN_DURATION, UNTRUSTED_SESSION_DURATION, COOKIE_*, LOG_*, TRUSTED_PROXIES,
-// ALLOWED_ORIGINS) get their defaults in LoadConfig, which also normalises
-// ALLOWED_ORIGINS after this check;
+// (REFRESH_TOKEN_DURATION, UNTRUSTED_SESSION_DURATION, COOKIE_*, LOG_*, TRUSTED_PROXIES)
+// get their defaults in LoadConfig, which also normalises ALLOWED_ORIGINS after
+// this check. ALLOWED_ORIGINS is required outside development (decision 0021):
+// the front end's origins, or "none" alone for a service without browser
+// callers;
 // LOG_FORMAT / LOG_LEVEL must still be values logging accepts, and each
 // TRUSTED_PROXIES entry an IP or a CIDR.
 func (c Config) Validate() error {
@@ -358,12 +365,38 @@ func (c Config) Validate() error {
 	if c.SMTPPort < 1 || c.SMTPPort > 65535 {
 		errs = append(errs, fmt.Errorf("config: SMTP_PORT %d is not a port", c.SMTPPort))
 	}
+	errs = append(errs, c.checkAllowedOrigins()...)
+	return errors.Join(errs...)
+}
+
+// checkAllowedOrigins: required outside development (empty there would turn
+// CORS and the origin guard off in production with only a warning); "none"
+// stands alone; every other entry is an origin.
+func (c Config) checkAllowedOrigins() []error {
+	if len(c.AllowedOrigins) == 0 {
+		if c.Environment == EnvironmentDevelopment {
+			return nil
+		}
+		return []error{errors.New("config: ALLOWED_ORIGINS is required outside development: the front end's origins " +
+			"(https://app.example.com), or none for a service without browser callers")}
+	}
+	var errs []error
 	for _, origin := range c.AllowedOrigins {
+		if isNoBrowserOrigins(origin) {
+			if len(c.AllowedOrigins) > 1 {
+				errs = append(errs, errors.New("config: ALLOWED_ORIGINS none can't be combined with origins"))
+			}
+			continue
+		}
 		if _, err := NormalizeOrigin(origin); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(errs...)
+	return errs
+}
+
+func isNoBrowserOrigins(s string) bool {
+	return strings.EqualFold(strings.TrimSpace(s), platformconstant.NoBrowserOrigins)
 }
 
 // originSchemes are the schemes an ALLOWED_ORIGINS entry may have: the web,
