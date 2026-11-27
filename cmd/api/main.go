@@ -260,7 +260,7 @@ func main() {
 	// Only now: a request that finished during the drain has queued its
 	// background work, which gets the cancel and flushes before the DB pool
 	// (deferred above) closes.
-	stopBackground(stopBg, &bg, stopAlerts, &alertSender, alertDrainTimeout)
+	stopBackground(stopBg, &bg, stopAlerts, &alertSender, backgroundStopTimeout, alertDrainTimeout)
 	if rdb != nil {
 		_ = rdb.Close() // after every request and background job is done with it
 	}
@@ -269,27 +269,54 @@ func main() {
 	}
 }
 
+// backgroundStopTimeout bounds stopBackground as a whole, jobs then alerts:
+// deploy.sh force-stops 30 s after SIGTERM, the server drain takes up to 5 s,
+// this 20 s, which leaves 5 s to close the pools and exit (decision 0005).
+const backgroundStopTimeout = 20 * time.Second
+
 // alertDrainTimeout bounds how long shutdown waits for the last alerts: with
 // Telegram down each send takes its 5 s timeout, and up to 100 can be queued.
-// deploy.sh gives 30 s in all (server drain 5 s, the last activity flush 5 s).
+// It is at most what's left of backgroundStopTimeout after the jobs.
 const alertDrainTimeout = 10 * time.Second
 
 // stopBackground ends the background work once the server has drained: the
 // jobs first (they flush what the last requests queued, and a failure there
 // may raise an alert), then the alert sender, which sends what is queued
-// before it returns, so those last alerts still go out — for up to
-// alertDrain; what's left then is given up (warned), not waited for.
+// before it returns, so those last alerts still go out. Everything shares one
+// deadline, total from the call: a job that ignores its cancel is given up
+// (warned) at the deadline, not waited for, and the alerts get what's left —
+// at most alertDrain — then are given up (warned) too.
 func stopBackground(stopJobs context.CancelFunc, jobs *utility.Group, stopAlerts context.CancelFunc, alertSender *utility.Group,
-	alertDrain time.Duration) {
+	total, alertDrain time.Duration) {
+	deadline := time.Now().Add(total)
 	stopJobs()
-	jobs.Wait()
+	if !waitFor(jobs, total) {
+		slog.Warn("background: jobs not finished before shutdown", "waited", total.String())
+	}
 	stopAlerts()
+	drain := min(alertDrain, time.Until(deadline))
+	if !waitFor(alertSender, drain) {
+		slog.Warn("notifier: alerts not sent before shutdown", "waited", max(drain, 0).String())
+	}
+}
+
+// minWait is the least waitFor waits, even past the deadline: long enough for
+// a group that has already finished to be seen finished (its Wait runs in a
+// goroutine), far inside the 5 s backgroundStopTimeout leaves.
+const minWait = 50 * time.Millisecond
+
+// waitFor waits for g at most d (minWait when d is shorter) and says whether
+// g finished. A group still running is left to the process exit.
+func waitFor(g *utility.Group, d time.Duration) bool {
 	done := make(chan struct{})
-	go func() { alertSender.Wait(); close(done) }()
+	go func() { g.Wait(); close(done) }()
+	timer := time.NewTimer(max(d, minWait))
+	defer timer.Stop()
 	select {
 	case <-done:
-	case <-time.After(alertDrain):
-		slog.Warn("notifier: alerts not sent before shutdown", "waited", alertDrain.String())
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 

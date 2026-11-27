@@ -141,7 +141,7 @@ Windows".
 - `cmd/api` — entrypoint: config → db pool → background group (`bgCtx`, `bg`) → validators → token maker → one
   service/handler per slice → `server.Handlers` → `server.NewServer(...).Run(ctx)` (graceful shutdown on
   SIGINT/SIGTERM) → `stopBackground` (`stopBg()` → `bg.Wait()` → then the alert sender's own ctx and group, so a
-  job's last alert still goes out) → the DB pool closes (see *Logging*).
+  job's last alert still goes out; one 20 s deadline over both) → the DB pool closes (see *Logging*).
 - `internal/platform` — infrastructure: `config` (viper, `.env` optional), `logging` (`log/slog` setup: `New` /
   `Setup` / `Check` / `Fatal`, a handler adding `request_id`), `server` (`server.go` + `router.go` with the
   `Handlers` and `Security` structs), `middleware` (`RequestID`, `AccessLog`, `ActivityLog`, `CORS`, `OriginGuard`, `JSONAPIMediaType`, `APIKey`,

@@ -41,9 +41,13 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (*Request
   `utility.Group` (`bg.Go(ctx, fn)` — recovered like `SafeGoContext`, counted done only **after** a panic was
   logged and reported, so `Wait` never returns ahead of that record), never a bare `SafeGoContext`. `main` cancels
   `bgCtx` only **after** `srv.Run` returned (requests drained), then `bg.Wait()`, then stops the **alert sender**
-  (its own ctx and group, `stopBackground` in `main.go`: a job finishing late can still alert; at most
-  `alertDrainTimeout` = 10 s, then warn `notifier: alerts not sent before shutdown`), then the DB pool
-  closes — so the last requests' work is flushed, not lost (`TestStopBackground_U`, `TestGroup_U`). A service that starts such work takes a `utility.GoFunc` (main passes
+  (its own ctx and group, `stopBackground` in `main.go`: a job finishing late can still alert), then the DB pool
+  closes — so the last requests' work is flushed, not lost (`TestStopBackground_U`, `TestGroup_U`).
+  **One deadline over both** (`backgroundStopTimeout` = 20 s: deploy.sh's 30 s − the 5 s server drain − 5 s to
+  close and exit): a job that ignores its cancel is given up at it (warn `background: jobs not finished before
+  shutdown`), the alerts get what's left, at most `alertDrainTimeout` = 10 s (warn `notifier: alerts not sent
+  before shutdown`); nothing is waited for past it but `minWait` (50 ms) (`TestStopBackground_Deadline_U`). A new
+  job still returns on its ctx — the deadline is the safety net, not the way to stop it. A service that starts such work takes a `utility.GoFunc` (main passes
   `bg.Go`; tests pass one that runs `fn` inline) and hands it `requestid.Detach(ctx)`. A worker returns when its
   ctx is done, after flushing.
 - A goroutine that outlives the request: `utility.SafeGoContext(requestid.Detach(ctx), fn)` — `Detach` keeps
