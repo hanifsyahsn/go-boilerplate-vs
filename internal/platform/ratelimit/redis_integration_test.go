@@ -14,6 +14,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// testCallTimeout replaces RedisTimeout in the tests against the real Redis:
+// they check behaviour, not latency, and under a full make check a first call
+// (dial + EVALSHA + EVAL) once took over the 150 ms production bound.
+// TestRedis_Timeout_U pins that bound; TestRedis_Down_I keeps it.
+const testCallTimeout = 2 * time.Second
+
+// newTestRedis is NewRedis with testCallTimeout.
+func newTestRedis(c *redis.Client, rate Rate, name string) *Redis {
+	l := NewRedis(c, rate, name)
+	l.timeout = testCallTimeout
+	return l
+}
+
 var (
 	redisOnce   sync.Once
 	redisClient *redis.Client
@@ -41,7 +54,7 @@ func TestRedis_Contract_I(t *testing.T) {
 	}
 	c := testRedis(t)
 	runLimiterContract(t, 200*time.Millisecond, func(r Rate) Limiter {
-		return NewRedis(c, r, uuid.NewString()) // a fresh name: fresh keys
+		return newTestRedis(c, r, uuid.NewString()) // a fresh name: fresh keys
 	}, func(_ Limiter, d time.Duration) {
 		time.Sleep(d)
 	})
@@ -63,7 +76,7 @@ func TestRedis_Take_Parallel_I(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			l := NewRedis(c, Rate{Burst: tc.burst, Per: time.Hour}, uuid.NewString())
+			l := newTestRedis(c, Rate{Burst: tc.burst, Per: time.Hour}, uuid.NewString())
 			var allowed atomic.Int64
 			var wg sync.WaitGroup
 			for range tc.parallel {
@@ -97,7 +110,7 @@ func TestRedis_KeyExpires_I(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			name := uuid.NewString()
-			l := NewRedis(c, tc.rate, name)
+			l := newTestRedis(c, tc.rate, name)
 			_, err := l.Take(context.Background(), "k")
 			require.NoError(t, err)
 			ttl, err := c.PTTL(context.Background(), "rl:"+name+":k").Result()
@@ -157,7 +170,7 @@ func TestRedis_StoredStatePrecision_I(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			name := uuid.NewString()
-			l := NewRedis(c, Rate{Burst: 5, Per: time.Minute}, name)
+			l := newTestRedis(c, Rate{Burst: 5, Per: time.Minute}, name)
 			require.NoError(t, tc.take(l))
 
 			ts, err := c.HGet(context.Background(), "rl:"+name+":k", "ts").Result()

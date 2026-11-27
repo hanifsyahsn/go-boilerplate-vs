@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hanifsyahsn/go_boilerplate_vs/internal/platform/logging"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
@@ -152,6 +153,59 @@ func TestFailOpen_U(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.run(t, captureLogs(t))
+		})
+	}
+}
+
+// deadlineScripter records the deadline of the ctx each script call gets and
+// fails at once (no waiting: the bound is read off the ctx, not off a clock).
+type deadlineScripter struct {
+	redis.Scripter
+	deadline    time.Time
+	hasDeadline bool
+}
+
+func (s *deadlineScripter) EvalSha(ctx context.Context, _ string, _ []string, _ ...any) *redis.Cmd {
+	return s.record(ctx)
+}
+
+func (s *deadlineScripter) Eval(ctx context.Context, _ string, _ []string, _ ...any) *redis.Cmd {
+	return s.record(ctx)
+}
+
+func (s *deadlineScripter) record(ctx context.Context) *redis.Cmd {
+	s.deadline, s.hasDeadline = ctx.Deadline()
+	cmd := redis.NewCmd(ctx)
+	cmd.SetErr(errors.New("redis down"))
+	return cmd
+}
+
+func TestRedis_Timeout_U(t *testing.T) {
+	testCases := []struct {
+		name    string
+		call    func(l *Redis) error
+		wantErr string
+	}{
+		{name: "a Take gives Redis exactly RedisTimeout, even when the caller's ctx has none", wantErr: "ratelimit.Redis.Take",
+			call: func(l *Redis) error { _, err := l.Take(context.Background(), "k"); return err }},
+		{name: "a Reset gives Redis exactly RedisTimeout", wantErr: "ratelimit.Redis.Reset",
+			call: func(l *Redis) error { return l.Reset(context.Background(), "k") }},
+		{name: "a Return gives Redis exactly RedisTimeout", wantErr: "ratelimit.Redis.Return",
+			call: func(l *Redis) error { return l.Return(context.Background(), "k") }},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &deadlineScripter{}
+			l := NewRedis(s, Rate{Burst: 5, Per: time.Minute}, "x")
+			before := time.Now()
+			err := tc.call(l)
+			after := time.Now()
+			require.ErrorContains(t, err, tc.wantErr)
+			require.True(t, s.hasDeadline, "every Redis call is bounded")
+			// The deadline was set between before and after, RedisTimeout ahead:
+			// exact bounds whatever the scheduler does.
+			require.False(t, s.deadline.Before(before.Add(RedisTimeout)), "deadline %v earlier than RedisTimeout", s.deadline.Sub(before))
+			require.False(t, s.deadline.After(after.Add(RedisTimeout)), "deadline %v later than RedisTimeout", s.deadline.Sub(after))
 		})
 	}
 }

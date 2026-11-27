@@ -31,9 +31,10 @@ var (
 // is the same as full. Wrap it in WithFallback or FailOpen: on its own an
 // error reaches the caller.
 type Redis struct {
-	client redis.Scripter // *redis.Client in prod
-	rate   Rate
-	prefix string // "rl:" + name + ":"
+	client  redis.Scripter // *redis.Client in prod
+	rate    Rate
+	prefix  string        // "rl:" + name + ":"
+	timeout time.Duration // per call; RedisTimeout, longer only in this package's tests
 }
 
 var _ Limiter = (*Redis)(nil)
@@ -45,7 +46,7 @@ func NewRedis(client redis.Scripter, rate Rate, name string) *Redis {
 	if rate.Burst <= 0 || rate.Per <= 0 || rate.interval().Microseconds() == 0 {
 		panic(fmt.Sprintf("ratelimit.NewRedis(): Burst and Per must be > 0 with an interval of at least 1µs, got %+v", rate))
 	}
-	return &Redis{client: client, rate: rate, prefix: "rl:" + name + ":"}
+	return &Redis{client: client, rate: rate, prefix: "rl:" + name + ":", timeout: RedisTimeout}
 }
 
 // args are the scripts' ARGV: burst, interval in µs, ttl in ms.
@@ -55,7 +56,7 @@ func (r *Redis) args() []any {
 }
 
 func (r *Redis) Take(ctx context.Context, key string) (Decision, error) {
-	ctx, cancel := context.WithTimeout(ctx, RedisTimeout)
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 	res, err := takeScript.Run(ctx, r.client, []string{r.prefix + key}, r.args()...).Int64Slice()
 	if err != nil {
@@ -71,7 +72,7 @@ func (r *Redis) Take(ctx context.Context, key string) (Decision, error) {
 }
 
 func (r *Redis) Reset(ctx context.Context, key string) error {
-	ctx, cancel := context.WithTimeout(ctx, RedisTimeout)
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 	if err := resetScript.Run(ctx, r.client, []string{r.prefix + key}).Err(); err != nil {
 		return fmt.Errorf("ratelimit.Redis.Reset: %w", err)
@@ -80,7 +81,7 @@ func (r *Redis) Reset(ctx context.Context, key string) error {
 }
 
 func (r *Redis) Return(ctx context.Context, key string) error {
-	ctx, cancel := context.WithTimeout(ctx, RedisTimeout)
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 	if err := returnScript.Run(ctx, r.client, []string{r.prefix + key}, r.args()...).Err(); err != nil {
 		return fmt.Errorf("ratelimit.Redis.Return: %w", err)
