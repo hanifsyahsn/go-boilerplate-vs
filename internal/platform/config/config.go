@@ -225,7 +225,7 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, err
 	}
 	for i, origin := range config.AllowedOrigins {
-		if isNoBrowserOrigins(origin) {
+		if platformconstant.IsNoBrowserOrigins(origin) {
 			config.AllowedOrigins[i] = platformconstant.NoBrowserOrigins
 			continue
 		}
@@ -381,22 +381,24 @@ func (c Config) checkAllowedOrigins() []error {
 			"(https://app.example.com), or none for a service without browser callers")}
 	}
 	var errs []error
+	nones, origins := 0, 0
 	for _, origin := range c.AllowedOrigins {
-		if isNoBrowserOrigins(origin) {
-			if len(c.AllowedOrigins) > 1 {
-				errs = append(errs, errors.New("config: ALLOWED_ORIGINS none can't be combined with origins"))
-			}
+		if platformconstant.IsNoBrowserOrigins(origin) {
+			nones++
 			continue
 		}
+		origins++
 		if _, err := NormalizeOrigin(origin); err != nil {
 			errs = append(errs, err)
 		}
 	}
+	switch {
+	case nones > 0 && origins > 0:
+		errs = append(errs, errors.New("config: ALLOWED_ORIGINS none can't be combined with origins"))
+	case nones > 1:
+		errs = append(errs, errors.New("config: ALLOWED_ORIGINS none is listed more than once: write it once"))
+	}
 	return errs
-}
-
-func isNoBrowserOrigins(s string) bool {
-	return strings.EqualFold(strings.TrimSpace(s), platformconstant.NoBrowserOrigins)
 }
 
 // originSchemes are the schemes an ALLOWED_ORIGINS entry may have: the web,

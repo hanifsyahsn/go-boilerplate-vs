@@ -29,11 +29,13 @@ var validEnv = map[string]string{
 
 func TestLoadConfig_Env_U(t *testing.T) {
 	testCases := []struct {
-		name      string
-		override  map[string]string
-		wantErr   string
-		wantNot   string // must not appear in the error
-		wantCheck func(t *testing.T, c Config)
+		name     string
+		override map[string]string
+		wantErr  string
+		wantNot  string // must not appear in the error
+		// wantExactErr is the whole error text: nothing said twice, nothing else
+		wantExactErr string
+		wantCheck    func(t *testing.T, c Config)
 	}{
 		{
 			name: "every required var set: defaults applied to the optional ones",
@@ -195,6 +197,12 @@ func TestLoadConfig_Env_U(t *testing.T) {
 		{name: "none can't be combined with origins wherever it stands (last, upper case)",
 			override: map[string]string{"ALLOWED_ORIGINS": "https://app.example.com,NONE"},
 			wantErr:  "ALLOWED_ORIGINS none can't be combined with origins"},
+		{name: "none combined with origins is said once, however many nones are listed",
+			override:     map[string]string{"ALLOWED_ORIGINS": "none,https://app.example.com,none"},
+			wantExactErr: "config: ALLOWED_ORIGINS none can't be combined with origins"},
+		{name: "none listed twice with no origin refuses to start and says so, not that origins were given",
+			override:     map[string]string{"ALLOWED_ORIGINS": "none, NONE"},
+			wantExactErr: "config: ALLOWED_ORIGINS none is listed more than once: write it once"},
 		{
 			name:     "allowed origins read as a list, normalised to lowercase without a trailing slash",
 			override: map[string]string{"ALLOWED_ORIGINS": " https://App.Example.com/ ,http://localhost:5173"},
@@ -318,6 +326,10 @@ func TestLoadConfig_Env_U(t *testing.T) {
 			}
 
 			c, err := LoadConfig(t.TempDir())
+			if tc.wantExactErr != "" {
+				require.EqualError(t, err, tc.wantExactErr)
+				return
+			}
 			if tc.wantErr != "" {
 				require.ErrorContains(t, err, tc.wantErr)
 				if tc.wantNot != "" {

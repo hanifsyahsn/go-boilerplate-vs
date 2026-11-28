@@ -22,7 +22,7 @@ func normalizeOrigin(s string) string {
 func newOriginSet(origins []string) (set map[string]struct{}, on bool) {
 	set = make(map[string]struct{}, len(origins))
 	for _, o := range origins {
-		if strings.EqualFold(strings.TrimSpace(o), platformconstant.NoBrowserOrigins) {
+		if platformconstant.IsNoBrowserOrigins(o) {
 			continue
 		}
 		set[normalizeOrigin(o)] = struct{}{}

@@ -108,12 +108,7 @@ func main() {
 	}
 
 	slog.InfoContext(ctx, "starting go_boilerplate_vs", "version", Version, "environment", conf.Environment)
-	switch {
-	case len(conf.AllowedOrigins) == 0: // config allows it in development only
-		slog.WarnContext(ctx, "ALLOWED_ORIGINS is empty: CORS and the origin guard are off")
-	case conf.AllowedOrigins[0] == platformconstant.NoBrowserOrigins:
-		slog.InfoContext(ctx, "ALLOWED_ORIGINS=none: no browser origin is allowed, writes with an Origin header are refused")
-	}
+	logAllowedOrigins(ctx, conf.AllowedOrigins)
 
 	conn, err := sql.Open(conf.DBDriver, conf.DBSource)
 	if err != nil {
@@ -266,6 +261,19 @@ func main() {
 	}
 	if runErr != nil {
 		logging.Fatal("server run failed", "err", runErr)
+	}
+}
+
+// logAllowedOrigins says at start when CORS and the origin guard aren't
+// guarding browser origins (decision 0021): empty (config allows it in
+// development only) turns both off — a warning; none keeps both on with no
+// origin allowed — info. A list of origins logs nothing.
+func logAllowedOrigins(ctx context.Context, origins []string) {
+	switch {
+	case len(origins) == 0:
+		slog.WarnContext(ctx, "ALLOWED_ORIGINS is empty: CORS and the origin guard are off")
+	case len(origins) == 1 && platformconstant.IsNoBrowserOrigins(origins[0]):
+		slog.InfoContext(ctx, "ALLOWED_ORIGINS=none: no browser origin is allowed, writes with an Origin header are refused")
 	}
 }
 

@@ -15,3 +15,5 @@ The refresh token rides a cookie; SameSite=Lax alone doesn't close every CSRF pa
   without an `Origin` header or with exactly one listed origin, and is a JSON:API 403 `forbidden` ("This request
   didn't come from an allowed origin.", `source.header` `Origin`) otherwise — `null`, an empty value and two
   `Origin` headers included. Empty list = off.
+- Since 0021 (2026-11-26): `ALLOWED_ORIGINS` is required outside development, so "empty = off" holds in
+  development only; `none` keeps the guard on with no origin allowed (every write with an `Origin` → 403).

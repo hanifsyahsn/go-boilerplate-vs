@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sync"
 	"testing"
@@ -190,6 +191,46 @@ func TestStopBackground_Deadline_U(t *testing.T) {
 			for _, not := range tc.wantNoLogs {
 				require.NotContains(t, buf.String(), not)
 			}
+		})
+	}
+}
+
+func TestLogAllowedOrigins_U(t *testing.T) {
+	testCases := []struct {
+		name      string
+		origins   []string
+		wantLevel string // "" = no record at all
+		wantMsg   string
+	}{
+		{name: "empty origins (development only) warn that CORS and the origin guard are off",
+			origins: nil, wantLevel: "WARN", wantMsg: "ALLOWED_ORIGINS is empty: CORS and the origin guard are off"},
+		{name: "none says at info that no browser origin is allowed",
+			origins: []string{"none"}, wantLevel: "INFO",
+			wantMsg: "ALLOWED_ORIGINS=none: no browser origin is allowed, writes with an Origin header are refused"},
+		{name: "a single origin logs nothing (only none is announced)",
+			origins: []string{"https://app.example.com"}},
+		{name: "a list of origins logs nothing",
+			origins: []string{"https://app.example.com", "http://localhost:5173"}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			l, err := logging.New(&buf, logging.FormatJSON, "debug")
+			require.NoError(t, err)
+			prev := slog.Default()
+			slog.SetDefault(l)
+			defer slog.SetDefault(prev)
+
+			logAllowedOrigins(context.Background(), tc.origins)
+
+			if tc.wantLevel == "" {
+				require.Empty(t, buf.String())
+				return
+			}
+			var rec map[string]any
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &rec), "exactly one JSON record: %s", buf.String())
+			require.Equal(t, tc.wantLevel, rec["level"])
+			require.Equal(t, tc.wantMsg, rec["msg"])
 		})
 	}
 }
