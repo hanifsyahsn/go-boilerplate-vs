@@ -114,6 +114,33 @@ func TestHandler_Register_U(t *testing.T) {
 				`"pointer":"/data/attributes/password"`},
 		},
 		{
+			name:     "a password over 72 bytes that also holds an unassigned code point gets only the 72-byte 422: the length is checked before the scan",
+			body:     doc(`{"name":"Jane","email":"jane@example.com","password":"` + strings.Repeat("a", 73) + "\u0378" + `"}`),
+			stub:     func(s *MockS) {},
+			wantCode: http.StatusUnprocessableEntity,
+			wantInBody: []string{`"code":"unprocessable_entity"`, "Password must be at most 72 bytes",
+				`"pointer":"/data/attributes/password"`},
+			wantNotInBody: []string{"isn't in Unicode yet"},
+		},
+		{
+			name:     "a password with a code point Unicode hasn't assigned yet (U+0378) is a 422 before the service",
+			body:     doc(`{"name":"Jane","email":"jane@example.com","password":"Passw0rd` + "\u0378" + `"}`),
+			stub:     func(s *MockS) {},
+			wantCode: http.StatusUnprocessableEntity,
+			wantInBody: []string{`"code":"unprocessable_entity"`, "Password contains a character that isn't in Unicode yet; remove it.",
+				`"pointer":"/data/attributes/password"`},
+		},
+		{
+			name: "an emoji password with joiners and a variation selector reaches the service: only unassigned code points are refused",
+			body: doc(`{"name":"Jane","email":"jane@example.com","password":"Passw0rd` + "\u2764\ufe0f\U0001f468\u200d\U0001f469\u200d\U0001f467" + `"}`),
+			stub: func(s *MockS) {
+				s.EXPECT().Register(gomock.Any(), Request{Name: "Jane", Email: "jane@example.com",
+					Password: "Passw0rd\u2764\ufe0f\U0001f468\u200d\U0001f469\u200d\U0001f467"}).
+					Return(authshared.UserResource{ID: "1", Name: "Jane", Email: "jane@example.com", Role: "user"}, nil)
+			},
+			wantCode: http.StatusCreated,
+		},
+		{
 			name:       "the role can't be chosen: 403",
 			body:       doc(`{"name":"Jane","email":"jane@example.com","password":"Passw0rd!","role":"admin"}`),
 			stub:       func(s *MockS) {},

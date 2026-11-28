@@ -153,7 +153,7 @@ Windows".
 - `internal/shared` — cross-cutting: `apperror` (typed error → HTTP status, with a JSON:API `Source`),
   `jsonapi` (documents, serializer, sparse fieldsets, links, error objects, `?include` policy, the query
   parser), `handlerutil` (`ParseQuery` / `BindResource` / `ParamID` / `WriteData` / `WriteMeta` /
-  `WriteError`), `validation` (`notblank`, `rfc3339`, `maxbytes`, `nfcmaxbytes`, `checkmaxbytes`,
+  `WriteError`), `validation` (`notblank`, `rfc3339`, `maxbytes`, `nfcmaxbytes`, `checkmaxbytes`, `assignedchars`,
   `RegisterGinValidators`), `pagination`,
   `password` (bcrypt on the NFC form, decision 0019), `enum` (`Role`: `user` / `admin`), `requestid` (`Header`, `Key`, `With` / `FromContext` / `Detach`),
   `dto`, `constant` (context keys, cookie names), `onetimetoken` (email-link tokens: `New` → plain + SHA-256 hash),
@@ -276,6 +276,8 @@ See `.env.example`.
   (`go1.26.11` / `golang:1.26.11-alpine` / `golang:1.26.11`). `GOTOOLCHAIN=auto` makes the local `go` download and use the `toolchain` version for
   this module only; `build.sh` doesn't pull, so the image is pinned rather than a floating `1.26` tag (which
   reuses whatever is cached on the host). Most `govulncheck` hits are stdlib, fixed only by a newer patch release.
+  **A minor bump (1.26 → 1.27) also moves `x/text` to newer Unicode tables** (15 → 17): password NFC and
+  `assignedchars` follow together (decision 0019, amended 2026-11-28); re-run the `password` and `validation` tests.
 - **The container runs as uid 10001** (non-root, `USER` in the Dockerfile): files mounted into it (the EC keys)
   must be readable by that uid.
 - **gin runs in release mode except when `ENVIRONMENT=development`** (`server.GinMode`, set in `main`): no route

@@ -32,7 +32,12 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   reset, change's `password`) validates `nfcmaxbytes=72` (`validation.NFCMaxBytes`: bytes of the NFC form, the one
   hashed); a password being **checked** (login, change's `current_password`) `checkmaxbytes=72`
   (`validation.CheckMaxBytes`: fits as sent **or** in NFC — the two forms `Verify` compares). A new password's
-  minimum stays `min=8` characters as sent.
+  minimum stays `min=8` characters as sent. A new password also validates `assignedchars` (after `nfcmaxbytes`, so a
+  huge body is refused before it is scanned): every code point assigned in the Unicode version NFC uses
+  (`password.AllAssigned`, `rangetable.Assigned(norm.Version)`) — NFC is stable only for assigned code points, and
+  `x/text` switches tables with the Go version (Go 1.27: Unicode 15 → 17). Never on a checked password (it would lock
+  its owner out). Tests: `TestAllAssigned_U`, `TestAssignedChars_U`, the handler tests of register, reset, change,
+  login.
 - **Passwords are NFC** (decision 0019): only through the `password` package, never bcrypt directly. `Hash` and
   `Verify` normalize (`password.Normalize`); `Verify` falls back to the bytes as sent for a hash made before 0019
   (`Match.Legacy`, only when the NFC form fits bcrypt), and login then rehashes it — after the active check, on
@@ -144,12 +149,12 @@ Moved verbatim from CLAUDE.md on 2026-11-04. Related rules: jsonapi.md (request 
   failure (`password reset: recipient limit failed` / `lookup failed` / `issue token failed`) is only logged,
   never with the address; there is no 500. Tests: `TestService_Request_AnswersBeforeWork_U`,
   `TestService_Request_BackgroundGroup_I`.
-  `POST /api/auth/password-resets` (`password-resets`, `token` + `password` `min=8,nfcmaxbytes=72`): in one tx
+  `POST /api/auth/password-resets` (`password-resets`, `token` + `password` `min=8,nfcmaxbytes=72,assignedchars`): in one tx
   `ConsumeAuthToken` (none → 422 `invalid_token` on `/data/attributes/token`, `authshared.CodeInvalidToken`), new
   hash + `email_verified_at` (`SetPasswordAfterReset`), `RevokeUserSessions(password_reset)`; bcrypt runs before
   the tx; after commit the "password changed" notice → 204.
 - **Change password** (slice `auth/passwordchange`, authed, `POST /api/auth/password-changes`, `password-changes`:
-  `current_password` `checkmaxbytes=72`, `password` `min=8,nfcmaxbytes=72`): the per-user failure limiter (5 / 15 min, key
+  `current_password` `checkmaxbytes=72`, `password` `min=8,nfcmaxbytes=72,assignedchars`): the per-user failure limiter (5 / 15 min, key
   `pwchange:` + user id) is **taken first** (refused → 429 "Too many wrong attempts…", error → 500), a wrong
   current password → 422 `wrong_password` on `/data/attributes/current_password`, the right one `Reset`s the count
   (a failed reset only logged); then in one tx the new hash + `RevokeUserSessions(password_changed, keep = the

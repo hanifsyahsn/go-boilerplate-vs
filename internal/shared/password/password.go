@@ -3,13 +3,17 @@
 package password
 
 import (
+	"unicode"
+
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/text/unicode/norm"
+	"golang.org/x/text/unicode/rangetable"
 )
 
 // Normalize returns plain in Unicode NFC, the form every password is hashed
 // and compared in — the normalization RFC 8265's OpaqueString profile uses
-// (only that step: unassigned code points aren't refused). The same "é" arrives as
+// (that step only; a new password's unassigned code points are refused by
+// AllAssigned, not here). The same "é" arrives as
 // one code point from one keyboard and as "e" + a combining accent from
 // another (macOS, some phone keyboards); bcrypt compares bytes, so without
 // this a password typed on one device fails on the other.
@@ -113,4 +117,25 @@ func VerifyOrWaste(hash, plain string) Match {
 		return Match{}
 	}
 	return Verify(hash, plain)
+}
+
+// assigned is the set of code points assigned in the Unicode version NFC is
+// computed with (norm.Version). x/text picks its tables by Go version (Go 1.26:
+// Unicode 15.0, Go 1.27: 17.0), and rangetable follows the same switch, so the
+// two never disagree.
+var assigned = rangetable.Assigned(norm.Version)
+
+// AllAssigned reports whether every code point in plain is assigned in the
+// Unicode version Normalize uses. Unicode keeps NFC stable only for assigned
+// code points: one assigned later may get a combining class, and NFC would
+// then reorder it — a stored hash of the old form would stop matching after a
+// Go upgrade. A new password is refused with one (`assignedchars`); a checked
+// one never is (decision 0019, amended 2026-11-28).
+func AllAssigned(plain string) bool {
+	for _, r := range plain {
+		if !unicode.Is(assigned, r) {
+			return false
+		}
+	}
+	return true
 }

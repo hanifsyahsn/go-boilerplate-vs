@@ -1,12 +1,14 @@
 package password
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/text/unicode/norm"
 )
 
 // TestHash_LengthLimit_U pins bcrypt's input limit, in bytes: the reason the
@@ -210,4 +212,31 @@ func TestFitsNFC_StopsEarly_U(t *testing.T) {
 	}
 	require.Less(t, hugeTook, 20*time.Millisecond+10*time.Since(start),
 		"refusing 12 MB costs about what refusing 3 KB does")
+}
+
+func TestAllAssigned_U(t *testing.T) {
+	major, err := strconv.Atoi(strings.SplitN(norm.Version, ".", 2)[0])
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name, in string
+		want     bool
+	}{
+		{name: "ASCII is assigned", in: "Passw0rd!", want: true},
+		{name: "the empty string has nothing unassigned", in: "", want: true},
+		{name: "accented, decomposed and non-Latin letters are assigned", in: "\u00e9e\u0301\u0958\u5bc6\u7801", want: true},
+		{name: "emoji with joiners and a variation selector are assigned", in: "\u2764\ufe0f\U0001f468\u200d\U0001f469\u200d\U0001f467", want: true},
+		{name: "private-use characters are assigned (their NFC never changes)", in: "\ue000", want: true},
+		{name: "U+0378, unassigned in Greek, is refused", in: "Passw0rd\u0378", want: false},
+		{name: "a noncharacter (U+10FFFF) is refused", in: "Passw0rd\U0010ffff", want: false},
+		{name: "U+1FAE8 (Unicode 15) is assigned", in: "\U0001fae8", want: true},
+		{name: "U+1FAE9 (Unicode 16) is assigned only when NFC's tables know it: the check follows norm.Version",
+			in: "\U0001fae9", want: major >= 16},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, AllAssigned(tc.in))
+		})
+	}
 }

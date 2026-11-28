@@ -59,6 +59,12 @@ func TestHandler_Reset_U(t *testing.T) {
 				`"pointer":"/data/attributes/password"`, "Password must be at most 72 bytes"},
 		},
 		{
+			name: "a password with a code point Unicode hasn't assigned yet (U+0378) is a 422 before the service",
+			body: doc("tok", "N3w-Passw0rd\u0378"), stub: func(*MockS) {},
+			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"code":"unprocessable_entity"`,
+				`"pointer":"/data/attributes/password"`, "Password contains a character that isn't in Unicode yet; remove it."},
+		},
+		{
 			name: "a short password is a 422", body: doc("tok", "short"), stub: func(*MockS) {},
 			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"pointer":"/data/attributes/password"`},
 		},

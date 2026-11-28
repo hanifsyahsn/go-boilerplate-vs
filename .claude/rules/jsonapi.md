@@ -74,7 +74,8 @@ The whole API is JSON:API 1.1; keep it that way in a new slice.
   (which counts characters). `maxbytes` is for string fields (or `*string`); on any other kind it fails every
   value. A password field uses `nfcmaxbytes=N` instead (a new password: the bytes of its NFC form, the one
   that is hashed) or `checkmaxbytes=N` (one checked against a stored hash: fits as sent or in NFC) — decision
-  0019; same 422 text.
+  0019; same 422 text. A new password adds `assignedchars` (no code point Unicode hasn't assigned yet; its own
+  422 text, see `auth.md`).
   Every error carries `source.pointer` (`/data/attributes/title`).
 - **Updates are `PATCH` and partial**: `Request` fields are pointers, nil keeps the current value (`note/update`
   → `COALESCE(sqlc.narg(...), col)`; `admin/user` with nothing to change just reads the user back).

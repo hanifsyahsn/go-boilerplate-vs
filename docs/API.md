@@ -231,7 +231,7 @@ Creates an account. The role is always `user` — there is no way to register an
 | --- | --- | --- | --- |
 | `name` | string | yes | not blank, ≤ 255; trimmed |
 | `email` | string | yes | valid email, ≤ 255; trimmed; **unique ignoring case** |
-| `password` | string | yes | at least 8 characters and at most **72 bytes** (bcrypt's input limit — see below) |
+| `password` | string | yes | at least 8 characters and at most **72 bytes** (bcrypt's input limit — see below); no character Unicode hasn't assigned yet |
 
 Any other attribute (`role`, `is_active`, …) is a **403**.
 
@@ -437,7 +437,7 @@ curl -s -X POST "$BASE/api/auth/password-resets" -H "$CT" \
 | Status | `code` | When |
 | --- | --- | --- |
 | 422 | `invalid_token` | `This link is invalid or has expired. Ask for a new one.` — `source.pointer` `/data/attributes/token`: unknown, already used or expired |
-| 422 | `unprocessable_entity` | `password` under 8 characters or over 72 bytes, `token` missing or over 64 characters |
+| 422 | `unprocessable_entity` | `password` under 8 characters, over 72 bytes or with a character Unicode hasn't assigned yet, `token` missing or over 64 characters |
 | 429 | `too_many_requests` | the IP's budget (see *Rate limits*) |
 
 ```json
@@ -466,7 +466,7 @@ curl -s -X POST "$BASE/api/auth/password-changes" -H "$CT" -H "Authorization: Be
 | Status | `code` | When |
 | --- | --- | --- |
 | 422 | `wrong_password` | `The current password is incorrect.` — `source.pointer` `/data/attributes/current_password` |
-| 422 | `unprocessable_entity` | a password missing, the new one under 8 characters, either over 72 bytes |
+| 422 | `unprocessable_entity` | a password missing, the new one under 8 characters or with a character Unicode hasn't assigned yet, either over 72 bytes |
 | 429 | `too_many_requests` | `Too many wrong attempts. Please wait a few minutes and try again.` — 5 wrong current passwords / 15 min per account (then one more every 3 min), the right one too until a try comes back; with a `Retry-After` header (seconds) |
 
 ### `POST /api/auth/email-verifications`
@@ -693,7 +693,17 @@ composed form doesn't match it. Over the limit is a
 `422` "<Label> must be at most 72 bytes (accented letters, non-Latin scripts and emoji take more than one byte
 each)." on the field's own pointer: register, login and password reset → "Password", `/data/attributes/password`;
 password change → "Current password" (`/data/attributes/current_password`) or "New password"
-(`/data/attributes/password`). A form can count `new TextEncoder().encode(pw).length` to warn early.
+(`/data/attributes/password`). A form can count `new TextEncoder().encode(pw.normalize('NFC')).length` to warn
+early — the NFC form, as the server counts a new password: a few characters (Devanagari `क़` U+0958 and its
+kin) grow when normalized, so the bytes as typed can fit while the stored form doesn't.
+
+**A new password can't hold a character Unicode hasn't assigned yet** (register, reset, change's new one): it is a
+`422` "<Label> contains a character that isn't in Unicode yet; remove it." on the same pointers. Unicode keeps the normalized form stable only for
+assigned characters, so such a password could stop matching after a server upgrade. "Assigned" means in the
+server's Unicode version (**15.0** today; it moves with server upgrades): letters, digits, symbols and emoji up to
+15.0 pass, joiners and variation selectors included, but an emoji newer than that (Unicode 16 / 17, which recent
+phone and desktop emoji pickers already offer) is refused until the server moves to a newer version. A password
+being checked (login, change's current one) is never refused for it.
 
 The `detail` names the field by its **label**, not its JSON name: `title` → "Title", `body` →
 "Content", `name` → "Name", `email` → "Email", `password` → "Password" (password change: "New password"),

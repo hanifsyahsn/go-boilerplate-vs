@@ -321,6 +321,7 @@ type testPayload struct {
 	Secret   string   `validate:"maxbytes=4"`
 	Pass     string   `validate:"nfcmaxbytes=4"`
 	Current  string   `validate:"checkmaxbytes=4"`
+	NewPass  string   `validate:"assignedchars"`
 }
 
 func registerCustomValidators(v *validator.Validate) {
@@ -337,6 +338,9 @@ func registerCustomValidators(v *validator.Validate) {
 		return false // always fail, we just need the tag to trigger
 	})
 	_ = v.RegisterValidation("checkmaxbytes", func(fl validator.FieldLevel) bool {
+		return false // always fail, we just need the tag to trigger
+	})
+	_ = v.RegisterValidation("assignedchars", func(fl validator.FieldLevel) bool {
 		return false // always fail, we just need the tag to trigger
 	})
 }
@@ -362,6 +366,7 @@ func TestValidatorError(t *testing.T) {
 		Secret:   "ééé",              // maxbytes=4 -> fails
 		Pass:     "ééé",              // nfcmaxbytes=4 -> fails
 		Current:  "ééé",              // checkmaxbytes=4 -> fails
+		NewPass:  "a\u0378",          // assignedchars -> fails
 	}
 
 	err := v.Struct(payload)
@@ -398,6 +403,7 @@ func TestValidatorError(t *testing.T) {
 		byField["Pass"].Detail, "nfcmaxbytes reads like maxbytes: the client needn't know about NFC")
 	assert.Equal(t, "Current must be at most 4 bytes (accented letters, non-Latin scripts and emoji take more than one byte each).",
 		byField["Current"].Detail, "checkmaxbytes too")
+	assert.Equal(t, "NewPass contains a character that isn't in Unicode yet; remove it.", byField["NewPass"].Detail)
 	assert.Equal(t, "/Name", byField["Name"].Pointer)
 }
 

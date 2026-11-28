@@ -31,6 +31,15 @@ Status: built (2026-11-13)
    nudge, not the security boundary (the failure limits are), and counting it in NFC would refuse what a user
    typed on one device and accept it on another.
 
+6. **A new password can't hold an unassigned code point** (amended 2026-11-28). Register, reset and change's new
+   password validate `assignedchars` (`validation.AssignedChars` → `password.AllAssigned`): every code point is
+   assigned in the Unicode version NFC is computed with, `rangetable.Assigned(norm.Version)`. Refused: a 422
+   "<Label> contains a character that isn't in Unicode yet; remove it." A checked password (login, change's
+   current one) is never refused for it — that would lock its owner out. Not RFC 8265's whole OpaqueString
+   profile: it also refuses joiners and variation selectors, so ❤️ and family emoji would be refused.
+   Accepted cost: an emoji newer than the server's Unicode version (Go 1.26: 15.0) is refused in a new password
+   until a Go upgrade moves `x/text` forward — recent emoji pickers already offer Unicode 16 / 17 emoji.
+
 ## Why
 The same "é" arrives as one code point (U+00E9, 2 bytes) from one keyboard and as "e" + U+0301 (3 bytes) from
 another — macOS and some phone keyboards send the decomposed form. bcrypt compares bytes, so a user who
@@ -42,6 +51,11 @@ error, a 500.
 A legacy hash of the decomposed bytes can't be matched from the composed form until it is rehashed: its owner
 signs in once from the device they registered on (or resets the password), and from then on both work.
 
+Item 6: Unicode keeps NFC stable only for assigned code points. One assigned later can get a non-zero combining
+class, and NFC then reorders it — the stored hash of the old form stops matching. `x/text` picks its tables by Go
+version (Go 1.26: Unicode 15.0, Go 1.27: 17.0), so a toolchain bump alone could lock such a user out. `rangetable`
+switches with the same build tag as `norm`, so the check and NFC never disagree.
+
 ## Adopting it in a derivative
 Copy `password/password.go` (`Normalize`, `Verify` / `Match`, `VerifyOrWaste`, the `compare` seam) and its
 tests, `validation/nfc_max_bytes.go` (+ test, register both tags, the 422 case next to `maxbytes`), the login
@@ -49,4 +63,7 @@ query `RehashPassword` and the rehash after a `Legacy` match; switch new-passwor
 `nfcmaxbytes=72` and checked ones (login, current password) to `checkmaxbytes=72`. `SeedUser`-style test
 helpers hash the NFC form too. A repo **with existing users** needs step 3 (otherwise users whose device sent
 the decomposed form are locked out); a new repo can still take it, it costs nothing. Every place that hashes or compares a
-password goes through the `password` package, never bcrypt directly.
+password goes through the `password` package, never bcrypt directly. Item 6 (2026-11-28): copy
+`password.AllAssigned`, `validation/assigned_chars.go` (+ tests), register the tag, the 422 case in `apperror`,
+and add `assignedchars` after `nfcmaxbytes=72` on every new-password field; a password already stored is
+untouched.

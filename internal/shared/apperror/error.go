@@ -266,6 +266,8 @@ func ValidatorError(err validator.ValidationErrors, obj interface{}) []Validatio
 		case "maxbytes", "nfcmaxbytes", "checkmaxbytes":
 			detail = fmt.Sprintf("%s must be at most %s bytes (accented letters, non-Latin scripts and emoji "+
 				"take more than one byte each).", label, e.Param())
+		case "assignedchars":
+			detail = fmt.Sprintf("%s contains a character that isn't in Unicode yet; remove it.", label)
 		case "email":
 			detail = fmt.Sprintf("%s must be a valid email address.", label)
 		case "len":

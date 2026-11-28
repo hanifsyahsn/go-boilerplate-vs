@@ -66,6 +66,21 @@ func TestHandler_Change_U(t *testing.T) {
 				"New password must be at most 72 bytes (accented letters, non-Latin scripts and emoji take more than one byte each)."},
 		},
 		{
+			name: "a new password with a code point Unicode hasn't assigned yet (U+0378) is a 422 named New password",
+			body: doc("Passw0rd!", "N3w-Passw0rd\u0378"), stub: func(*MockS) {},
+			wantCode: http.StatusUnprocessableEntity, wantInBody: []string{`"code":"unprocessable_entity"`, `"pointer":"/data/attributes/password"`,
+				"New password contains a character that isn't in Unicode yet; remove it."},
+		},
+		{
+			name: "a current password with an unassigned code point reaches the service: a checked password is never refused for it",
+			body: doc("Passw0rd\u0378", "N3w-Passw0rd"),
+			stub: func(s *MockS) {
+				s.EXPECT().Change(gomock.Any(), gomock.Any(), gomock.Any(),
+					Request{CurrentPassword: "Passw0rd\u0378", Password: "N3w-Passw0rd"}).Return(nil)
+			},
+			wantCode: http.StatusNoContent,
+		},
+		{
 			name: "a decomposed new password of 108 bytes as sent (72 in NFC) reaches the service: the limit counts the NFC form",
 			body: doc("Passw0rd!", strings.Repeat("e\u0301", 36)),
 			stub: func(s *MockS) {

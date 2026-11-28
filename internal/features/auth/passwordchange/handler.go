@@ -17,7 +17,7 @@ const ResourceType = "password-changes"
 // Both passwords are bounded in bytes (bcrypt's 72).
 type Request struct {
 	CurrentPassword string `json:"current_password" binding:"required,checkmaxbytes=72" label:"Current password"`
-	Password        string `json:"password" binding:"required,min=8,nfcmaxbytes=72" label:"New password"`
+	Password        string `json:"password" binding:"required,min=8,nfcmaxbytes=72,assignedchars" label:"New password"`
 }
 
 type H interface {

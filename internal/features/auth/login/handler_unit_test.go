@@ -64,6 +64,15 @@ func TestHandler_Login_U(t *testing.T) {
 				`"pointer":"/data/attributes/password"`},
 		},
 		{
+			name: "a password with an unassigned code point reaches the service: a checked password is never refused for it",
+			body: doc(`{"email":"jane@example.com","password":"Passw0rd` + "\u0378" + `"}`),
+			stub: func(s *MockS) {
+				s.EXPECT().Login(gomock.Any(), Request{Email: "jane@example.com", Password: "Passw0rd\u0378"}, gomock.Any()).Return(ok, nil)
+			},
+			wantCode:    http.StatusOK,
+			wantCookies: true,
+		},
+		{
 			name: "a 72-byte password reaches the service",
 			body: doc(`{"email":"jane@example.com","password":"` + strings.Repeat("é", 36) + `"}`),
 			stub: func(s *MockS) {
